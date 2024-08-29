@@ -3,9 +3,17 @@ name = "ivy"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = "==3.12"
+dependencies = [
+    "vyper",
+    "titanoboa",
+]
+
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+vyper = { git = "https://github.com/vyperlang/vyper" }
+titanoboa = { path = "titanoboa", editable = true }
