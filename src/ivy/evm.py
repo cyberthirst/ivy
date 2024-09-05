@@ -103,6 +103,8 @@ class Interpreter:
 
         self.state[target_address].contract_data = contract
 
+        print("deployed contract!")
+
 
 
     def execute_code(
@@ -114,7 +116,7 @@ class Interpreter:
             data: bytes,
             is_static: bool = False,
     ):
-        # TODO create message object and execute it
+        print("executing code!")
         pass
 
 
