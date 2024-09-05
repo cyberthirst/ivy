@@ -59,7 +59,8 @@ class Env:
     def deploy(
             self,
             module: vy_ast.Module,
-            args: bytes = None,
+            *args: Any,
+            raw_args: bytes = None,
             sender: Optional[_AddressType] = None,
             value: int = 0,
     ):
@@ -70,12 +71,13 @@ class Env:
         origin = sender
 
         self.evm.deploy(
-            sender=sender,
-            origin=origin,
-            target_address=target_address,
-            value=value,
-            module=module,
-            args=args,
+            sender,
+            origin,
+            target_address,
+            module,
+            value,
+            *args,
+            raw_args=raw_args,
         )
 
         return target_address
@@ -83,10 +85,12 @@ class Env:
 
     def execute_code(
         self,
+        func_name: str,
+        *args: Any,
         to_address: _AddressType = constants.ZERO_ADDRESS,
         sender: Optional[_AddressType] = None,
         value: int = 0,
-        data: bytes = b"",
+        raw_args: bytes = b"",
         is_modifying: bool = True,
     ) -> Any:
 
@@ -99,11 +103,13 @@ class Env:
         is_static = not is_modifying
 
         ret = self.evm.execute_code(
-            sender=sender,
-            to=to,
-            value=value,
-            code=code,
-            data=data,
+            sender,
+            to,
+            value,
+            code,
+            func_name,
+            *args,
+            raw_args=raw_args,
             is_static=is_static,
         )
 

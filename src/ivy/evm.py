@@ -64,6 +64,8 @@ class Message: # msg from execution specs
 class EVM:
     def __init__(self):
         self.state = {}
+        self.msg = None
+        self.env = None
 
     def process_message(self, msg: Message):
         pass
@@ -93,7 +95,8 @@ class Interpreter:
             target_address: Address,
             module: vy_ast.Module,
             value: int,
-            args=None,  # abi-encoded constructor args
+            *args: Any,
+            raw_args=None,  # abi-encoded constructor args
     ):
         typ = module._metadata["type"]
         assert isinstance(typ, ModuleT)
@@ -114,7 +117,7 @@ class Interpreter:
                 depth=0,
                 is_static=False,
             )
-            self._process_message(msg)
+            self._call(msg)
 
         # module's immutables were fixed up within the _process_message call
         contract = ContractData(module)
@@ -123,15 +126,15 @@ class Interpreter:
 
         print("deployed contract!")
 
-
-
     def execute_code(
             self,
             sender: Address,
             to: Address,
             value: int,
             code: ContractFunctionT,
-            data: bytes,
+            func_name: str,
+            *args: Any,
+            raw_args: bytes = b"",
             is_static: bool = False,
     ):
         print("executing code!")
@@ -141,11 +144,12 @@ class Interpreter:
     def get_code(self, address):
         pass
 
+
     def generate_create_address(self, sender):
         nonce = self.evm.get_nonce(sender.canonical_address)
         self.evm.increment_nonce(sender.canonical_address)
         return Address(generate_contract_address(sender.canonical_address, nonce))
 
 
-    def _process_message(self, msg: Message):
+    def _call(self, msg: Message):
         pass
