@@ -4,10 +4,10 @@ from typing import Any
 from vyper import ast as vy_ast
 from vyper.semantics.types.module import ModuleT, ContractFunctionT
 
-from titanoboa.boa.util.abi import Address
+from titanoboa.boa.util.abi import Address, abi_encode, abi_decode
 
 import eth.constants as constants
-
+from eth._utils.address import generate_contract_address
 
 class ContractData:
     def __init__(self, module):
@@ -61,11 +61,29 @@ class Message: # msg from execution specs
     # parent_evm: Optional["Evm"]
 
 
+class EVM:
+    def __init__(self):
+        self.state = {}
+
+    def process_message(self, msg: Message):
+        pass
+
+    def get_nonce(self, address):
+        if address not in self.state:
+            self.state[address] = Account(0, 0, None, {})
+        return self.state[address].nonce
+
+    def increment_nonce(self, address):
+        assert address in self.state
+        self.state[address].nonce += 1
+
+
+
 class Interpreter:
 
     def __init__(self):
         # address -> Account
-        self.state = {}
+        self.evm = EVM()
 
 
     def deploy(
@@ -81,7 +99,7 @@ class Interpreter:
         assert isinstance(typ, ModuleT)
 
         # TODO follow the evm semantics for nonce, value, storage etc..)
-        self.state[target_address] = Account(1, 0, None, {})
+        self.evm.state[target_address] = Account(1, 0, None, {})
 
         if typ.init_function is not None:
             constructor = typ.init_function
@@ -101,7 +119,7 @@ class Interpreter:
         # module's immutables were fixed up within the _process_message call
         contract = ContractData(module)
 
-        self.state[target_address].contract_data = contract
+        self.evm.state[target_address].contract_data = contract
 
         print("deployed contract!")
 
@@ -117,14 +135,16 @@ class Interpreter:
             is_static: bool = False,
     ):
         print("executing code!")
-        pass
+        return abi_encode("(int256)", (42,))
 
 
     def get_code(self, address):
         pass
 
     def generate_create_address(self, sender):
-        pass
+        nonce = self.evm.get_nonce(sender.canonical_address)
+        self.evm.increment_nonce(sender.canonical_address)
+        return Address(generate_contract_address(sender.canonical_address, nonce))
 
 
     def _process_message(self, msg: Message):
