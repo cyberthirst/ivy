@@ -1,6 +1,6 @@
 import sys
 
-import ivy.interpret as itp
+import ivy.loader as itp
 
 def main():
     out = itp.load(sys.argv[1])

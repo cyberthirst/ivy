@@ -70,7 +70,8 @@ class VyperContract:
         self.filename = filename
 
 
-        # add all exposed functions from the interface to the contract
+        # TODO collect all the exposed funcs in ivy to avoid introducing
+        # a potential Vyper bug
         exposed_fns = {
             fn_t.name: fn_t.decl_node
             for fn_t in compiler_data.global_ctx.exposed_functions
@@ -119,7 +120,8 @@ class VyperContract:
 
         address = self.env.deploy(
             module=module,
-            args=encoded_args,
+            *args,
+            raw_args=encoded_args,
             value=value,
         )
 
@@ -199,11 +201,12 @@ class VyperFunction:
     def __call__(self, *args, value=0, sender=None, **kwargs):
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
 
-
         res = self.env.execute_code(
+            self.func_t.name,
+            *args,
             to_address=self.contract._address,
             sender=sender,
-            data=calldata_bytes,
+            raw_args=calldata_bytes,
             value=value,
             is_modifying=self.func_t.is_mutable,
         )
