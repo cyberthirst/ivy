@@ -95,6 +95,21 @@ class VyperContract:
         return build_abi_output(self.compiler_data)
 
 
+
+    def marshal_to_python(self, computation, vyper_typ):
+        if vyper_typ is None:
+            return None
+
+        return_typ = calculate_type_for_external_return(vyper_typ)
+        ret = abi_decode(return_typ.abi_type.selector_name(), computation)
+
+        # unwrap the tuple if needed
+        if not isinstance(vyper_typ, TupleT):
+            (ret,) = ret
+
+        return vyper_object(ret, vyper_typ)
+
+
     def _run_init(self, *args, value=0):
         encoded_args = b""
         if self._ctor:
@@ -181,20 +196,41 @@ class VyperFunction:
 
         return method_id + encoded_args
 
-    def __call__(self, *args, value=0, gas=None, sender=None, **kwargs):
+    def __call__(self, *args, value=0, sender=None, **kwargs):
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
 
 
-        computation = self.env.execute_code(
+        res = self.env.execute_code(
             to_address=self.contract._address,
             sender=sender,
             data=calldata_bytes,
             value=value,
-            gas=gas,
             is_modifying=self.func_t.is_mutable,
-            contract=self.contract,
         )
 
         typ = self.func_t.return_type
-        return self.contract.marshal_to_python(computation, typ)
+        return self.contract.marshal_to_python(res, typ)
 
+
+_typ_cache = {}
+
+
+def vyper_object(val, vyper_type):
+    # make a thin wrapper around whatever type val is,
+    # and tag it with _vyper_type metadata
+
+    vt = type(val)
+    if vt is bool or vt is Address:
+        # https://stackoverflow.com/q/2172189
+        # bool is not ambiguous wrt vyper type anyways.
+        return val
+
+    if vt not in _typ_cache:
+        # ex. class int_wrapper(int): pass
+        _typ_cache[vt] = type(f"{vt.__name__}_wrapper", (vt,), {})
+
+    t = _typ_cache[type(val)]
+
+    ret = t(val)
+    ret._vyper_type = vyper_type
+    return ret
