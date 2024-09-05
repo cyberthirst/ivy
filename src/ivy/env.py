@@ -10,8 +10,7 @@ from vyper import ast as vy_ast
 
 from titanoboa.boa.util.abi import Address
 
-from evm import Interpreter
-from vyper_contract import VyperDeployer
+from ivy.evm import Interpreter
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes | PYEVM_Address
@@ -29,10 +28,9 @@ class Env:
     ):
         super().__init__(**kwargs)
         self._accounts = accounts or {}
-        self.eoa = self.generate_address("eoa")
         self.evm = Interpreter()
         self._aliases = {}
-        self.deployer_class = VyperDeployer
+        self.eoa = self.generate_address("eoa")
 
 
     @classmethod

@@ -34,7 +34,7 @@ from vyper.utils import method_id
 
 from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 
-from env import Env
+from ivy.env import Env
 
 
 class VyperDeployer:
@@ -102,7 +102,7 @@ class VyperContract:
 
         module = self.compiler_data.annotated_vyper_module
 
-        address, computation = self.env.deploy(
+        address = self.env.deploy(
             module=module,
             args=encoded_args,
             value=value,

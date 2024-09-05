@@ -1,15 +1,11 @@
 import sys
 
-import titanoboa.boa as boa
-import titanoboa.boa.interpret as boa_itp
-from titanoboa.boa.ivy import IvyEnv
-
+import ivy.interpret as itp
 
 def main():
-    boa.set_env(IvyEnv())
-    out = boa_itp.load(sys.argv[1])
+    out = itp.load(sys.argv[1])
     print(out.compiler_data.compilation_target)
-    out.foo()
+    #out.foo()
 
 
 if __name__ == "__main__":

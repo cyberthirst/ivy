@@ -11,19 +11,15 @@ from vyper.compiler.input_bundle import (
 from vyper.compiler.phases import CompilerData
 from vyper.compiler.settings import Settings
 
-from titanoboa.boa.contracts.abi.abi_contract import ABIContractFactory
-from titanoboa.boa.contracts.vvm.vvm_contract import VVMDeployer, _detect_version
-from titanoboa.boa.contracts.vyper.vyper_contract import (
-    VyperBlueprint,
-    VyperContract,
-    VyperDeployer,
-)
-from titanoboa.boa.environment import Env
+from titanoboa.boa.contracts.vvm.vvm_contract import _detect_version
+
+from ivy.vyper_contract import VyperDeployer, VyperContract
+
 
 if TYPE_CHECKING:
     from vyper.semantics.analysis.base import ImportInfo
 
-_Contract = Union[VyperContract, VyperBlueprint]
+_Contract = Union[VyperContract]
 
 _search_path = None
 
