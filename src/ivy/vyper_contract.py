@@ -37,15 +37,6 @@ from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 from env import Env
 
 
-# error messages for external calls
-EXTERNAL_CALL_ERRORS = ("external call failed", "returndatasize too small")
-
-CREATE_ERRORS = ("create failed", "create2 failed")
-
-# error detail where user possibly provided dev revert reason
-DEV_REASON_ALLOWED = ("user raise", "user assert")
-
-
 class VyperDeployer:
     create_compiler_data = CompilerData  # this may be a different class in plugins
 
@@ -72,20 +63,12 @@ class VyperContract:
         *args,
         value=0,
         env: Env = None,
-        override_address: Address = None,
-        # whether to skip constructor
-        skip_initcode=False,
-        created_from: Address = None,
         filename: str = None,
-        gas=None,
     ):
         self.compiler_data = compiler_data
         self.env = env or Env.get_singleton()
         self.filename = filename
 
-        self.created_from = created_from
-        self._computation = None
-        self._source_map = None
 
         # add all exposed functions from the interface to the contract
         exposed_fns = {
@@ -100,14 +83,8 @@ class VyperContract:
                 compiler_data.global_ctx.init_function.decl_node, self
             )
 
-        if skip_initcode:
-            if value:
-                raise Exception("nonzero value but initcode is being skipped")
-            addr = Address(override_address)
-        else:
-            addr = self._run_init(
-                *args, value=value, override_address=override_address, gas=gas
-            )
+        addr = self._run_init( *args, value=value)
+
         self._address = addr
 
         for fn_name, fn in exposed_fns.items():
@@ -118,18 +95,17 @@ class VyperContract:
         return build_abi_output(self.compiler_data)
 
 
-    def _run_init(self, *args, value=0, override_address=None, gas=None):
+    def _run_init(self, *args, value=0):
         encoded_args = b""
         if self._ctor:
             encoded_args = self._ctor.prepare_calldata(*args)
 
-        initcode = self.compiler_data.bytecode + encoded_args
+        module = self.compiler_data.annotated_vyper_module
+
         address, computation = self.env.deploy(
-            bytecode=initcode,
+            module=module,
+            args=encoded_args,
             value=value,
-            override_address=override_address,
-            gas=gas,
-            contract=self,
         )
 
         return address
@@ -137,7 +113,6 @@ class VyperContract:
 
 class VyperFunction:
     def __init__(self, fn_ast, contract):
-        super().__init__()
         self.fn_ast = fn_ast
         self.contract = contract
         self.env = contract.env
@@ -156,19 +131,6 @@ class VyperFunction:
     @property
     def func_t(self):
         return self.fn_ast._metadata["func_type"]
-
-    @cached_property
-    def ir(self):
-        module_t = self.contract.module_t
-
-        if self.func_t.is_internal:
-            res = generate_ir_for_internal_function(self.fn_ast, module_t, False)
-            ir = res.func_ir
-        else:
-            res = generate_ir_for_external_function(self.fn_ast, module_t)
-            ir = res.common_ir
-
-        return optimize(ir)
 
     # hotspot, cache the signature computation
     def args_abi_type(self, num_kwargs):
