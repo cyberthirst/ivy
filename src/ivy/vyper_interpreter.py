@@ -11,9 +11,11 @@ import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
 from ivy.evm import EVM, Account, Environment, Message, ContractData, VyperEVM
+from ivy.expr import ExprVisitor
+from ivy.stmt import StmtVisitor
 
 
-class BaseInterpreter(ABC):
+class BaseInterpreter(ABC, ExprVisitor, StmtVisitor):
     evm: EVM
     contract: Optional[ContractData]
     function: Optional[ContractFunctionT]
@@ -25,37 +27,6 @@ class BaseInterpreter(ABC):
         # function being executed
         self.function = None
 
-    @abstractmethod
-    def deploy(
-        self,
-        sender: Address,
-        origin: Address,
-        target_address: Address,
-        module: vy_ast.Module,
-        value: int,
-        *args: Any,
-        raw_args=None,
-    ):
-        pass
-
-    @abstractmethod
-    def execute_code(
-        self,
-        sender: Address,
-        to: Address,
-        value: int,
-        code: ContractFunctionT,
-        func_name: str,
-        *args: Any,
-        raw_args: Optional[bytes],
-        is_static: bool,
-    ):
-        pass
-
-    def generate_create_address(self, sender):
-        nonce = self.evm.get_nonce(sender.canonical_address)
-        self.evm.increment_nonce(sender.canonical_address)
-        return Address(generate_contract_address(sender.canonical_address, nonce))
 
     def get_code(self, address):
         pass
@@ -66,12 +37,15 @@ class BaseInterpreter(ABC):
         pass
 
 
-class VyperInterpreter(BaseInterpreter):
-    contract: Optional[ContractData]
+    @abstractmethod
+    def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+        pass
 
-    def __init__(self, evm: EVM):
-        super().__init__(evm)
-        self.executor = None
+
+    def generate_create_address(self, sender):
+        nonce = self.evm.get_nonce(sender.canonical_address)
+        self.evm.increment_nonce(sender.canonical_address)
+        return Address(generate_contract_address(sender.canonical_address, nonce))
 
     def deploy(
         self,
@@ -103,6 +77,7 @@ class VyperInterpreter(BaseInterpreter):
                 is_static=False,
             )
 
+            # TODO this probably should return ContractData
             self._call(msg)
 
         # module's immutables were fixed up within the _process_message call
@@ -158,6 +133,15 @@ class VyperInterpreter(BaseInterpreter):
         self._call(func_name, raw_args, args)
 
         return abi_encode("(int256)", (42,))
+
+
+
+class VyperInterpreter(BaseInterpreter):
+    contract: Optional[ContractData]
+
+    def __init__(self, evm: EVM):
+        super().__init__(evm)
+        self.executor = None
 
     @property
     def deployer(self):
