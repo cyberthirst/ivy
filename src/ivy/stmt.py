@@ -1,18 +1,13 @@
-class StatementVisitor:
-    def __init__(self, interpreter):
-        self.interpreter = interpreter
+from abc import ABC, abstractmethod
 
-    def visit(self, node):
-        method_name = f"visit_{type(node).__name__}"
-        visitor = getattr(self, method_name, self.generic_visit)
-        return visitor(node)
+from ivy.visitor import BaseVisitor
 
-    def generic_visit(self, node):
-        raise Exception(f"No visit method for {type(node).__name__}")
+
+class StmtVisitor(ABC, BaseVisitor):
 
     def visit_Expr(self, node):
         # Evaluate the expression
-        return self.interpreter.evaluate_expr(node.value)
+        return self.visit(node.value)
 
     def visit_Pass(self, node):
         # Do nothing for pass statement
@@ -25,18 +20,18 @@ class StatementVisitor:
         raise Exception(f"Unsupported Name: {node.id}")
 
     def visit_AnnAssign(self, node):
-        value = self.interpreter.evaluate_expr(node.value)
-        self.interpreter.set_variable(node.target.id, value)
+        value = self.visit(node.value)
+        self.set_variable(node.target.id, value)
         return None
 
     def visit_Assign(self, node):
-        value = self.interpreter.evaluate_expr(node.value)
+        value = self.visit(node.value)
         target = self.visit(node.target)
-        self.interpreter.set_variable(target, value)
+        self.set_variable(target, value)
         return None
 
     def visit_If(self, node):
-        condition = self.interpreter.evaluate_expr(node.test)
+        condition = self.visit(node.test)
         if condition:
             return self.visit_body(node.body)
         elif node.orelse:
@@ -44,10 +39,10 @@ class StatementVisitor:
         return None
 
     def visit_Assert(self, node):
-        condition = self.interpreter.evaluate_expr(node.test)
+        condition = self.visit(node.test)
         if not condition:
             if node.msg:
-                msg = self.interpreter.evaluate_expr(node.msg)
+                msg = self.visit(node.msg)
                 raise AssertionError(msg)
             else:
                 raise AssertionError()
@@ -55,7 +50,7 @@ class StatementVisitor:
 
     def visit_Raise(self, node):
         if node.exc:
-            exc = self.interpreter.evaluate_expr(node.exc)
+            exc = self.visit(node.exc)
             raise exc
         else:
             raise Exception("Generic raise")
@@ -66,10 +61,10 @@ class StatementVisitor:
 
     def visit_AugAssign(self, node):
         target = self.visit(node.target)
-        right = self.interpreter.evaluate_expr(node.value)
-        left = self.interpreter.get_variable(target)
-        new_value = self.interpreter.handle_binop(node.op, left, right)
-        self.interpreter.set_variable(target, new_value)
+        right = self.visit(node.value)
+        left = self.get_variable(target)
+        new_value = self.handle_binop(node.op, left, right)
+        self.set_variable(target, new_value)
         return None
 
     def visit_Continue(self, node):
@@ -80,7 +75,7 @@ class StatementVisitor:
 
     def visit_Return(self, node):
         if node.value:
-            return self.interpreter.evaluate_expr(node.value)
+            return self.visit(node.value)
         return None
 
     def visit_body(self, body):
@@ -93,3 +88,15 @@ class StatementVisitor:
             ):
                 return result
         return None
+
+    @abstractmethod
+    def set_variable(self, name, value):
+        pass
+
+    @abstractmethod
+    def get_variable(self, name):
+        pass
+
+    @abstractmethod
+    def handle_binop(self, op, left, right):
+        pass
