@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Any, Optional, Dict
 from abc import ABC, abstractmethod
 
@@ -11,99 +10,21 @@ from titanoboa.boa.util.abi import Address, abi_encode, abi_decode
 import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
-
-class ContractData:
-    def __init__(self, module):
-        self.module = module
-        self.storage = {}
-        self.ext_funs: Dict[str, ContractFunctionT] = {}
-        self.internal_funs: Dict[str, ContractFunctionT] = {}
-        self.immutables = {}
-
-
-@dataclass
-class Account:
-    nonce: Any
-    balance: Any
-    contract_data: ContractData | None
-    storage: Any
-
-
-@dataclass
-class Environment:  # env from execution specs
-    caller: Any  # Address
-    block_hashes: Any  # List[Hash32]
-    origin: Any  # Address
-    coinbase: Any  # Address
-    number: Any  # Uint
-    # base_fee_per_gas: Uint
-    # gas_limit: Uint
-    # gas_price: Uint
-    time: Any  # U256
-    prev_randao: Any  # Bytes32
-    # state: Any#State
-    chain_id: Any  # U64
-    # traces: List[dict]
-
-
-@dataclass
-class Message:  # msg from execution specs
-    caller: Any  # Address
-    to: Any  # Union[Bytes0, Address]
-    create_address: Any  # Address
-    # gas: Uint
-    value: Any  # U256
-    data: Any  # Bytes
-    code_address: Any  # Optional[Address]
-    code: Any  # Bytes
-    depth: Any  # Uint
-    # should_transfer_value: bool
-    is_static: bool
-    # accessed_addresses: Set[Address]
-    # accessed_storage_keys: Set[Tuple[Address, Bytes32]]
-    # parent_evm: Optional["Evm"]
-
-
-class EVM(ABC):
-    @abstractmethod
-    def set_slot(self):
-        pass
-
-    @abstractmethod
-    def get_slot(self):
-        pass
-
-    @abstractmethod
-    def get_nonce(self, address):
-        pass
-
-    @abstractmethod
-    def increment_nonce(self, address):
-        pass
-
-
-class VyperEVM(EVM):
-    def __init__(self):
-        self.state = {}
-        self.msg = None
-        self.env = None
-
-    def process_message(self, msg: Message):
-        pass
-
-    def get_nonce(self, address):
-        if address not in self.state:
-            self.state[address] = Account(0, 0, None, {})
-        return self.state[address].nonce
-
-    def increment_nonce(self, address):
-        assert address in self.state
-        self.state[address].nonce += 1
+from ivy.evm import EVM, Account, Environment, Message, ContractData, VyperEVM
+from ivy.vyper_contract import VyperDeployer
 
 
 class BaseInterpreter(ABC):
+    evm: EVM
+    contract: Optional[ContractData]
+    function: Optional[ContractFunctionT]
+
     def __init__(self, evm: EVM):
         self.evm = evm
+        # contract being executed
+        self.contract = None
+        # function being executed
+        self.function = None
 
     @abstractmethod
     def deploy(
@@ -132,18 +53,24 @@ class BaseInterpreter(ABC):
     ):
         pass
 
+    def generate_create_address(self, sender):
+        nonce = self.evm.get_nonce(sender.canonical_address)
+        self.evm.increment_nonce(sender.canonical_address)
+        return Address(generate_contract_address(sender.canonical_address, nonce))
 
-class Interpreter:
+    def get_code(self, address):
+        pass
+
+    @property
+    def deployer(self):
+        return VyperDeployer
+
+
+class VyperInterpreter(BaseInterpreter):
     contract: Optional[ContractData]
 
     def __init__(self, evm: EVM):
-        # address -> Account
-        self.evm = evm
-        # contract being executed
-        self.contract = None
-        # function being executed
-        self.function = None
-
+        super().__init__(evm)
         self.executor = None
 
     def deploy(
@@ -160,7 +87,7 @@ class Interpreter:
         assert isinstance(typ, ModuleT)
 
         # TODO follow the evm semantics for nonce, value, storage etc..)
-        self.evm.state[target_address] = Account(1, 0, None, {})
+        self.evm.state[target_address] = Account(1, 0, {}, None)
 
         if typ.init_function is not None:
             constructor = typ.init_function
@@ -175,6 +102,7 @@ class Interpreter:
                 depth=0,
                 is_static=False,
             )
+
             self._call(msg)
 
         # module's immutables were fixed up within the _process_message call
@@ -230,14 +158,6 @@ class Interpreter:
         self._call(func_name, raw_args, args)
 
         return abi_encode("(int256)", (42,))
-
-    def get_code(self, address):
-        pass
-
-    def generate_create_address(self, sender):
-        nonce = self.evm.get_nonce(sender.canonical_address)
-        self.evm.increment_nonce(sender.canonical_address)
-        return Address(generate_contract_address(sender.canonical_address, nonce))
 
     def _dispatch(self, function_name, *args):
         functions = self.contract.ext_funs
