@@ -14,6 +14,7 @@ from vyper.compiler.settings import Settings
 from titanoboa.boa.contracts.vvm.vvm_contract import _detect_version
 
 from ivy.vyper_contract import VyperDeployer, VyperContract
+from ivy.env import Env
 
 
 if TYPE_CHECKING:
@@ -92,7 +93,7 @@ def loads_partial(
 
     compiler_args = compiler_args or {}
 
-    deployer_class = VyperDeployer
+    deployer_class = _get_deployer_class()
     data = compiler_data(source_code, name, filename, deployer_class, **compiler_args)
     return deployer_class(data, filename=filename)
 
@@ -102,3 +103,8 @@ def load_partial(filename: str, compiler_args=None):
         return loads_partial(
             f.read(), name=filename, filename=filename, compiler_args=compiler_args
         )
+
+
+def _get_deployer_class():
+    env = Env.get_singleton()
+    return env.interpreter.deployer

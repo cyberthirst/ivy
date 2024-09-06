@@ -1,4 +1,5 @@
 from functools import cached_property
+from abc import ABC, abstractmethod
 
 from vyper.codegen.core import calculate_type_for_external_return
 
@@ -12,13 +13,24 @@ from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 from ivy.env import Env
 
 
-class VyperDeployer:
+class BaseDeployer(ABC):
+    def __init__(self, compiler_data, filename=None):
+        self.compiler_data = compiler_data
+        self.filename = filename
+
+    def __call__(self, *args, **kwargs):
+        return self.deploy(*args, **kwargs)
+
+    @abstractmethod
+    def deploy(self, *args, **kwargs):
+        pass
+
+
+class VyperDeployer(BaseDeployer):
     create_compiler_data = CompilerData  # this may be a different class in plugins
 
     def __init__(self, compiler_data, filename=None):
-        self.compiler_data = compiler_data
-
-        self.filename = filename
+        super().__init__(compiler_data, filename=filename)
 
     def __call__(self, *args, **kwargs):
         return self.deploy(*args, **kwargs)
