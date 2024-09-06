@@ -3,7 +3,7 @@ class ExpressionVisitor:
         self.interpreter = interpreter
 
     def visit(self, node):
-        method_name = f'visit_{type(node).__name__}'
+        method_name = f"visit_{type(node).__name__}"
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
 
@@ -29,7 +29,7 @@ class ExpressionVisitor:
         return node.value
 
     def visit_Name(self, node):
-        if node.id == 'self':
+        if node.id == "self":
             return self.interpreter.contract_address
         return self.interpreter.get_variable(node.id)
 

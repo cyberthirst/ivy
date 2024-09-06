@@ -1,3 +1,12 @@
+from ivy.env import Env
 
-def hello() -> str:
-    return "Hello from ivy!"
+
+env = Env.get_singleton()
+
+
+def set_interpreter(interpreter):
+    env.interpreter = interpreter
+
+
+def set_evm(evm):
+    env.evm = evm

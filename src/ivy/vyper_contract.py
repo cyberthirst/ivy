@@ -1,35 +1,10 @@
-# the main "entry point" of vyper-related functionality like
-# AST handling, traceback construction and ABI (marshaling
-# and unmarshaling vyper objects)
-
-import contextlib
-import copy
-import warnings
-from dataclasses import dataclass
 from functools import cached_property
-from typing import Any, Optional
 
-import vyper
-import vyper.ast as vy_ast
-import vyper.ir.compile_ir as compile_ir
-import vyper.semantics.namespace as vy_ns
-from eth.exceptions import VMError
-from vyper.ast.nodes import VariableDecl
-from vyper.ast.parse import parse_to_ast
 from vyper.codegen.core import calculate_type_for_external_return
-from vyper.codegen.function_definitions import (
-    generate_ir_for_external_function,
-    generate_ir_for_internal_function,
-)
-from vyper.codegen.ir_node import IRnode
-from vyper.codegen.module import generate_ir_for_module
+
 from vyper.compiler import CompilerData
-from vyper.compiler import output as compiler_output
 from vyper.compiler.output import build_abi_output
-from vyper.compiler.settings import OptimizationLevel, anchor_settings
-from vyper.exceptions import VyperException
-from vyper.ir.optimizer import optimize
-from vyper.semantics.types import AddressT, HashMapT, TupleT
+from vyper.semantics.types import TupleT
 from vyper.utils import method_id
 
 from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
@@ -69,7 +44,6 @@ class VyperContract:
         self.env = env or Env.get_singleton()
         self.filename = filename
 
-
         # TODO collect all the exposed funcs in ivy to avoid introducing
         # a potential Vyper bug
         exposed_fns = {
@@ -84,7 +58,7 @@ class VyperContract:
                 compiler_data.global_ctx.init_function.decl_node, self
             )
 
-        addr = self._run_init( *args, value=value)
+        addr = self._run_init(*args, value=value)
 
         self._address = addr
 
@@ -94,8 +68,6 @@ class VyperContract:
     @cached_property
     def abi(self):
         return build_abi_output(self.compiler_data)
-
-
 
     def marshal_to_python(self, computation, vyper_typ):
         if vyper_typ is None:
@@ -109,7 +81,6 @@ class VyperContract:
             (ret,) = ret
 
         return vyper_object(ret, vyper_typ)
-
 
     def _run_init(self, *args, value=0):
         encoded_args = b""

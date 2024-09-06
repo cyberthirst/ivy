@@ -10,14 +10,13 @@ from vyper import ast as vy_ast
 
 from titanoboa.boa.util.abi import Address
 
-from ivy.interpreter import Interpreter
+from ivy.interpreter import Interpreter, VyperEVM, EVM
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes | PYEVM_Address
 
 
 class Env:
-
     _singleton = None
     _random = random.Random("ivy")
 
@@ -28,10 +27,10 @@ class Env:
     ):
         super().__init__(**kwargs)
         self._accounts = accounts or {}
-        self.evm = Interpreter()
+        self.evm: EVM = VyperEVM()
+        self.interpreter = Interpreter(self.evm)
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
-
 
     @classmethod
     def get_singleton(cls):
@@ -39,9 +38,8 @@ class Env:
             cls._singleton = cls()
         return cls._singleton
 
-
     def _get_sender(self, sender=None) -> Address:
-        if sender is None: # TODO add ctx manager to set this
+        if sender is None:  # TODO add ctx manager to set this
             sender = self.eoa
         if self.eoa is None:
             raise ValueError(f"{self}.eoa not defined!")
@@ -57,20 +55,20 @@ class Env:
         self._aliases[Address(address).canonical_address] = name
 
     def deploy(
-            self,
-            module: vy_ast.Module,
-            *args: Any,
-            raw_args: bytes = None,
-            sender: Optional[_AddressType] = None,
-            value: int = 0,
+        self,
+        module: vy_ast.Module,
+        *args: Any,
+        raw_args: bytes = None,
+        sender: Optional[_AddressType] = None,
+        value: int = 0,
     ):
         sender = self._get_sender(sender)
 
-        target_address = self.evm.generate_create_address(sender)
+        target_address = self.interpreter.generate_create_address(sender)
 
         origin = sender
 
-        self.evm.deploy(
+        self.interpreter.deploy(
             sender,
             origin,
             target_address,
@@ -82,7 +80,6 @@ class Env:
 
         return target_address
 
-
     def execute_code(
         self,
         func_name: str,
@@ -93,16 +90,15 @@ class Env:
         raw_args: bytes = b"",
         is_modifying: bool = True,
     ) -> Any:
-
         sender = self._get_sender(sender)
 
         to = Address(to_address)
 
-        code = self.evm.get_code(to)
+        code = self.interpreter.get_code(to)
 
         is_static = not is_modifying
 
-        ret = self.evm.execute_code(
+        ret = self.interpreter.execute_code(
             sender,
             to,
             value,
