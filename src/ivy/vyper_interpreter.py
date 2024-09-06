@@ -11,7 +11,6 @@ import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
 from ivy.evm import EVM, Account, Environment, Message, ContractData, VyperEVM
-from ivy.vyper_contract import VyperDeployer
 
 
 class BaseInterpreter(ABC):
@@ -62,8 +61,9 @@ class BaseInterpreter(ABC):
         pass
 
     @property
+    @abstractmethod
     def deployer(self):
-        return VyperDeployer
+        pass
 
 
 class VyperInterpreter(BaseInterpreter):
@@ -106,7 +106,7 @@ class VyperInterpreter(BaseInterpreter):
             self._call(msg)
 
         # module's immutables were fixed up within the _process_message call
-        contract = ContractData(module)
+        contract = ContractData(typ)
 
         self.evm.state[target_address].contract_data = contract
 
@@ -159,6 +159,11 @@ class VyperInterpreter(BaseInterpreter):
 
         return abi_encode("(int256)", (42,))
 
+    @property
+    def deployer(self):
+        from ivy.vyper_contract import VyperDeployer
+        return VyperDeployer
+
     def _dispatch(self, function_name, *args):
         functions = self.contract.ext_funs
 
@@ -192,7 +197,7 @@ class VyperInterpreter(BaseInterpreter):
         pass
 
     def _exec_body(self):
-        for stmt in self.function.body:
+        for stmt in self.function.decl_node.body:
             self.executor.eval(stmt)
 
     def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):

@@ -3,15 +3,26 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from vyper.semantics.types.function import ContractFunctionT
+from vyper.semantics.types.module import ModuleT
 
 from titanoboa.boa.util.abi import Address
 
 
 class ContractData:
-    def __init__(self, module):
+    module: ModuleT
+    ext_funs: Dict[str, ContractFunctionT]
+    internal_funs: Dict[str, ContractFunctionT]
+    immutables: Dict[str, Any]
+
+    def __init__(self, module: ModuleT):
         self.module = module
-        self.ext_funs: Dict[str, ContractFunctionT] = {}
-        self.internal_funs: Dict[str, ContractFunctionT] = {}
+
+        self.ext_funs: Dict[str, ContractFunctionT] = {
+            f.name: f for f in module.exposed_functions
+        }
+        self.internal_funs: Dict[str, ContractFunctionT] = {
+            f: f for f in module.functions if f not in self.ext_funs.values()
+        }
         self.immutables = {}
 
 
@@ -97,3 +108,9 @@ class VyperEVM(EVM):
     def increment_nonce(self, address):
         assert address in self.state
         self.state[address].nonce += 1
+
+    def set_slot(self, key, value):
+        pass
+
+    def get_slot(self, key):
+        pass
