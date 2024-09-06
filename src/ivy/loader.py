@@ -29,7 +29,6 @@ def set_search_path(path: list[str]):
     _search_path = path
 
 
-
 def compiler_data(
     source_code: str, contract_name: str, filename: str | Path, deployer=None, **kwargs
 ) -> CompilerData:
@@ -71,7 +70,6 @@ def loads(
         return d.deploy_as_blueprint(**kwargs)
     else:
         return d.deploy(*args, **kwargs)
-
 
 
 def loads_partial(

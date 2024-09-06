@@ -3,7 +3,7 @@ class StatementVisitor:
         self.interpreter = interpreter
 
     def visit(self, node):
-        method_name = f'visit_{type(node).__name__}'
+        method_name = f"visit_{type(node).__name__}"
         visitor = getattr(self, method_name, self.generic_visit)
         return visitor(node)
 
@@ -43,7 +43,6 @@ class StatementVisitor:
             return self.visit_body(node.orelse)
         return None
 
-
     def visit_Assert(self, node):
         condition = self.interpreter.evaluate_expr(node.test)
         if not condition:
@@ -74,10 +73,10 @@ class StatementVisitor:
         return None
 
     def visit_Continue(self, node):
-        return 'continue'
+        return "continue"
 
     def visit_Break(self, node):
-        return 'break'
+        return "break"
 
     def visit_Return(self, node):
         if node.value:
@@ -87,6 +86,10 @@ class StatementVisitor:
     def visit_body(self, body):
         for stmt in body:
             result = self.visit(stmt)
-            if result == 'continue' or result == 'break' or isinstance(result, Exception):
+            if (
+                result == "continue"
+                or result == "break"
+                or isinstance(result, Exception)
+            ):
                 return result
         return None
