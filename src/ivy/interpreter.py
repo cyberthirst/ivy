@@ -1,8 +1,9 @@
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional, Dict
 
 from vyper import ast as vy_ast
 from vyper.semantics.types.module import ModuleT, ContractFunctionT
+from vyper.semantics.types.function import ContractFunctionT
 
 from titanoboa.boa.util.abi import Address, abi_encode, abi_decode
 
@@ -13,8 +14,8 @@ class ContractData:
     def __init__(self, module):
         self.module = module
         self.storage = {}
-        self.ext_funs = {}
-        self.internal_funs = {}
+        self.ext_funs: Dict[str, ContractFunctionT] = {}
+        self.internal_funs: Dict[str, ContractFunctionT] = {}
         self.immutables = {}
 
 
@@ -38,7 +39,7 @@ class Environment: # env from execution specs
     # gas_price: Uint
     time: Any#U256
     prev_randao: Any#Bytes32
-    state: Any#State
+    #state: Any#State
     chain_id: Any#U64
     # traces: List[dict]
 
@@ -83,9 +84,18 @@ class EVM:
 
 class Interpreter:
 
+    contract: Optional[ContractData]
+
     def __init__(self):
         # address -> Account
         self.evm = EVM()
+        # contract being executed
+        self.contract = None
+        # function being executed
+        self.function = None
+
+        self.executor = None
+
 
 
     def deploy(
@@ -134,10 +144,44 @@ class Interpreter:
             code: ContractFunctionT,
             func_name: str,
             *args: Any,
-            raw_args: bytes = b"",
+            raw_args: Optional[bytes],
             is_static: bool = False,
     ):
         print("executing code!")
+
+
+        msg = Message(
+            caller=sender,
+            to=to,
+            create_address=to,
+            value=value,
+            data=args,
+            code_address=to,
+            code=code,
+            depth=0,
+            is_static=is_static,
+        )
+
+        self.evm.msg = msg
+
+        env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=sender,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
+
+        self.evm.env = env
+
+        self.contract = self.evm.state[to].contract_data
+
+        # TODO return value from this call
+        self._call(func_name, raw_args, args)
+
         return abi_encode("(int256)", (42,))
 
 
@@ -151,5 +195,62 @@ class Interpreter:
         return Address(generate_contract_address(sender.canonical_address, nonce))
 
 
-    def _call(self, msg: Message):
+    def _dispatch(self, function_name, *args):
+        functions = self.contract.ext_funs
+
+        if function_name not in functions:
+            # TODO check fallback
+            # TODO rollback the evm journal
+            raise Exception(f"function {function_name} not found")
+        else:
+            self.function = functions[function_name]
+
+
+        if self.function.is_payable:
+            if self.evm.msg.value != 0:
+                # TODO raise and rollback
+                pass
+
+
+        # check args
+
+        # check decorators
         pass
+
+    def _prologue(self):
+        # TODO handle reentrancy lock
+
+        # TODO handle args
+
+        pass
+
+
+    def _epilogue(self):
+        # TODO handle reentrancy lock
+        # TODO handle return value
+        pass
+
+
+    def _exec_body(self):
+
+        for stmt in self.function.body:
+            self.executor.eval(stmt)
+
+
+    def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+        if raw_args:
+            # TODO decode args and continue as normal
+            # args = abi_decode(raw_args, schema based on func_name)
+            pass
+
+        self._dispatch(func_name, args)
+
+        self._prologue()
+
+        self._exec_body()
+
+        self._epilogue()
+
+
+
+
