@@ -43,23 +43,23 @@ class ExprVisitor(BaseVisitor):
         left = self.visit(node.left)
         right = self.visit(node.right)
         op = node.op.__class__.__name__
-        return self.handle_binop(op, left, right)
+        return self.evaluator.eval_binop(op, left, right)
 
     def visit_Compare(self, node):
         left = self.visit(node.left)
         right = self.visit(node.right)
         op = node.op.__class__.__name__
-        return self.handle_compare(op, left, right)
+        return self.evaluator.eval_compare(op, left, right)
 
     def visit_BoolOp(self, node):
         values = [self.visit(value) for value in node.values]
         op = node.op.__class__.__name__
-        return self.handle_boolop(op, values)
+        return self.evaluator.eval_boolop(op, values)
 
     def visit_UnaryOp(self, node):
         operand = self.visit(node.operand)
         op = node.op.__class__.__name__
-        return self.handle_unaryop(op, operand)
+        return self.evaluator.eval_unaryop(op, operand)
 
     def visit_Call(self, node):
         func = self.visit(node.func)
@@ -85,18 +85,6 @@ class ExprVisitor(BaseVisitor):
 
     def visit_StaticCall(self, node):
         return self.handle_static_call(node)
-
-    @abstractmethod
-    def handle_boolop(self, op, values):
-        pass
-
-    @abstractmethod
-    def handle_unaryop(self, op, operand):
-        pass
-
-    @abstractmethod
-    def handle_compare(self, op, left, right):
-        pass
 
     @abstractmethod
     def handle_call(self, func, args):
