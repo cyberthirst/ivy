@@ -4,11 +4,8 @@ from vyper.ast import nodes as ast
 
 from ivy.visitor import BaseVisitor
 
+
 class ExprVisitor(BaseVisitor):
-
-    def generic_visit(self, node: ast.VyperNode):
-        raise Exception(f"No visit method for {type(node).__name__}")
-
     def visit_Int(self, node: ast.Int):
         return node.value
 

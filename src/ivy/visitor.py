@@ -4,7 +4,6 @@ from ivy.evaluator import BaseEvaluator
 
 
 class BaseVisitor(ABC):
-
     evaluator: BaseEvaluator
 
     def visit(self, node):
@@ -14,7 +13,6 @@ class BaseVisitor(ABC):
 
     def generic_visit(self, node):
         raise Exception(f"No visit method for {type(node).__name__}")
-
 
     @abstractmethod
     def set_variable(self, name, value):
