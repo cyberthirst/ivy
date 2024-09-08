@@ -1,6 +1,9 @@
-from abc import ABC, abstractmethod
-
 from ivy.visitor import BaseVisitor
+
+
+class ReturnException(Exception):
+    def __init__(self, value):
+        self.value = value
 
 
 class StmtVisitor(BaseVisitor):
@@ -63,7 +66,7 @@ class StmtVisitor(BaseVisitor):
         target = self.visit(node.target)
         right = self.visit(node.value)
         left = self.get_variable(target)
-        new_value = self.handle_binop(node.op, left, right)
+        new_value = self.evaluator.eval_binop(node.op, left, right)
         self.set_variable(target, new_value)
         return None
 
@@ -75,8 +78,9 @@ class StmtVisitor(BaseVisitor):
 
     def visit_Return(self, node):
         if node.value:
-            return self.visit(node.value)
-        return None
+            value = self.visit(node.value)
+            raise ReturnException(value)
+        raise ReturnException(None)
 
     def visit_body(self, body):
         for stmt in body:

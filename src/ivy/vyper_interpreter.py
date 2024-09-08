@@ -12,7 +12,8 @@ from eth._utils.address import generate_contract_address
 
 from ivy.evm import EVM, Account, Environment, Message, ContractData, VyperEVM
 from ivy.expr import ExprVisitor
-from ivy.stmt import StmtVisitor
+from ivy.stmt import StmtVisitor, ReturnException
+from ivy.evaluator import VyperEvaluator
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -40,6 +41,9 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
         pass
 
+    @abstractmethod
+    def _return(self):
+        pass
 
     def generate_create_address(self, sender):
         nonce = self.evm.get_nonce(sender.canonical_address)
@@ -131,16 +135,21 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         # TODO return value from this call
         self._call(func_name, raw_args, args)
 
-        return abi_encode("(int256)", (42,))
+        #return abi_encode("(int256)", (42,))
+        return self._return()
 
 
 
 class VyperInterpreter(BaseInterpreter):
     contract: Optional[ContractData]
+    returndata: bytes
+    evaluator: VyperEvaluator
 
     def __init__(self, evm: EVM):
         super().__init__(evm)
         self.executor = None
+        self.returndata = None
+        self.evaluator = VyperEvaluator()
 
     @property
     def deployer(self):
@@ -181,7 +190,12 @@ class VyperInterpreter(BaseInterpreter):
 
     def _exec_body(self):
         for stmt in self.function.decl_node.body:
-            self.visit(stmt)
+            try:
+                self.visit(stmt)
+            except ReturnException as e:
+                # TODO handle the return value
+                self.returndata = e.value
+                break
 
     def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
         if raw_args:
@@ -197,24 +211,16 @@ class VyperInterpreter(BaseInterpreter):
 
         self._epilogue()
 
+    def _return(self):
+        return abi_encode("(int256)", (self.returndata,))
+
+
     def get_variable(self, name):
         print(f"Getting variable: {name}")
         return None
 
-    def handle_binop(self, op, left, right):
-        print(f"Handling binary operation: {op} with {left} and {right}")
-        return None
-
-    def handle_boolop(self, op, values):
-        print(f"Handling boolean operation: {op} with values {values}")
-        return None
-
     def handle_call(self, func, args):
         print(f"Handling function call to {func} with arguments {args}")
-        return None
-
-    def handle_compare(self, op, left, right):
-        print(f"Handling comparison: {op} between {left} and {right}")
         return None
 
     def handle_external_call(self, node):

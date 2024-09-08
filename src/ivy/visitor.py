@@ -1,7 +1,11 @@
 from abc import ABC, abstractmethod
 
+from ivy.evaluator import BaseEvaluator
+
 
 class BaseVisitor(ABC):
+
+    evaluator: BaseEvaluator
 
     def visit(self, node):
         method_name = f"visit_{type(node).__name__}"
@@ -18,8 +22,4 @@ class BaseVisitor(ABC):
 
     @abstractmethod
     def get_variable(self, name):
-        pass
-
-    @abstractmethod
-    def handle_binop(self, op, left, right):
         pass
