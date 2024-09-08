@@ -3,7 +3,7 @@ from abc import ABC, abstractmethod
 from ivy.visitor import BaseVisitor
 
 
-class StmtVisitor(ABC, BaseVisitor):
+class StmtVisitor(BaseVisitor):
 
     def visit_Expr(self, node):
         # Evaluate the expression
@@ -88,15 +88,3 @@ class StmtVisitor(ABC, BaseVisitor):
             ):
                 return result
         return None
-
-    @abstractmethod
-    def set_variable(self, name, value):
-        pass
-
-    @abstractmethod
-    def get_variable(self, name):
-        pass
-
-    @abstractmethod
-    def handle_binop(self, op, left, right):
-        pass

@@ -15,7 +15,7 @@ from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor
 
 
-class BaseInterpreter(ABC, ExprVisitor, StmtVisitor):
+class BaseInterpreter(ExprVisitor, StmtVisitor):
     evm: EVM
     contract: Optional[ContractData]
     function: Optional[ContractFunctionT]
@@ -35,7 +35,6 @@ class BaseInterpreter(ABC, ExprVisitor, StmtVisitor):
     @abstractmethod
     def deployer(self):
         pass
-
 
     @abstractmethod
     def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
@@ -182,7 +181,7 @@ class VyperInterpreter(BaseInterpreter):
 
     def _exec_body(self):
         for stmt in self.function.decl_node.body:
-            self.executor.eval(stmt)
+            self.visit(stmt)
 
     def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
         if raw_args:
@@ -197,3 +196,38 @@ class VyperInterpreter(BaseInterpreter):
         self._exec_body()
 
         self._epilogue()
+
+    def get_variable(self, name):
+        print(f"Getting variable: {name}")
+        return None
+
+    def handle_binop(self, op, left, right):
+        print(f"Handling binary operation: {op} with {left} and {right}")
+        return None
+
+    def handle_boolop(self, op, values):
+        print(f"Handling boolean operation: {op} with values {values}")
+        return None
+
+    def handle_call(self, func, args):
+        print(f"Handling function call to {func} with arguments {args}")
+        return None
+
+    def handle_compare(self, op, left, right):
+        print(f"Handling comparison: {op} between {left} and {right}")
+        return None
+
+    def handle_external_call(self, node):
+        print(f"Handling external call with node {node}")
+        return None
+
+    def handle_static_call(self, node):
+        print(f"Handling static call with node {node}")
+        return None
+
+    def handle_unaryop(self, op, operand):
+        print(f"Handling unary operation: {op} on operand {operand}")
+        return None
+
+    def set_variable(self, name, value):
+        print(f"Setting variable {name} to {value}")

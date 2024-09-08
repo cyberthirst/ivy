@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 from ivy.visitor import BaseVisitor
 
-class ExprVisitor(ABC, BaseVisitor):
+class ExprVisitor(BaseVisitor):
 
     def generic_visit(self, node):
         raise Exception(f"No visit method for {type(node).__name__}")
@@ -85,14 +85,6 @@ class ExprVisitor(ABC, BaseVisitor):
 
     def visit_StaticCall(self, node):
         return self.handle_static_call(node)
-
-    @abstractmethod
-    def get_variable(self, name):
-        pass
-
-    @abstractmethod
-    def handle_binop(self, op, left, right):
-        pass
 
     @abstractmethod
     def handle_boolop(self, op, values):

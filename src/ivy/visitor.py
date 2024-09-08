@@ -1,5 +1,7 @@
+from abc import ABC, abstractmethod
 
-class BaseVisitor:
+
+class BaseVisitor(ABC):
 
     def visit(self, node):
         method_name = f"visit_{type(node).__name__}"
@@ -9,3 +11,15 @@ class BaseVisitor:
     def generic_visit(self, node):
         raise Exception(f"No visit method for {type(node).__name__}")
 
+
+    @abstractmethod
+    def set_variable(self, name, value):
+        pass
+
+    @abstractmethod
+    def get_variable(self, name):
+        pass
+
+    @abstractmethod
+    def handle_binop(self, op, left, right):
+        pass
