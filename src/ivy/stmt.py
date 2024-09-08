@@ -11,7 +11,6 @@ class ReturnException(Exception):
 
 
 class StmtVisitor(BaseVisitor):
-
     def visit_Expr(self, node: ast.Expr):
         # Evaluate the expression
         return self.visit(node.value)

@@ -22,19 +22,16 @@ class BaseEvaluator(ABC):
         pass
 
 
-
 class VyperEvaluator(BaseEvaluator):
     def eval_boolop(self, op, values):
         eval = op.op._op
         res = eval(values)
         return res
 
-
     def eval_unaryop(self, op, operand):
         eval = op.op._op
         res = eval(operand)
         return res
-
 
     def eval_binop(self, op: ast.BinOp, left: Any, right: Any):
         eval = op.op._op
@@ -45,4 +42,3 @@ class VyperEvaluator(BaseEvaluator):
         eval = op.op._op
         res = eval(left, right)
         return res
-

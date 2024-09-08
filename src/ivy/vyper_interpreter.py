@@ -28,7 +28,6 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         # function being executed
         self.function = None
 
-
     def get_code(self, address):
         pass
 
@@ -135,9 +134,8 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         # TODO return value from this call
         self._call(func_name, raw_args, args)
 
-        #return abi_encode("(int256)", (42,))
+        # return abi_encode("(int256)", (42,))
         return self._return()
-
 
 
 class VyperInterpreter(BaseInterpreter):
@@ -154,6 +152,7 @@ class VyperInterpreter(BaseInterpreter):
     @property
     def deployer(self):
         from ivy.vyper_contract import VyperDeployer
+
         return VyperDeployer
 
     def _dispatch(self, function_name, *args):
@@ -213,7 +212,6 @@ class VyperInterpreter(BaseInterpreter):
 
     def _return(self):
         return abi_encode("(int256)", (self.returndata,))
-
 
     def get_variable(self, name):
         print(f"Getting variable: {name}")
