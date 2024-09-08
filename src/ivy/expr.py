@@ -44,8 +44,7 @@ class ExprVisitor(BaseVisitor):
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)
         right = self.visit(node.right)
-        op = node.op.__class__.__name__
-        return self.evaluator.eval_binop(op, left, right)
+        return self.evaluator.eval_binop(node, left, right)
 
     def visit_Compare(self, node: ast.Compare):
         left = self.visit(node.left)
@@ -87,10 +86,6 @@ class ExprVisitor(BaseVisitor):
 
     def visit_StaticCall(self, node: ast.StaticCall):
         return self.handle_static_call(node)
-
-    @abstractmethod
-    def construct_value(self, node: ast.VyperNode):
-        pass
 
     @abstractmethod
     def handle_call(self, func, args):
