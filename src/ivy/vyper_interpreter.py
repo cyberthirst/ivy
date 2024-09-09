@@ -1,25 +1,26 @@
-from typing import Any, Optional, Dict
-from abc import ABC, abstractmethod
+from typing import Any, Optional
+from abc import abstractmethod
 
 from vyper import ast as vy_ast
 from vyper.semantics.types.module import ModuleT, ContractFunctionT
-from vyper.semantics.types.function import ContractFunctionT
 
-from titanoboa.boa.util.abi import Address, abi_encode, abi_decode
+from titanoboa.boa.util.abi import Address, abi_encode
 
 import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
-from ivy.evm import EVM, Account, Environment, Message, ContractData, VyperEVM
+from ivy.evm import EVM, Account, Environment, Message, ContractData
 from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
+from ivy.ctx import Ctx
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
     evm: EVM
     contract: Optional[ContractData]
     function: Optional[ContractFunctionT]
+    ctxs: list[Ctx]
 
     def __init__(self, evm: EVM):
         self.evm = evm
@@ -43,6 +44,12 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     @abstractmethod
     def _return(self):
         pass
+
+    def _push_ctx(self):
+        self.ctxs.append(Ctx())
+
+    def _pop_ctx(self):
+        self.ctxs.pop()
 
     def generate_create_address(self, sender):
         nonce = self.evm.get_nonce(sender.canonical_address)
@@ -179,12 +186,14 @@ class VyperInterpreter(BaseInterpreter):
         # TODO handle reentrancy lock
 
         # TODO handle args
+        self._push_ctx()
 
         pass
 
     def _epilogue(self):
         # TODO handle reentrancy lock
         # TODO handle return value
+        self._pop_ctx()
         pass
 
     def _exec_body(self):
