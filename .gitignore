@@ -41,3 +41,7 @@ pytest_cache/
 # System files
 .DS_Store
 Thumbs.db
+
+# PyCharm files
+ivy/.idea/*.xml
+.idea/
