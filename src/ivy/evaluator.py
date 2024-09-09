@@ -38,7 +38,7 @@ class VyperEvaluator(BaseEvaluator):
         res = eval(left, right)
         return res
 
-    def eval_compare(self, op, left, right):
+    def eval_compare(self, op: ast.Compare, left, right):
         eval = op.op._op
         res = eval(left, right)
         return res

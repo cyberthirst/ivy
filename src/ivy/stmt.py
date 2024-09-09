@@ -1,3 +1,5 @@
+from abc import abstractmethod
+
 from vyper.ast.nodes import VyperNode
 
 from ivy.visitor import BaseVisitor
@@ -27,8 +29,8 @@ class StmtVisitor(BaseVisitor):
 
     def visit_Assign(self, node: ast.Assign):
         value = self.visit(node.value)
-        target = self.visit(node.target)
-        self.set_variable(target, value)
+        self._assign_target(node.target, value)
+
         return None
 
     def visit_If(self, node: ast.If):
@@ -89,3 +91,7 @@ class StmtVisitor(BaseVisitor):
             ):
                 return result
         return None
+
+    @abstractmethod
+    def _assign_target(self, target, value):
+        pass

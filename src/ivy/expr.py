@@ -46,8 +46,7 @@ class ExprVisitor(BaseVisitor):
     def visit_Compare(self, node: ast.Compare):
         left = self.visit(node.left)
         right = self.visit(node.right)
-        op = node.op.__class__.__name__
-        return self.evaluator.eval_compare(op, left, right)
+        return self.evaluator.eval_compare(node, left, right)
 
     def visit_BoolOp(self, node: ast.BoolOp):
         values = [self.visit(value) for value in node.values]

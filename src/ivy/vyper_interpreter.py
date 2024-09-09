@@ -233,6 +233,36 @@ class VyperInterpreter(BaseInterpreter):
         else:
             raise NotImplementedError(f"Data location {loc} not implemented")
 
+    def set_variable(
+        self, name: Union[vy_ast.Name, vy_ast.Subscript, vy_ast.Attribute], value
+    ):
+        info = name._expr_info
+        loc = info.location
+        if loc == DataLocation.MEMORY:
+            self.ctxs[-1][name.id] = value
+        else:
+            raise NotImplementedError(f"Data location {loc} not implemented")
+
+    def _assign_target(self, target, value):
+        if isinstance(target, vy_ast.Name):
+            self.set_variable(target, value)
+        elif isinstance(target, vy_ast.Tuple):
+            if not isinstance(value, tuple):
+                raise TypeError("Cannot unpack non-iterable to tuple")
+            if len(target.elts) != len(value):
+                raise ValueError("Mismatch in number of items to unpack")
+            for t, v in zip(target.elts, value):
+                self._assign_target(t, v)
+        elif isinstance(target, vy_ast.Subscript):
+            container = self.visit(target.value)
+            index = self.visit(target.slice)
+            container[index] = value
+        elif isinstance(target, vy_ast.Attribute):
+            obj = self.visit(target.value)
+            setattr(obj, target.attr, value)
+        else:
+            raise NotImplementedError(f"Assignment to {type(target)} not implemented")
+
     def handle_call(self, func, args):
         print(f"Handling function call to {func} with arguments {args}")
         return None
@@ -248,13 +278,3 @@ class VyperInterpreter(BaseInterpreter):
     def handle_unaryop(self, op, operand):
         print(f"Handling unary operation: {op} on operand {operand}")
         return None
-
-    def set_variable(
-        self, name: Union[vy_ast.Name, vy_ast.Subscript, vy_ast.Attribute], value
-    ):
-        info = name._expr_info
-        loc = info.location
-        if loc == DataLocation.MEMORY:
-            self.ctxs[-1][name.id] = value
-        else:
-            raise NotImplementedError(f"Data location {loc} not implemented")
