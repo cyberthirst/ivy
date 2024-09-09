@@ -10,7 +10,8 @@ from vyper import ast as vy_ast
 
 from titanoboa.boa.util.abi import Address
 
-from ivy.vyper_interpreter import VyperInterpreter, VyperEVM, EVM, BaseInterpreter
+from ivy.vyper_interpreter import VyperInterpreter, EVM, BaseInterpreter
+from ivy.evm import VyperEVM
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes | PYEVM_Address

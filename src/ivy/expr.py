@@ -1,4 +1,4 @@
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 
 from vyper.ast import nodes as ast
 
@@ -27,7 +27,7 @@ class ExprVisitor(BaseVisitor):
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
             return self.interpreter.contract_address
-        return self.get_variable(node.id)
+        return self.get_variable(node)
 
     def visit_Attribute(self, node: ast.Attribute):
         obj = self.visit(node.value)

@@ -1,8 +1,10 @@
-from typing import Any, Optional
+import ast
+from typing import Any, Optional, Union
 from abc import abstractmethod
 
 from vyper import ast as vy_ast
 from vyper.semantics.types.module import ModuleT, ContractFunctionT
+from vyper.semantics.data_locations import DataLocation
 
 from titanoboa.boa.util.abi import Address, abi_encode
 
@@ -28,6 +30,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         self.contract = None
         # function being executed
         self.function = None
+        self.ctxs = []
 
     def get_code(self, address):
         pass
@@ -222,9 +225,13 @@ class VyperInterpreter(BaseInterpreter):
     def _return(self):
         return abi_encode("(int256)", (self.returndata,))
 
-    def get_variable(self, name):
-        print(f"Getting variable: {name}")
-        return None
+    def get_variable(self, name: ast.Name):
+        info = name._expr_info
+        loc = info.location
+        if loc == DataLocation.MEMORY:
+            return self.ctxs[-1][name.id]
+        else:
+            raise NotImplementedError(f"Data location {loc} not implemented")
 
     def handle_call(self, func, args):
         print(f"Handling function call to {func} with arguments {args}")
@@ -242,5 +249,12 @@ class VyperInterpreter(BaseInterpreter):
         print(f"Handling unary operation: {op} on operand {operand}")
         return None
 
-    def set_variable(self, name, value):
-        print(f"Setting variable {name} to {value}")
+    def set_variable(
+        self, name: Union[vy_ast.Name, vy_ast.Subscript, vy_ast.Attribute], value
+    ):
+        info = name._expr_info
+        loc = info.location
+        if loc == DataLocation.MEMORY:
+            self.ctxs[-1][name.id] = value
+        else:
+            raise NotImplementedError(f"Data location {loc} not implemented")

@@ -12,22 +12,17 @@ class ReturnException(Exception):
 
 class StmtVisitor(BaseVisitor):
     def visit_Expr(self, node: ast.Expr):
-        # Evaluate the expression
         return self.visit(node.value)
 
     def visit_Pass(self, node: ast.Pass):
-        # Do nothing for pass statement
         return None
 
     def visit_Name(self, node: ast.Name):
-        if node.id == "vdb":
-            # Handle debugger
-            return None
-        raise Exception(f"Unsupported Name: {node.id}")
+        return self.get_variable(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
-        self.set_variable(node.target.id, value)
+        self.set_variable(node.target, value)
         return None
 
     def visit_Assign(self, node: ast.Assign):
@@ -62,7 +57,6 @@ class StmtVisitor(BaseVisitor):
             raise Exception("Generic raise")
 
     def visit_For(self, node: ast.For):
-        # Implement for loop logic
         pass
 
     def visit_AugAssign(self, node: ast.AugAssign):
