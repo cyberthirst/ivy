@@ -2,8 +2,10 @@ from typing import Any, Optional, Union
 from abc import abstractmethod
 
 import vyper.ast.nodes as ast
-from vyper.semantics.types.module import ModuleT, ContractFunctionT
+from vyper.semantics.types.module import ModuleT
+from vyper.semantics.types.function import ContractFunctionT, _FunctionArg
 from vyper.semantics.data_locations import DataLocation
+from vyper.builtins._signatures import BuiltinFunctionT
 
 from titanoboa.boa.util.abi import Address, abi_encode
 
@@ -15,7 +17,6 @@ from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
-from vyper.builtins._signatures import BuiltinFunctionT
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -196,23 +197,25 @@ class VyperInterpreter(BaseInterpreter):
 
         return function
 
-    def _prologue(self, func_t, *args):
+    def _prologue(self, func_t, args):
         self._push_fun_ctx(func_t)
+        self._push_scope()
+
         # TODO handle reentrancy lock
 
-        # TODO handle args
-
-        pass
+        for arg, param in zip(args, func_t.arguments):
+            self._new_variable(param)
+            self.set_variable(param.name, arg)
 
     def _epilogue(self, *args):
         # TODO handle reentrancy lock
         # TODO handle return value
+        self._pop_scope()
         self._pop_fun_ctx()
         # TODO register arguments as local variables
         pass
 
     def _exec_body(self):
-        # for stmt in self.execution_ctx[-1].function.decl_node.body:
         for stmt in self.ctx.function.decl_node.body:
             try:
                 self.visit(stmt)
@@ -221,11 +224,9 @@ class VyperInterpreter(BaseInterpreter):
                 self.returndata = e.value
                 break
 
-    def _execute_function(self, func_t, *args):
+    def _execute_function(self, func_t, args):
         self._prologue(func_t, args)
-
         self._exec_body()
-
         self._epilogue()
 
         return self.returndata
@@ -252,11 +253,21 @@ class VyperInterpreter(BaseInterpreter):
     def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
         self.execution_ctx.append(ExecutionContext(acc, fun))
 
+    def _get_var_name(self, node):
+        if isinstance(node, ast.Name):
+            return node.id
+        elif isinstance(node, ast.Attribute):
+            return node.attr
+        elif isinstance(node, _FunctionArg):
+            return node.name
+        else:
+            raise NotImplementedError(
+                f"Getting variable name from {type(node)} not implemented"
+            )
+
     # name: locals, immutables, constants
     # attribute: storage, transient
-    def set_variable(self, name: Union[ast.Name, ast.Attribute], value):
-        name = name.id if isinstance(name, ast.Name) else name.attr
-
+    def set_variable(self, name: str, value):
         if name in self.ctx:
             self.ctx[name].value = value
         else:
@@ -264,7 +275,7 @@ class VyperInterpreter(BaseInterpreter):
 
     def _assign_target(self, target, value):
         if isinstance(target, ast.Name):
-            self.set_variable(target, value)
+            self.set_variable(target.id, value)
         elif isinstance(target, ast.Tuple):
             if not isinstance(value, tuple):
                 raise TypeError("Cannot unpack non-iterable to tuple")
@@ -301,13 +312,20 @@ class VyperInterpreter(BaseInterpreter):
         # TODO based on type return its default value
         return None
 
-    def _new_variable(self, target: ast.Name):
-        assert isinstance(target, ast.Name)
-        info = target._expr_info
-        var = Variable(
-            self._default_type_value(info.typ), info.typ, DataLocation.MEMORY
-        )
-        self.ctx[target.id] = var
+    def _new_variable(self, target: Union[ast.Name, _FunctionArg]):
+        if isinstance(target, ast.Name):
+            info = target._expr_info
+            var = Variable(
+                self._default_type_value(info.typ), info.typ, DataLocation.MEMORY
+            )
+            self.ctx[target.id] = var
+        elif isinstance(target, _FunctionArg):
+            var = Variable(
+                self._default_type_value(target.typ), target.typ, DataLocation.MEMORY
+            )
+            self.ctx[target.name] = var
+        else:
+            raise RuntimeError(f"Cannot create variable for {type(target)}")
 
     def _new_internal_variable(self, node):
         info = node._expr_info
@@ -324,7 +342,7 @@ class VyperInterpreter(BaseInterpreter):
             return self.builtin_funcs[func_t.name](*args)
         elif isinstance(func_t, ContractFunctionT):
             assert func_t.is_internal
-            return self._execute_function(func_t, *args)
+            return self._execute_function(func_t, args)
         else:
             raise NotImplementedError(f"Function type {func_t} not supported")
 

@@ -15,7 +15,7 @@ class BaseVisitor(ABC):
         raise Exception(f"No visit method for {type(node).__name__}")
 
     @abstractmethod
-    def set_variable(self, name, value):
+    def set_variable(self, name: str, value):
         pass
 
     @abstractmethod

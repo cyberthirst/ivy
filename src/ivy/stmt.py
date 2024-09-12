@@ -32,7 +32,7 @@ class StmtVisitor(BaseVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
         self._new_variable(node.target)
-        self.set_variable(node.target, value)
+        self.set_variable(node.target.id, value)
         return None
 
     def visit_Assign(self, node: ast.Assign):
@@ -72,8 +72,8 @@ class StmtVisitor(BaseVisitor):
         self._push_scope()
 
         try:
+            self._new_internal_variable(node.target.target)
             for item in iterable:
-                self._new_internal_variable(node.target.target)
                 self._assign_target(node.target.target, item)
 
                 try:
