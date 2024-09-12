@@ -1,8 +1,7 @@
-import ast
 from typing import Any, Optional, Union
 from abc import abstractmethod
 
-from vyper import ast as vy_ast
+import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT, ContractFunctionT
 from vyper.semantics.data_locations import DataLocation
 
@@ -15,22 +14,15 @@ from ivy.evm import EVM, Account, Environment, Message, ContractData
 from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
-from ivy.ctx import Ctx
+from ivy.context import ExecutionContext, Variable
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
     evm: EVM
-    contract: Optional[ContractData]
-    function: Optional[ContractFunctionT]
-    ctxs: list[Ctx]
+    execution_ctx: list[ExecutionContext]
 
     def __init__(self, evm: EVM):
         self.evm = evm
-        # contract being executed
-        self.contract = None
-        # function being executed
-        self.function = None
-        self.ctxs = []
 
     def get_code(self, address):
         pass
@@ -48,11 +40,21 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     def _return(self):
         pass
 
-    def _push_ctx(self):
-        self.ctxs.append(Ctx())
+    @abstractmethod
+    def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
+        pass
 
-    def _pop_ctx(self):
-        self.ctxs.pop()
+    def _push_fun_ctx(self):
+        self.execution_ctx[-1].push_fun_context()
+
+    def _pop_fun_ctx(self):
+        self.execution_ctx[-1].pop_fun_context()
+
+    def _push_scope(self):
+        self.execution_ctx[-1].push_scope()
+
+    def _pop_scope(self):
+        self.execution_ctx[-1].pop_scope()
 
     def generate_create_address(self, sender):
         nonce = self.evm.get_nonce(sender.canonical_address)
@@ -64,7 +66,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         sender: Address,
         origin: Address,
         target_address: Address,
-        module: vy_ast.Module,
+        module: ast.Module,
         value: int,
         *args: Any,
         raw_args=None,  # abi-encoded constructor args
@@ -73,10 +75,11 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         assert isinstance(typ, ModuleT)
 
         # TODO follow the evm semantics for nonce, value, storage etc..)
-        self.evm.state[target_address] = Account(1, 0, {}, None)
+        self.evm.state[target_address] = Account(1, 0, {}, {}, None)
 
         if typ.init_function is not None:
             constructor = typ.init_function
+            self._init_execution(self.evm.state[target_address], constructor)
             msg = Message(
                 caller=sender,
                 to=constants.CREATE_CONTRACT_ADDRESS,
@@ -139,7 +142,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
         self.evm.env = env
 
-        self.contract = self.evm.state[to].contract_data
+        self._init_execution(self.evm.state[to])
 
         # TODO return value from this call
         self._call(func_name, raw_args, args)
@@ -150,14 +153,15 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
 class VyperInterpreter(BaseInterpreter):
     contract: Optional[ContractData]
-    returndata: bytes
     evaluator: VyperEvaluator
+    vars: dict[str, Any]
 
     def __init__(self, evm: EVM):
         super().__init__(evm)
         self.executor = None
         self.returndata = None
         self.evaluator = VyperEvaluator()
+        self.execution_ctx = []
 
     @property
     def deployer(self):
@@ -166,16 +170,17 @@ class VyperInterpreter(BaseInterpreter):
         return VyperDeployer
 
     def _dispatch(self, function_name, *args):
-        functions = self.contract.ext_funs
+        functions = self.execution_ctx[-1].contract.ext_funs
 
         if function_name not in functions:
             # TODO check fallback
             # TODO rollback the evm journal
             raise Exception(f"function {function_name} not found")
         else:
-            self.function = functions[function_name]
+            function = functions[function_name]
+            self.execution_ctx[-1].function = function
 
-        if self.function.is_payable:
+        if function.is_payable:
             if self.evm.msg.value != 0:
                 # TODO raise and rollback
                 pass
@@ -196,11 +201,11 @@ class VyperInterpreter(BaseInterpreter):
     def _epilogue(self):
         # TODO handle reentrancy lock
         # TODO handle return value
-        self._pop_ctx()
+        self.execution_ctx[-1].pop_fun_context()
         pass
 
     def _exec_body(self):
-        for stmt in self.function.decl_node.body:
+        for stmt in self.execution_ctx[-1].function.decl_node.body:
             try:
                 self.visit(stmt)
             except ReturnException as e:
@@ -226,42 +231,78 @@ class VyperInterpreter(BaseInterpreter):
         return abi_encode("(int256)", (self.returndata,))
 
     def get_variable(self, name: ast.Name):
-        info = name._expr_info
-        loc = info.location
-        if loc == DataLocation.MEMORY:
-            return self.ctxs[-1][name.id]
+        if name.id in self.execution_ctx[-1].current_fun_context():
+            return self.execution_ctx[-1].current_fun_context()[name.id].value
         else:
-            raise NotImplementedError(f"Data location {loc} not implemented")
+            raise NotImplementedError(f"{name.id}'s location not yet supported")
 
-    def set_variable(
-        self, name: Union[vy_ast.Name, vy_ast.Subscript, vy_ast.Attribute], value
-    ):
-        info = name._expr_info
-        loc = info.location
-        if loc == DataLocation.MEMORY:
-            self.ctxs[-1][name.id] = value
+    def _push_ctx(self):
+        self.execution_ctx[-1].push_fun_context()
+
+    def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
+        self.execution_ctx.append(ExecutionContext(acc, fun))
+
+    # name: locals, immutables, constants
+    # attribute: storage, transient
+    def set_variable(self, name: Union[ast.Name, ast.Attribute], value):
+        name = name.id if isinstance(name, ast.Name) else name.attr
+
+        if name in self.execution_ctx[-1].current_fun_context():
+            self.execution_ctx[-1].current_fun_context()[name].value = value
         else:
-            raise NotImplementedError(f"Data location {loc} not implemented")
+            raise NotImplementedError(f"{name}'s location not yet supported")
 
     def _assign_target(self, target, value):
-        if isinstance(target, vy_ast.Name):
+        if isinstance(target, ast.Name):
             self.set_variable(target, value)
-        elif isinstance(target, vy_ast.Tuple):
+        elif isinstance(target, ast.Tuple):
             if not isinstance(value, tuple):
                 raise TypeError("Cannot unpack non-iterable to tuple")
             if len(target.elts) != len(value):
                 raise ValueError("Mismatch in number of items to unpack")
             for t, v in zip(target.elts, value):
                 self._assign_target(t, v)
-        elif isinstance(target, vy_ast.Subscript):
+        elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
             index = self.visit(target.slice)
             container[index] = value
-        elif isinstance(target, vy_ast.Attribute):
+        elif isinstance(target, ast.Attribute):
             obj = self.visit(target.value)
             setattr(obj, target.attr, value)
         else:
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")
+
+    def _get_target_value(self, target):
+        if isinstance(target, ast.Name):
+            return self.get_variable(target)
+        elif isinstance(target, ast.Subscript):
+            container = self.visit(target.value)
+            index = self.visit(target.slice)
+            return container[index]
+        elif isinstance(target, ast.Attribute):
+            obj = self.visit(target.value)
+            return getattr(obj, target.attr)
+        else:
+            raise NotImplementedError(
+                f"Getting value from {type(target)} not implemented"
+            )
+
+    def _default_type_value(self, typ):
+        # TODO based on type return its default value
+        return None
+
+    def _new_variable(self, target: ast.Name):
+        assert isinstance(target, ast.Name)
+        info = target._expr_info
+        var = Variable(
+            self._default_type_value(info.typ), info.typ, DataLocation.MEMORY
+        )
+        self.execution_ctx[-1].add_variable(target.id, var)
+
+    def _new_internal_variable(self, node):
+        info = node._expr_info
+        var = Variable(node.id, info.typ, DataLocation.MEMORY)
+        self.execution_ctx[-1].add_variable(node.id, var)
 
     def handle_call(self, func, args):
         print(f"Handling function call to {func} with arguments {args}")

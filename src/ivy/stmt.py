@@ -24,6 +24,7 @@ class StmtVisitor(BaseVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
+        self._new_variable(node.target)
         self.set_variable(node.target, value)
         return None
 
@@ -62,18 +63,17 @@ class StmtVisitor(BaseVisitor):
         pass
 
     def visit_AugAssign(self, node: ast.AugAssign):
-        target = self.visit(node.target)
-        right = self.visit(node.value)
-        left = self.get_variable(target)
-        new_value = self.evaluator.eval_binop(node.op, left, right)
-        self.set_variable(target, new_value)
+        target_value = self._get_target_value(node.target)
+        value = self.visit(node.value)
+        new_value = self.evaluator.eval_binop(node, target_value, value)
+        self._assign_target(node.target, new_value)
         return None
 
     def visit_Continue(self, node: ast.Continue):
-        return "continue"
+        raise ContinueException
 
     def visit_Break(self, node: ast.Break):
-        return "break"
+        raise BreakException
 
     def visit_Return(self, node: ast.Return):
         if node.value:
@@ -94,4 +94,24 @@ class StmtVisitor(BaseVisitor):
 
     @abstractmethod
     def _assign_target(self, target, value):
+        pass
+
+    @abstractmethod
+    def _get_target_value(self, target):
+        pass
+
+    @abstractmethod
+    def _push_scope(self):
+        pass
+
+    @abstractmethod
+    def _pop_scope(self):
+        pass
+
+    @abstractmethod
+    def _new_variable(self, target):
+        pass
+
+    @abstractmethod
+    def _new_internal_variable(self, target):
         pass

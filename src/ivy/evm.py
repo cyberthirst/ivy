@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -31,7 +31,8 @@ class Account:
     nonce: Any
     balance: Any
     storage: Any
-    contract_data: ContractData | None
+    transient: Any
+    contract_data: Optional[ContractData]
 
 
 @dataclass
@@ -102,7 +103,7 @@ class VyperEVM(EVM):
 
     def get_nonce(self, address):
         if address not in self.state:
-            self.state[address] = Account(0, 0, {}, None)
+            self.state[address] = Account(0, 0, {}, {}, None)
         return self.state[address].nonce
 
     def increment_nonce(self, address):
