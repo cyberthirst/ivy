@@ -1,15 +1,23 @@
 from abc import abstractmethod
 
 from vyper.ast.nodes import VyperNode
+from vyper.ast import nodes as ast
 
 from ivy.visitor import BaseVisitor
-
-from vyper.ast import nodes as ast
+from ivy.context import Context
 
 
 class ReturnException(Exception):
     def __init__(self, value):
         self.value = value
+
+
+class ContinueException(Exception):
+    pass
+
+
+class BreakException(Exception):
+    pass
 
 
 class StmtVisitor(BaseVisitor):
@@ -60,7 +68,26 @@ class StmtVisitor(BaseVisitor):
             raise Exception("Generic raise")
 
     def visit_For(self, node: ast.For):
-        pass
+        iterable = self.visit(node.iter)
+
+        self._push_scope()
+
+        try:
+            for item in iterable:
+                self._new_internal_variable(node.target.target)
+                self._assign_target(node.target.target, item)
+
+                try:
+                    for stmt in node.body:
+                        self.visit(stmt)
+                except ContinueException:
+                    continue
+                except BreakException:
+                    break
+        finally:
+            self._pop_scope()
+
+        return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
         target_value = self._get_target_value(node.target)

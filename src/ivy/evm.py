@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
 
-from titanoboa.boa.util.abi import Address
-
 
 class ContractData:
     module: ModuleT
