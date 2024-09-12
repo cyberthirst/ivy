@@ -1,6 +1,6 @@
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Union
+from typing import TYPE_CHECKING, Union
 
 import vyper
 from vyper.cli.vyper_compile import get_search_paths

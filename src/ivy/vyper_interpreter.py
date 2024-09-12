@@ -169,6 +169,10 @@ class VyperInterpreter(BaseInterpreter):
 
         return VyperDeployer
 
+    @property
+    def ctx(self):
+        return self.execution_ctx[-1].current_fun_context()
+
     def _dispatch(self, function_name, *args):
         functions = self.execution_ctx[-1].contract.ext_funs
 
@@ -194,7 +198,7 @@ class VyperInterpreter(BaseInterpreter):
         # TODO handle reentrancy lock
 
         # TODO handle args
-        self._push_ctx()
+        self._push_fun_ctx()
 
         pass
 
@@ -231,13 +235,10 @@ class VyperInterpreter(BaseInterpreter):
         return abi_encode("(int256)", (self.returndata,))
 
     def get_variable(self, name: ast.Name):
-        if name.id in self.execution_ctx[-1].current_fun_context():
-            return self.execution_ctx[-1].current_fun_context()[name.id].value
+        if name.id in self.ctx:
+            return self.ctx[name.id].value
         else:
             raise NotImplementedError(f"{name.id}'s location not yet supported")
-
-    def _push_ctx(self):
-        self.execution_ctx[-1].push_fun_context()
 
     def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
         self.execution_ctx.append(ExecutionContext(acc, fun))
@@ -247,8 +248,8 @@ class VyperInterpreter(BaseInterpreter):
     def set_variable(self, name: Union[ast.Name, ast.Attribute], value):
         name = name.id if isinstance(name, ast.Name) else name.attr
 
-        if name in self.execution_ctx[-1].current_fun_context():
-            self.execution_ctx[-1].current_fun_context()[name].value = value
+        if name in self.ctx:
+            self.ctx[name].value = value
         else:
             raise NotImplementedError(f"{name}'s location not yet supported")
 
@@ -297,12 +298,13 @@ class VyperInterpreter(BaseInterpreter):
         var = Variable(
             self._default_type_value(info.typ), info.typ, DataLocation.MEMORY
         )
-        self.execution_ctx[-1].add_variable(target.id, var)
+        self.ctx[target.id] = var
 
     def _new_internal_variable(self, node):
         info = node._expr_info
-        var = Variable(node.id, info.typ, DataLocation.MEMORY)
-        self.execution_ctx[-1].add_variable(node.id, var)
+        typ = info.typ
+        var = Variable(self._default_type_value(typ), typ, DataLocation.MEMORY)
+        self.execution_ctx[-1].new_variable(node.id, var)
 
     def handle_call(self, func, args):
         print(f"Handling function call to {func} with arguments {args}")

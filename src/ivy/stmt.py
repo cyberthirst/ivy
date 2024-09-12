@@ -4,7 +4,6 @@ from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
 
 from ivy.visitor import BaseVisitor
-from ivy.context import Context
 
 
 class ReturnException(Exception):

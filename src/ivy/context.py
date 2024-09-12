@@ -15,7 +15,7 @@ class Variable:
     location: DataLocation
 
 
-class Context:
+class FunctionContext:
     scopes: list[dict[str, Any]]
 
     def __init__(self):
@@ -50,7 +50,7 @@ class ExecutionContext:
     def __init__(self, acc: Account, function: ContractFunctionT = None):
         self.contract = acc.contract_data
         self.function = function
-        self.function_contexts = [Context()]
+        self.function_contexts = [FunctionContext()]
         self.storage = acc.storage
         self.transient = acc.transient
         self.immutables = self.contract.immutables
@@ -58,7 +58,7 @@ class ExecutionContext:
         # self.constants = contract.module.constants
 
     def push_fun_context(self):
-        self.function_contexts.append(Context())
+        self.function_contexts.append(FunctionContext())
 
     def pop_fun_context(self):
         self.function_contexts.pop()
@@ -72,5 +72,5 @@ class ExecutionContext:
     def pop_scope(self):
         self.current_fun_context().pop()
 
-    def add_variable(self, key, value):
+    def new_variable(self, key, value):
         self.function_contexts[-1][key] = value
