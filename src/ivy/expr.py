@@ -59,9 +59,9 @@ class ExprVisitor(BaseVisitor):
         return self.evaluator.eval_unaryop(op, operand)
 
     def visit_Call(self, node: ast.Call):
-        func = self.visit(node.func)
+        # func = self.visit(node.func)
         args = [self.visit(arg) for arg in node.args]
-        return self.handle_call(func, args)
+        return self.handle_call(node, args)
 
     def visit_List(self, node: ast.List):
         return [self.visit(elem) for elem in node.elements]

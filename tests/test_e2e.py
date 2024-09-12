@@ -43,3 +43,26 @@ def foo() -> uint256:
 
     c = loads(src)
     assert c.foo() == 47
+
+
+def test_internal_call():
+    src = """
+    @internal
+    def bar() -> uint256:
+        a: DynArray[uint256, 10] = [1, 2, 3]
+        counter: uint256 = 0
+        for i: uint256 in a:
+            counter += i
+        return counter
+
+
+    @external
+    def foo() -> uint256:
+        a: DynArray[uint256, 10] = [1, 2, 3]
+        counter: uint256 = 0
+        for i: uint256 in a:
+            counter += i
+        return counter + self.bar()
+    """
+    c = loads(src)
+    assert c.foo() == 12

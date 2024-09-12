@@ -17,9 +17,11 @@ class Variable:
 
 class FunctionContext:
     scopes: list[dict[str, Any]]
+    function: ContractFunctionT
 
-    def __init__(self):
+    def __init__(self, function: ContractFunctionT):
         self.scopes = [{}]
+        self.function = function
 
     def push(self):
         self.scopes.append({})
@@ -50,15 +52,15 @@ class ExecutionContext:
     def __init__(self, acc: Account, function: ContractFunctionT = None):
         self.contract = acc.contract_data
         self.function = function
-        self.function_contexts = [FunctionContext()]
+        self.function_contexts = [FunctionContext(function)]
         self.storage = acc.storage
         self.transient = acc.transient
         self.immutables = self.contract.immutables
         self.returndata: bytes = b""
         # self.constants = contract.module.constants
 
-    def push_fun_context(self):
-        self.function_contexts.append(FunctionContext())
+    def push_fun_context(self, func_t: ContractFunctionT):
+        self.function_contexts.append(FunctionContext(func_t))
 
     def pop_fun_context(self):
         self.function_contexts.pop()

@@ -15,6 +15,7 @@ from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
+from vyper.builtins._signatures import BuiltinFunctionT
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -33,7 +34,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
-    def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+    def _extcall(self, func_name: str, raw_args: Optional[bytes], *args: Any):
         pass
 
     @abstractmethod
@@ -44,8 +45,8 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
         pass
 
-    def _push_fun_ctx(self):
-        self.execution_ctx[-1].push_fun_context()
+    def _push_fun_ctx(self, func_t):
+        self.execution_ctx[-1].push_fun_context(func_t)
 
     def _pop_fun_ctx(self):
         self.execution_ctx[-1].pop_fun_context()
@@ -93,7 +94,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             )
 
             # TODO this probably should return ContractData
-            self._call(msg)
+            self._extcall(msg)
 
         # module's immutables were fixed up within the _process_message call
         contract = ContractData(typ)
@@ -145,7 +146,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         self._init_execution(self.evm.state[to])
 
         # TODO return value from this call
-        self._call(func_name, raw_args, args)
+        self._extcall(func_name, raw_args, args)
 
         # return abi_encode("(int256)", (42,))
         return self._return()
@@ -162,6 +163,7 @@ class VyperInterpreter(BaseInterpreter):
         self.returndata = None
         self.evaluator = VyperEvaluator()
         self.execution_ctx = []
+        self.builtin_funcs = {}
 
     @property
     def deployer(self):
@@ -182,7 +184,6 @@ class VyperInterpreter(BaseInterpreter):
             raise Exception(f"function {function_name} not found")
         else:
             function = functions[function_name]
-            self.execution_ctx[-1].function = function
 
         if function.is_payable:
             if self.evm.msg.value != 0:
@@ -192,24 +193,27 @@ class VyperInterpreter(BaseInterpreter):
         # check args
 
         # check decorators
-        pass
 
-    def _prologue(self):
+        return function
+
+    def _prologue(self, func_t, *args):
+        self._push_fun_ctx(func_t)
         # TODO handle reentrancy lock
 
         # TODO handle args
-        self._push_fun_ctx()
 
         pass
 
-    def _epilogue(self):
+    def _epilogue(self, *args):
         # TODO handle reentrancy lock
         # TODO handle return value
-        self.execution_ctx[-1].pop_fun_context()
+        self._pop_fun_ctx()
+        # TODO register arguments as local variables
         pass
 
     def _exec_body(self):
-        for stmt in self.execution_ctx[-1].function.decl_node.body:
+        # for stmt in self.execution_ctx[-1].function.decl_node.body:
+        for stmt in self.ctx.function.decl_node.body:
             try:
                 self.visit(stmt)
             except ReturnException as e:
@@ -217,19 +221,24 @@ class VyperInterpreter(BaseInterpreter):
                 self.returndata = e.value
                 break
 
-    def _call(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+    def _execute_function(self, func_t, *args):
+        self._prologue(func_t, args)
+
+        self._exec_body()
+
+        self._epilogue()
+
+        return self.returndata
+
+    def _extcall(self, func_name: str, raw_args: Optional[bytes], *args: Any):
         if raw_args:
             # TODO decode args and continue as normal
             # args = abi_decode(raw_args, schema based on func_name)
             pass
 
-        self._dispatch(func_name, args)
+        func_t = self._dispatch(func_name, args)
 
-        self._prologue()
-
-        self._exec_body()
-
-        self._epilogue()
+        self._execute_function(func_t, *args)
 
     def _return(self):
         return abi_encode("(int256)", (self.returndata,))
@@ -306,9 +315,18 @@ class VyperInterpreter(BaseInterpreter):
         var = Variable(self._default_type_value(typ), typ, DataLocation.MEMORY)
         self.execution_ctx[-1].new_variable(node.id, var)
 
-    def handle_call(self, func, args):
+    def handle_call(self, func: ast.Call, args):
+        func_t = func.func._metadata["type"]
+
         print(f"Handling function call to {func} with arguments {args}")
-        return None
+
+        if isinstance(func_t, BuiltinFunctionT):
+            return self.builtin_funcs[func_t.name](*args)
+        elif isinstance(func_t, ContractFunctionT):
+            assert func_t.is_internal
+            return self._execute_function(func_t, *args)
+        else:
+            raise NotImplementedError(f"Function type {func_t} not supported")
 
     def handle_external_call(self, node):
         print(f"Handling external call with node {node}")
