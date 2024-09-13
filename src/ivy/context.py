@@ -5,7 +5,7 @@ from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
-from ivy.evm import Account
+from ivy.evm import Account, Message
 
 
 @dataclass
@@ -49,7 +49,7 @@ class FunctionContext:
 
 
 class ExecutionContext:
-    def __init__(self, acc: Account, function: ContractFunctionT = None):
+    def __init__(self, acc: Account, msg: Message, function: ContractFunctionT = None):
         self.contract = acc.contract_data
         self.function = function
         self.function_contexts = [FunctionContext(function)]
@@ -57,6 +57,8 @@ class ExecutionContext:
         self.transient = acc.transient
         self.immutables = self.contract.immutables
         self.returndata: bytes = b""
+        self.msg = msg
+
         # self.constants = contract.module.constants
 
     def push_fun_context(self, func_t: ContractFunctionT):

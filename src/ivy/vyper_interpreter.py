@@ -43,7 +43,9 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
-    def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
+    def _init_execution(
+        self, acc: Account, msg: Message, fun: ContractFunctionT = None
+    ):
         pass
 
     def _push_fun_ctx(self, func_t):
@@ -81,7 +83,6 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
         if typ.init_function is not None:
             constructor = typ.init_function
-            self._init_execution(self.evm.state[target_address], constructor)
             msg = Message(
                 caller=sender,
                 to=constants.CREATE_CONTRACT_ADDRESS,
@@ -93,6 +94,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
                 depth=0,
                 is_static=False,
             )
+            self._init_execution(self.evm.state[target_address], msg, constructor)
 
             # TODO this probably should return ContractData
             self._extcall(msg)
@@ -117,6 +119,17 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     ):
         print("executing code!")
 
+        self.evm.env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=sender,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
+
         msg = Message(
             caller=sender,
             to=to,
@@ -129,22 +142,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        self.evm.msg = msg
-
-        env = Environment(
-            caller=sender,
-            block_hashes=[],
-            origin=sender,
-            coinbase=sender,
-            number=0,
-            time=0,
-            prev_randao=b"",
-            chain_id=0,
-        )
-
-        self.evm.env = env
-
-        self._init_execution(self.evm.state[to])
+        self._init_execution(self.evm.state[to], msg)
 
         # TODO return value from this call
         self._extcall(func_name, raw_args, args)
@@ -250,8 +248,10 @@ class VyperInterpreter(BaseInterpreter):
         else:
             raise NotImplementedError(f"{name.id}'s location not yet supported")
 
-    def _init_execution(self, acc: Account, fun: ContractFunctionT = None):
-        self.execution_ctx.append(ExecutionContext(acc, fun))
+    def _init_execution(
+        self, acc: Account, msg: Message, fun: ContractFunctionT = None
+    ):
+        self.execution_ctx.append(ExecutionContext(acc, msg, fun))
 
     def _get_var_name(self, node):
         if isinstance(node, ast.Name):

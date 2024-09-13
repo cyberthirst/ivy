@@ -70,7 +70,6 @@ class Message:  # msg from execution specs
 
 class EVM(ABC):
     state: Dict[Any, Account]
-    msg: Message
     env: Environment
 
     @abstractmethod
