@@ -10,8 +10,7 @@ from vyper import ast as vy_ast
 
 from titanoboa.boa.util.abi import Address
 
-from ivy.vyper_interpreter import VyperInterpreter, EVM, BaseInterpreter
-from ivy.evm import VyperEVM
+from ivy.vyper_interpreter import VyperInterpreter, BaseInterpreter
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes | PYEVM_Address
@@ -21,7 +20,6 @@ class Env:
     _singleton = None
     _random = random.Random("ivy")
 
-    evm: EVM
     interpreter: BaseInterpreter
 
     def __init__(
@@ -31,8 +29,7 @@ class Env:
     ):
         super().__init__(**kwargs)
         self._accounts = accounts or {}
-        self.evm = VyperEVM()
-        self.interpreter = VyperInterpreter(self.evm)
+        self.interpreter = VyperInterpreter()
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
 

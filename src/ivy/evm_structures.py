@@ -1,5 +1,4 @@
 from typing import Any, Dict, Optional
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from vyper.semantics.types.function import ContractFunctionT
@@ -66,49 +65,3 @@ class Message:  # msg from execution specs
     # accessed_addresses: Set[Address]
     # accessed_storage_keys: Set[Tuple[Address, Bytes32]]
     # parent_evm: Optional["Evm"]
-
-
-class EVM(ABC):
-    state: Dict[Any, Account]
-    env: Environment
-
-    @abstractmethod
-    def set_slot(self, key, value):
-        pass
-
-    @abstractmethod
-    def get_slot(self, key):
-        pass
-
-    @abstractmethod
-    def get_nonce(self, address):
-        pass
-
-    @abstractmethod
-    def increment_nonce(self, address):
-        pass
-
-
-class VyperEVM(EVM):
-    def __init__(self):
-        self.state = {}
-        self.msg = None
-        self.env = None
-
-    def process_message(self, msg: Message):
-        pass
-
-    def get_nonce(self, address):
-        if address not in self.state:
-            self.state[address] = Account(0, 0, {}, {}, None)
-        return self.state[address].nonce
-
-    def increment_nonce(self, address):
-        assert address in self.state
-        self.state[address].nonce += 1
-
-    def set_slot(self, key, value):
-        pass
-
-    def get_slot(self, key):
-        pass

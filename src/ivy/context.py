@@ -5,7 +5,7 @@ from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
-from ivy.evm import Account, Message
+from ivy.evm_structures import Account, Message
 
 
 @dataclass

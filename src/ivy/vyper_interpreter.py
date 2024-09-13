@@ -12,7 +12,7 @@ from titanoboa.boa.util.abi import Address, abi_encode
 import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
-from ivy.evm import EVM, Account, Environment, Message, ContractData
+from ivy.evm_structures import Account, Environment, Message, ContractData
 from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
@@ -20,11 +20,11 @@ from ivy.context import ExecutionContext, Variable
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
-    evm: EVM
     execution_ctx: list[ExecutionContext]
+    env: Optional[Environment]
 
-    def __init__(self, evm: EVM):
-        self.evm = evm
+    def __init__(self):
+        self.state = {}
 
     def get_code(self, address):
         pass
@@ -36,6 +36,14 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
     @abstractmethod
     def _extcall(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+        pass
+
+    @abstractmethod
+    def get_nonce(self, address):
+        pass
+
+    @abstractmethod
+    def increment_nonce(self, address):
         pass
 
     @abstractmethod
@@ -61,8 +69,8 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         self.execution_ctx[-1].pop_scope()
 
     def generate_create_address(self, sender):
-        nonce = self.evm.get_nonce(sender.canonical_address)
-        self.evm.increment_nonce(sender.canonical_address)
+        nonce = self.get_nonce(sender.canonical_address)
+        self.increment_nonce(sender.canonical_address)
         return Address(generate_contract_address(sender.canonical_address, nonce))
 
     def deploy(
@@ -79,7 +87,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         assert isinstance(typ, ModuleT)
 
         # TODO follow the evm semantics for nonce, value, storage etc..)
-        self.evm.state[target_address] = Account(1, 0, {}, {}, None)
+        self.state[target_address] = Account(1, 0, {}, {}, None)
 
         if typ.init_function is not None:
             constructor = typ.init_function
@@ -94,7 +102,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
                 depth=0,
                 is_static=False,
             )
-            self._init_execution(self.evm.state[target_address], msg, constructor)
+            self._init_execution(self.state[target_address], msg, constructor)
 
             # TODO this probably should return ContractData
             self._extcall(msg)
@@ -102,7 +110,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         # module's immutables were fixed up within the _process_message call
         contract = ContractData(typ)
 
-        self.evm.state[target_address].contract_data = contract
+        self.state[target_address].contract_data = contract
 
         print("deployed contract!")
 
@@ -119,7 +127,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     ):
         print("executing code!")
 
-        self.evm.env = Environment(
+        self.env = Environment(
             caller=sender,
             block_hashes=[],
             origin=sender,
@@ -142,7 +150,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        self._init_execution(self.evm.state[to], msg)
+        self._init_execution(self.state[to], msg)
 
         # TODO return value from this call
         self._extcall(func_name, raw_args, args)
@@ -156,13 +164,14 @@ class VyperInterpreter(BaseInterpreter):
     evaluator: VyperEvaluator
     vars: dict[str, Any]
 
-    def __init__(self, evm: EVM):
-        super().__init__(evm)
+    def __init__(self):
+        super().__init__()
         self.executor = None
         self.returndata = None
         self.evaluator = VyperEvaluator()
         self.execution_ctx = []
         self.builtin_funcs = {}
+        self.env = None
 
     @property
     def deployer(self):
@@ -170,9 +179,22 @@ class VyperInterpreter(BaseInterpreter):
 
         return VyperDeployer
 
+    def get_nonce(self, address):
+        if address not in self.state:
+            self.state[address] = Account(0, 0, {}, {}, None)
+        return self.state[address].nonce
+
+    def increment_nonce(self, address):
+        assert address in self.state
+        self.state[address].nonce += 1
+
     @property
     def ctx(self):
         return self.execution_ctx[-1].current_fun_context()
+
+    @property
+    def msg(self):
+        return self.execution_ctx[-1].msg
 
     def _dispatch(self, function_name, *args):
         functions = self.execution_ctx[-1].contract.ext_funs
@@ -185,7 +207,7 @@ class VyperInterpreter(BaseInterpreter):
             function = functions[function_name]
 
         if function.is_payable:
-            if self.evm.msg.value != 0:
+            if self.msg.value != 0:
                 # TODO raise and rollback
                 pass
 
