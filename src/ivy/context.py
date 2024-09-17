@@ -58,6 +58,7 @@ class ExecutionContext:
         self.storage = acc.storage
         self.transient = acc.transient
         self.immutables = self.contract.immutables
+        self.constants = self.contract.constants
         self.returndata: bytes = b""
         self.msg = msg
 

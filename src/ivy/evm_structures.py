@@ -22,6 +22,7 @@ class ContractData:
             f: f for f in module.functions if f not in self.ext_funs.values()
         }
         self.immutables = {}
+        self.constants = {}
 
 
 @dataclass

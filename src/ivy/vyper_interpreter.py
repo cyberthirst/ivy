@@ -39,6 +39,10 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
+    def _execute_function(self, func_t, args):
+        pass
+
+    @abstractmethod
     def get_nonce(self, address):
         pass
 
@@ -53,6 +57,10 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     @abstractmethod
     def _init_execution(self, acc: Account, msg: Message, module: ModuleT = None):
         pass
+
+    @property
+    def exec_ctx(self):
+        return self.execution_ctxs[-1]
 
     def _push_fun_ctx(self, func_t):
         self.execution_ctxs[-1].push_fun_context(func_t)
@@ -87,26 +95,28 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         # TODO follow the evm semantics for nonce, value, storage etc..)
         self.state[target_address] = Account(1, 0, {}, {}, None)
 
+        msg = Message(
+            caller=sender,
+            to=constants.CREATE_CONTRACT_ADDRESS,
+            create_address=target_address,
+            value=value,
+            data=args,
+            code_address=target_address,
+            code=module_t.init_function,
+            depth=0,
+            is_static=False,
+        )
+
+        self._init_execution(self.state[target_address], msg, module_t)
+
         if module_t.init_function is not None:
             constructor = module_t.init_function
-            msg = Message(
-                caller=sender,
-                to=constants.CREATE_CONTRACT_ADDRESS,
-                create_address=target_address,
-                value=value,
-                data=args,
-                code_address=target_address,
-                code=constructor,
-                depth=0,
-                is_static=False,
-            )
-            self._init_execution(self.state[target_address], msg, module_t)
 
-            # TODO this probably should return ContractData
-            self._extcall(msg)  # probably rather "execute_function"
+            # TODO this probably should return ContractData?
+            self._execute_function(constructor, args)
 
         # module's immutables were fixed upon upon constructor execution
-        contract = ContractData(module_t)
+        contract = self.exec_ctx.contract
 
         self.state[target_address].contract_data = contract
 
@@ -190,10 +200,6 @@ class VyperInterpreter(BaseInterpreter):
         return self.execution_ctxs[-1].current_fun_context()
 
     @property
-    def exec_ctx(self):
-        return self.execution_ctxs[-1]
-
-    @property
     def msg(self):
         return self.execution_ctxs[-1].msg
 
@@ -270,9 +276,20 @@ class VyperInterpreter(BaseInterpreter):
     def _return(self):
         return abi_encode("(int256)", (self.returndata,))
 
+    @property
+    def var_locations(self):
+        return (
+            self.fun_ctx,
+            self.exec_ctx.storage,
+            self.exec_ctx.transient,
+            self.exec_ctx.immutables,
+            self.exec_ctx.constants,
+        )
+
     def get_variable(self, name: ast.Name):
-        if name.id in self.fun_ctx:
-            return self.fun_ctx[name.id].value
+        for loc in self.var_locations:
+            if name.id in loc:
+                return self.fun_ctx[name.id].value
         else:
             raise NotImplementedError(f"{name.id}'s location not yet supported")
 
@@ -285,23 +302,11 @@ class VyperInterpreter(BaseInterpreter):
             for d in decls:
                 self._new_variable(d)
 
-    def _get_var_name(self, node):
-        if isinstance(node, ast.Name):
-            return node.id
-        elif isinstance(node, ast.Attribute):
-            return node.attr
-        elif isinstance(node, _FunctionArg):
-            return node.name
-        else:
-            raise NotImplementedError(
-                f"Getting variable name from {type(node)} not implemented"
-            )
-
-    # name: locals, immutables, constants
-    # attribute: storage, transient
     def set_variable(self, name: str, value):
-        if name in self.fun_ctx:
-            self.fun_ctx[name].value = value
+        for loc in self.var_locations:
+            if name in loc:
+                self.fun_ctx[name].value = value
+                break
         else:
             raise NotImplementedError(f"{name}'s location not yet supported")
 
