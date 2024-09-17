@@ -20,7 +20,7 @@ from ivy.context import ExecutionContext, Variable
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
-    execution_ctx: list[ExecutionContext]
+    execution_ctxs: list[ExecutionContext]
     env: Optional[Environment]
 
     def __init__(self):
@@ -51,22 +51,20 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
-    def _init_execution(
-        self, acc: Account, msg: Message, fun: ContractFunctionT = None
-    ):
+    def _init_execution(self, acc: Account, msg: Message, module: ModuleT = None):
         pass
 
     def _push_fun_ctx(self, func_t):
-        self.execution_ctx[-1].push_fun_context(func_t)
+        self.execution_ctxs[-1].push_fun_context(func_t)
 
     def _pop_fun_ctx(self):
-        self.execution_ctx[-1].pop_fun_context()
+        self.execution_ctxs[-1].pop_fun_context()
 
     def _push_scope(self):
-        self.execution_ctx[-1].push_scope()
+        self.execution_ctxs[-1].push_scope()
 
     def _pop_scope(self):
-        self.execution_ctx[-1].pop_scope()
+        self.execution_ctxs[-1].pop_scope()
 
     def generate_create_address(self, sender):
         nonce = self.get_nonce(sender.canonical_address)
@@ -83,14 +81,14 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         *args: Any,
         raw_args=None,  # abi-encoded constructor args
     ):
-        typ = module._metadata["type"]
-        assert isinstance(typ, ModuleT)
+        module_t = module._metadata["type"]
+        assert isinstance(module_t, ModuleT)
 
         # TODO follow the evm semantics for nonce, value, storage etc..)
         self.state[target_address] = Account(1, 0, {}, {}, None)
 
-        if typ.init_function is not None:
-            constructor = typ.init_function
+        if module_t.init_function is not None:
+            constructor = module_t.init_function
             msg = Message(
                 caller=sender,
                 to=constants.CREATE_CONTRACT_ADDRESS,
@@ -102,13 +100,13 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
                 depth=0,
                 is_static=False,
             )
-            self._init_execution(self.state[target_address], msg, constructor)
+            self._init_execution(self.state[target_address], msg, module_t)
 
             # TODO this probably should return ContractData
-            self._extcall(msg)
+            self._extcall(msg)  # probably rather "execute_function"
 
-        # module's immutables were fixed up within the _process_message call
-        contract = ContractData(typ)
+        # module's immutables were fixed upon upon constructor execution
+        contract = ContractData(module_t)
 
         self.state[target_address].contract_data = contract
 
@@ -166,10 +164,9 @@ class VyperInterpreter(BaseInterpreter):
 
     def __init__(self):
         super().__init__()
-        self.executor = None
         self.returndata = None
         self.evaluator = VyperEvaluator()
-        self.execution_ctx = []
+        self.execution_ctxs = []
         self.builtin_funcs = {}
         self.env = None
 
@@ -189,15 +186,24 @@ class VyperInterpreter(BaseInterpreter):
         self.state[address].nonce += 1
 
     @property
-    def ctx(self):
-        return self.execution_ctx[-1].current_fun_context()
+    def fun_ctx(self):
+        return self.execution_ctxs[-1].current_fun_context()
+
+    @property
+    def exec_ctx(self):
+        return self.execution_ctxs[-1]
 
     @property
     def msg(self):
-        return self.execution_ctx[-1].msg
+        return self.execution_ctxs[-1].msg
+
+    def _init_vars(self, acc: Account, module: ModuleT):
+        decls = module.variable_decls
+        for d in decls:
+            self._new_variable(d)
 
     def _dispatch(self, function_name, *args):
-        functions = self.execution_ctx[-1].contract.ext_funs
+        functions = self.execution_ctxs[-1].contract.ext_funs
 
         if function_name not in functions:
             # TODO check fallback
@@ -236,7 +242,7 @@ class VyperInterpreter(BaseInterpreter):
         pass
 
     def _exec_body(self):
-        for stmt in self.ctx.function.decl_node.body:
+        for stmt in self.fun_ctx.function.decl_node.body:
             try:
                 self.visit(stmt)
             except ReturnException as e:
@@ -265,15 +271,19 @@ class VyperInterpreter(BaseInterpreter):
         return abi_encode("(int256)", (self.returndata,))
 
     def get_variable(self, name: ast.Name):
-        if name.id in self.ctx:
-            return self.ctx[name.id].value
+        if name.id in self.fun_ctx:
+            return self.fun_ctx[name.id].value
         else:
             raise NotImplementedError(f"{name.id}'s location not yet supported")
 
-    def _init_execution(
-        self, acc: Account, msg: Message, fun: ContractFunctionT = None
-    ):
-        self.execution_ctx.append(ExecutionContext(acc, msg, fun))
+    def _init_execution(self, acc: Account, msg: Message, module_t: ModuleT = None):
+        self.execution_ctxs.append(ExecutionContext(acc, msg, module_t))
+
+        # intialize variables to default values
+        if module_t:
+            decls = module_t.variable_decls
+            for d in decls:
+                self._new_variable(d)
 
     def _get_var_name(self, node):
         if isinstance(node, ast.Name):
@@ -290,8 +300,8 @@ class VyperInterpreter(BaseInterpreter):
     # name: locals, immutables, constants
     # attribute: storage, transient
     def set_variable(self, name: str, value):
-        if name in self.ctx:
-            self.ctx[name].value = value
+        if name in self.fun_ctx:
+            self.fun_ctx[name].value = value
         else:
             raise NotImplementedError(f"{name}'s location not yet supported")
 
@@ -330,30 +340,49 @@ class VyperInterpreter(BaseInterpreter):
                 f"Getting value from {type(target)} not implemented"
             )
 
-    def _default_type_value(self, typ):
-        # TODO based on type return its default value
-        return None
-
-    def _new_variable(self, target: Union[ast.Name, _FunctionArg]):
+    def _new_variable(self, target: Union[ast.Name, ast.VariableDecl, _FunctionArg]):
         if isinstance(target, ast.Name):
             info = target._expr_info
             var = Variable(
-                self._default_type_value(info.typ), info.typ, DataLocation.MEMORY
+                self.evaluator.default_value(info.typ), info.typ, DataLocation.MEMORY
             )
-            self.ctx[target.id] = var
+            self.fun_ctx[target.id] = var
         elif isinstance(target, _FunctionArg):
             var = Variable(
-                self._default_type_value(target.typ), target.typ, DataLocation.MEMORY
+                self.evaluator.default_value(target.typ),
+                target.typ,
+                DataLocation.MEMORY,
             )
-            self.ctx[target.name] = var
+            self.fun_ctx[target.name] = var
+        elif isinstance(target, ast.VariableDecl):
+            # TODO handle public variables
+            id = target.target.id
+            typ = target.typ
+            defeault_value = self.evaluator.default_value(typ)
+            if target.is_immutable:
+                self.exec_ctx.immutables[id] = Variable(
+                    defeault_value, typ, DataLocation.CODE
+                )
+            elif target.is_constant:
+                self.exec_ctx.contract.constants[id] = Variable(
+                    self.visit(target.value), typ, DataLocation.CODE
+                )
+            elif target.is_transient:
+                self.exec_ctx.transient[id] = Variable(
+                    defeault_value, typ, DataLocation.TRANSIENT
+                )
+            else:  # storage
+                self.exec_ctx.storage[id] = Variable(
+                    defeault_value, typ, DataLocation.STORAGE
+                )
         else:
             raise RuntimeError(f"Cannot create variable for {type(target)}")
 
     def _new_internal_variable(self, node):
         info = node._expr_info
         typ = info.typ
-        var = Variable(self._default_type_value(typ), typ, DataLocation.MEMORY)
-        self.execution_ctx[-1].new_variable(node.id, var)
+        var = Variable(self.evaluator.default_value(typ), typ, DataLocation.MEMORY)
+        self.exec_ctx.new_variable(node.id, var)
 
     def handle_call(self, func: ast.Call, args):
         func_t = func.func._metadata["type"]

@@ -1,11 +1,12 @@
-from typing import Any
+from typing import Any, Optional
 from dataclasses import dataclass
 
 from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
+from vyper.semantics.types.module import ModuleT
 
-from ivy.evm_structures import Account, Message
+from ivy.evm_structures import Account, Message, ContractData
 
 
 @dataclass
@@ -49,10 +50,11 @@ class FunctionContext:
 
 
 class ExecutionContext:
-    def __init__(self, acc: Account, msg: Message, function: ContractFunctionT = None):
-        self.contract = acc.contract_data
-        self.function = function
-        self.function_contexts = [FunctionContext(function)]
+    def __init__(self, acc: Account, msg: Message, module: Optional[ModuleT]):
+        self.acc = acc
+        self.contract = acc.contract_data or ContractData(module)
+        self.function = None
+        self.function_contexts = []
         self.storage = acc.storage
         self.transient = acc.transient
         self.immutables = self.contract.immutables

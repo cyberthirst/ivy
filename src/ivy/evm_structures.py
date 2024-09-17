@@ -10,6 +10,7 @@ class ContractData:
     ext_funs: Dict[str, ContractFunctionT]
     internal_funs: Dict[str, ContractFunctionT]
     immutables: Dict[str, Any]
+    constants: Dict[str, Any]
 
     def __init__(self, module: ModuleT):
         self.module = module

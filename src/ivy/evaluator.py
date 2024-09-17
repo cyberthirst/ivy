@@ -21,6 +21,10 @@ class BaseEvaluator(ABC):
     def eval_compare(self, op, left, right):
         pass
 
+    @abstractmethod
+    def default_value(self, typ):
+        pass
+
 
 class VyperEvaluator(BaseEvaluator):
     def eval_boolop(self, op, values):
@@ -42,3 +46,6 @@ class VyperEvaluator(BaseEvaluator):
         eval = op.op._op
         res = eval(left, right)
         return res
+
+    def default_value(self, typ):
+        return None
