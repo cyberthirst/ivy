@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types.primitives import IntegerT
 
 
 class BaseEvaluator(ABC):
@@ -48,4 +49,6 @@ class VyperEvaluator(BaseEvaluator):
         return res
 
     def default_value(self, typ):
+        if isinstance(typ, IntegerT):
+            return 0
         return None

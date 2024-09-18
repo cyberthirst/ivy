@@ -203,11 +203,6 @@ class VyperInterpreter(BaseInterpreter):
     def msg(self):
         return self.execution_ctxs[-1].msg
 
-    def _init_vars(self, acc: Account, module: ModuleT):
-        decls = module.variable_decls
-        for d in decls:
-            self._new_variable(d)
-
     def _dispatch(self, function_name, *args):
         functions = self.execution_ctxs[-1].contract.ext_funs
 
@@ -286,12 +281,12 @@ class VyperInterpreter(BaseInterpreter):
             self.exec_ctx.constants,
         )
 
-    def get_variable(self, name: ast.Name):
+    def get_variable(self, name: str):
         for loc in self.var_locations:
-            if name.id in loc:
-                return self.fun_ctx[name.id].value
+            if name in loc:
+                return loc[name].value
         else:
-            raise KeyError(f"Variable {name.id} not found")
+            raise KeyError(f"Variable {name} not found")
 
     def _init_execution(self, acc: Account, msg: Message, module_t: ModuleT = None):
         self.execution_ctxs.append(ExecutionContext(acc, msg, module_t))
@@ -305,7 +300,7 @@ class VyperInterpreter(BaseInterpreter):
     def set_variable(self, name: str, value):
         for loc in self.var_locations:
             if name in loc:
-                self.fun_ctx[name].value = value
+                loc[name].value = value
                 break
         else:
             raise KeyError(f"Variable {name} not found")
@@ -354,10 +349,10 @@ class VyperInterpreter(BaseInterpreter):
             # TODO handle public variables
             id = target.target.id
             typ = target._metadata["type"]
-            defeault_value = self.evaluator.default_value(typ)
+            default_value = self.evaluator.default_value(typ)
             if target.is_immutable:
                 self.exec_ctx.immutables[id] = Variable(
-                    defeault_value, typ, DataLocation.CODE
+                    default_value, typ, DataLocation.CODE
                 )
             elif target.is_constant:
                 self.exec_ctx.contract.constants[id] = Variable(
@@ -365,11 +360,11 @@ class VyperInterpreter(BaseInterpreter):
                 )
             elif target.is_transient:
                 self.exec_ctx.transient[id] = Variable(
-                    defeault_value, typ, DataLocation.TRANSIENT
+                    default_value, typ, DataLocation.TRANSIENT
                 )
             else:  # storage
                 self.exec_ctx.storage[id] = Variable(
-                    defeault_value, typ, DataLocation.STORAGE
+                    default_value, typ, DataLocation.STORAGE
                 )
         else:
             raise RuntimeError(f"Cannot create variable for {type(target)}")

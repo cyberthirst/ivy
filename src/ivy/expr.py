@@ -27,7 +27,7 @@ class ExprVisitor(BaseVisitor):
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
             return self.interpreter.contract_address
-        return self.get_variable(node)
+        return self.get_variable(node.id)
 
     def visit_Attribute(self, node: ast.Attribute):
         if isinstance(node.value, ast.Name) and node.value.id == "self":

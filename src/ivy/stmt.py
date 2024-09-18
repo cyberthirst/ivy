@@ -26,9 +26,6 @@ class StmtVisitor(BaseVisitor):
     def visit_Pass(self, node: ast.Pass):
         return None
 
-    def visit_Name(self, node: ast.Name):
-        return self.get_variable(node)
-
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
         self._new_variable(node.target)

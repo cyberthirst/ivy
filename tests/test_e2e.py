@@ -86,3 +86,74 @@ def test_internal_call_with_args():
 
     c = loads(src)
     assert c.foo() == 6
+
+
+def test_storage_variables():
+    src = """
+d: uint256
+
+@external
+def foo() -> uint256:
+    a: uint256 = 1
+    self.d = a
+    if a == 1:
+        a = 2
+    else:
+        a = 3
+    return self.d + 42
+    """
+
+    c = loads(src)
+    assert c.foo() == 43
+
+
+def test_storage_variables2():
+    src = """
+d: uint256
+k: uint256
+
+@external
+def foo() -> uint256:
+    self.k = 1
+    self.d = self.k
+    self.d += self.k
+    return self.d + self.k
+    """
+
+    c = loads(src)
+    assert c.foo() == 3
+
+
+def test_tstorage_variables0():
+    src = """
+d: transient(uint256)
+k: transient(uint256)
+
+@external
+def foo() -> uint256:
+    self.k = 1
+    self.d = self.k
+    self.d += self.k
+    return self.d + self.k
+    """
+
+    c = loads(src)
+    assert c.foo() == 3
+
+
+def test_tstorage_variables2():
+    src = """
+d: uint256
+k: uint256
+
+@external
+def foo() -> uint256:
+    if self.k == 0:
+        self.k = 1
+    self.d = self.k
+    self.d += self.k
+    return self.d + self.k
+    """
+
+    c = loads(src)
+    assert c.foo() == 3

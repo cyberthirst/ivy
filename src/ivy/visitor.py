@@ -19,7 +19,7 @@ class BaseVisitor(ABC):
         pass
 
     @abstractmethod
-    def get_variable(self, name):
+    def get_variable(self, name: str):
         pass
 
     @abstractmethod
