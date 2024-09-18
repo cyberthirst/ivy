@@ -291,7 +291,7 @@ class VyperInterpreter(BaseInterpreter):
             if name.id in loc:
                 return self.fun_ctx[name.id].value
         else:
-            raise NotImplementedError(f"{name.id}'s location not yet supported")
+            raise KeyError(f"Variable {name.id} not found")
 
     def _init_execution(self, acc: Account, msg: Message, module_t: ModuleT = None):
         self.execution_ctxs.append(ExecutionContext(acc, msg, module_t))
@@ -308,7 +308,7 @@ class VyperInterpreter(BaseInterpreter):
                 self.fun_ctx[name].value = value
                 break
         else:
-            raise NotImplementedError(f"{name}'s location not yet supported")
+            raise KeyError(f"Variable {name} not found")
 
     def _assign_target(self, target, value):
         if isinstance(target, ast.Name):
@@ -325,25 +325,16 @@ class VyperInterpreter(BaseInterpreter):
             index = self.visit(target.slice)
             container[index] = value
         elif isinstance(target, ast.Attribute):
-            obj = self.visit(target.value)
-            setattr(obj, target.attr, value)
+            if isinstance(target.value, ast.Name) and target.value.id == "self":
+                try:
+                    self.set_variable(target.attr, value)
+                except KeyError:
+                    pass
+            else:
+                obj = self.visit(target.value)
+                setattr(obj, target.attr, value)
         else:
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")
-
-    def _get_target_value(self, target):
-        if isinstance(target, ast.Name):
-            return self.get_variable(target)
-        elif isinstance(target, ast.Subscript):
-            container = self.visit(target.value)
-            index = self.visit(target.slice)
-            return container[index]
-        elif isinstance(target, ast.Attribute):
-            obj = self.visit(target.value)
-            return getattr(obj, target.attr)
-        else:
-            raise NotImplementedError(
-                f"Getting value from {type(target)} not implemented"
-            )
 
     def _new_variable(self, target: Union[ast.Name, ast.VariableDecl, _FunctionArg]):
         if isinstance(target, ast.Name):
@@ -362,7 +353,7 @@ class VyperInterpreter(BaseInterpreter):
         elif isinstance(target, ast.VariableDecl):
             # TODO handle public variables
             id = target.target.id
-            typ = target.typ
+            typ = target._metadata["type"]
             defeault_value = self.evaluator.default_value(typ)
             if target.is_immutable:
                 self.exec_ctx.immutables[id] = Variable(

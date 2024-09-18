@@ -30,8 +30,17 @@ class ExprVisitor(BaseVisitor):
         return self.get_variable(node)
 
     def visit_Attribute(self, node: ast.Attribute):
-        obj = self.visit(node.value)
-        return getattr(obj, node.attr)
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            try:
+                return self.get_variable(node.attr)
+            except KeyError:
+                pass
+            raise NotImplementedError(
+                f"Getting value from {type(node)} not implemented"
+            )
+        else:
+            obj = self.visit(node.value)
+            return getattr(obj, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
         value = self.visit(node.value)

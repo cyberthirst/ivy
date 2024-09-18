@@ -89,7 +89,7 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
-        target_value = self._get_target_value(node.target)
+        target_value = self.visit(node.target)
         value = self.visit(node.value)
         new_value = self.evaluator.eval_binop(node, target_value, value)
         self._assign_target(node.target, new_value)
@@ -117,14 +117,6 @@ class StmtVisitor(BaseVisitor):
             ):
                 return result
         return None
-
-    @abstractmethod
-    def _assign_target(self, target, value):
-        pass
-
-    @abstractmethod
-    def _get_target_value(self, target):
-        pass
 
     @abstractmethod
     def _push_scope(self):

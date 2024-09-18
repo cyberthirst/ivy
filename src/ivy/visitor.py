@@ -21,3 +21,7 @@ class BaseVisitor(ABC):
     @abstractmethod
     def get_variable(self, name):
         pass
+
+    @abstractmethod
+    def _assign_target(self, target, value):
+        pass

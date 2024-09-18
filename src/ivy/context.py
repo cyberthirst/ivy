@@ -62,8 +62,6 @@ class ExecutionContext:
         self.returndata: bytes = b""
         self.msg = msg
 
-        # self.constants = contract.module.constants
-
     def push_fun_context(self, func_t: ContractFunctionT):
         self.function_contexts.append(FunctionContext(func_t))
 
