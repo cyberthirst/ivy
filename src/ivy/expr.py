@@ -70,7 +70,8 @@ class ExprVisitor(BaseVisitor):
     def visit_Call(self, node: ast.Call):
         # func = self.visit(node.func)
         args = [self.visit(arg) for arg in node.args]
-        return self.handle_call(node, args)
+        kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        return self.handle_call(node, args, kws)
 
     def visit_List(self, node: ast.List):
         return [self.visit(elem) for elem in node.elements]
@@ -93,7 +94,7 @@ class ExprVisitor(BaseVisitor):
         return self.handle_static_call(node)
 
     @abstractmethod
-    def handle_call(self, func, args):
+    def handle_call(self, func, args, kws):
         pass
 
     @abstractmethod

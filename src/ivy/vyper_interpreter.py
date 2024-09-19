@@ -384,7 +384,7 @@ class VyperInterpreter(BaseInterpreter):
         var = Variable(self.evaluator.default_value(typ), typ, DataLocation.MEMORY)
         self.exec_ctx.new_variable(node.id, var)
 
-    def handle_call(self, func: ast.Call, args):
+    def handle_call(self, func: ast.Call, args, kws):
         print(f"Handling function call to {func} with arguments {args}")
         func_t = func.func._metadata.get("type")
 
@@ -396,7 +396,7 @@ class VyperInterpreter(BaseInterpreter):
                 return self._execute_function(func_t, args)
             raise NotImplementedError(f"Function type {func_t} not supported")
         else:  # range()
-            return self.builtins[func.func.id](*args)
+            return self.builtins[func.func.id](*args, **kws)
 
     def handle_external_call(self, node):
         print(f"Handling external call with node {node}")

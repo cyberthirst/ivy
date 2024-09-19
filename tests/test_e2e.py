@@ -230,15 +230,13 @@ def foo() -> uint256:
     assert c.foo() == expected
 
 
-# TODO kwargs not yet supported
-@pytest.mark.xfail
 def test_range_builtin2():
     src = """
 a: uint256
 
 @external
 def foo() -> uint256:
-    k: uint256 = 10
+    k: uint256 = 5
     for i: uint256 in range(k, bound=5):
         self.a += i 
     return self.a
@@ -247,5 +245,42 @@ def foo() -> uint256:
     c = loads(src)
     expected = 0
     for i in range(5):
+        expected += i
+    assert c.foo() == expected
+
+
+def test_range_builtin3():
+    src = """
+a: uint256
+
+@external
+def foo() -> uint256:
+    for i: uint256 in range(1, 5):
+        self.a += i 
+    return self.a
+    """
+
+    c = loads(src)
+    expected = 0
+    for i in range(1, 5):
+        expected += i
+    assert c.foo() == expected
+
+
+def test_range_builtin4():
+    src = """
+a: uint256
+
+@external
+def foo() -> uint256:
+    k: uint256 = 1
+    for i: uint256 in range(k, 5, bound=4):
+        self.a += i 
+    return self.a
+    """
+
+    c = loads(src)
+    expected = 0
+    for i in range(1, 5):
         expected += i
     assert c.foo() == expected

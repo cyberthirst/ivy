@@ -1,25 +1,16 @@
-def builtin_range(start_or_stop, stop=None, step=None, bound=None):
-    if stop is None:
-        start, stop = 0, start_or_stop
+def builtin_range(*args, bound=None):
+    if len(args) == 2:
+        start, stop = args
     else:
-        start = start_or_stop
+        start, stop = 0, args[0]
 
-    if step is None:
-        step = 1
+    if bound:
+        if stop > bound and len(args) == 1:
+            raise RuntimeError(f"Stop value is greater than bound={bound} value")
+        if stop - start > bound:
+            raise RuntimeError(f"Range is greater than bound={bound} value")
 
-    if bound is not None:
-        stop = min(stop, bound)
-
-    # Ensure all arguments are integers
-    # start, stop, step = int(start), int(stop), int(step)
-
-    # Runtime checks
-    if stop <= start:
-        raise ValueError("STOP must be greater than START")
-    if step <= 0:
-        raise ValueError("Step must be positive")
-
-    return range(start, stop, step)
+    return range(start, stop)
 
 
 def builtin_len(x):
