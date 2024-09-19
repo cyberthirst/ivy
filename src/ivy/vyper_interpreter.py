@@ -1,5 +1,6 @@
 from typing import Any, Optional, Union
 from abc import abstractmethod
+import inspect
 
 import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
@@ -17,6 +18,7 @@ from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
+import ivy.builtins as vyper_builtins
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -177,8 +179,15 @@ class VyperInterpreter(BaseInterpreter):
         self.returndata = None
         self.evaluator = VyperEvaluator()
         self.execution_ctxs = []
-        self.builtin_funcs = {}
+        self.builtins = {}
+        self._collect_builtins()
         self.env = None
+
+    def _collect_builtins(self):
+        for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
+            if name.startswith("builtin_"):
+                builtin_name = name[8:]  # Remove 'builtin_' prefix
+                self.builtins[builtin_name] = func
 
     @property
     def deployer(self):
@@ -376,17 +385,18 @@ class VyperInterpreter(BaseInterpreter):
         self.exec_ctx.new_variable(node.id, var)
 
     def handle_call(self, func: ast.Call, args):
-        func_t = func.func._metadata["type"]
-
         print(f"Handling function call to {func} with arguments {args}")
+        func_t = func.func._metadata.get("type")
 
-        if isinstance(func_t, BuiltinFunctionT):
-            return self.builtin_funcs[func_t.name](*args)
-        elif isinstance(func_t, ContractFunctionT):
-            assert func_t.is_internal
-            return self._execute_function(func_t, args)
-        else:
+        if func_t is not None:
+            if isinstance(func_t, BuiltinFunctionT):
+                return self.builtins[func_t._id](*args)
+            elif isinstance(func_t, ContractFunctionT):
+                assert func_t.is_internal
+                return self._execute_function(func_t, args)
             raise NotImplementedError(f"Function type {func_t} not supported")
+        else:  # range()
+            return self.builtins[func.func.id](*args)
 
     def handle_external_call(self, node):
         print(f"Handling external call with node {node}")

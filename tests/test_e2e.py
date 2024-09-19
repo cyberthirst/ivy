@@ -1,3 +1,5 @@
+import pytest
+
 from ivy.loader import loads
 
 
@@ -124,6 +126,30 @@ def foo() -> uint256:
     assert c.foo() == 3
 
 
+def test_storage_variables3():
+    src = """
+d: uint256
+
+@internal
+def bar():
+    a: DynArray[uint256, 10] = [1, 2, 3]
+    for i: uint256 in a:
+        self.d += i
+
+
+@external
+def foo() -> uint256:
+    a: DynArray[uint256, 10] = [1, 2, 3]
+    counter: uint256 = 0
+    for i: uint256 in a:
+        self.d += i
+    self.bar()
+    return self.d
+    """
+    c = loads(src)
+    assert c.foo() == 12
+
+
 def test_tstorage_variables0():
     src = """
 d: transient(uint256)
@@ -143,8 +169,8 @@ def foo() -> uint256:
 
 def test_tstorage_variables2():
     src = """
-d: uint256
-k: uint256
+d: transient(uint256)
+k: transient(uint256)
 
 @external
 def foo() -> uint256:
@@ -157,3 +183,69 @@ def foo() -> uint256:
 
     c = loads(src)
     assert c.foo() == 3
+
+
+def test_default_storage_values():
+    src = """
+struct S:
+    a: uint256 
+    
+a: uint256
+b: uint256
+c: DynArray[uint256, 10]
+#d: S
+e: Bytes[10]
+f: String[10]
+
+@external
+def foo() -> uint256:
+    assert self.a == 0
+    assert self.b == 0
+    assert len(self.c) == 0
+    #assert self.d.a == 0
+    assert len(self.e) == 0
+    assert len(self.f) == 0
+    return 1
+    """
+
+    c = loads(src)
+    assert c.foo() == 1
+
+
+def test_range_builtin():
+    src = """
+a: uint256
+
+@external
+def foo() -> uint256:
+    for i: uint256 in range(10):
+        self.a += i 
+    return self.a
+    """
+
+    c = loads(src)
+    expected = 0
+    for i in range(10):
+        expected += i
+    assert c.foo() == expected
+
+
+# TODO kwargs not yet supported
+@pytest.mark.xfail
+def test_range_builtin2():
+    src = """
+a: uint256
+
+@external
+def foo() -> uint256:
+    k: uint256 = 10
+    for i: uint256 in range(k, bound=5):
+        self.a += i 
+    return self.a
+    """
+
+    c = loads(src)
+    expected = 0
+    for i in range(5):
+        expected += i
+    assert c.foo() == expected

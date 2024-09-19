@@ -3,6 +3,9 @@ from typing import Any
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types.primitives import IntegerT
+from vyper.semantics.types.subscriptable import _SequenceT
+from vyper.semantics.types.bytestrings import BytesT, StringT
+from vyper.semantics.types.user import StructT
 
 
 class BaseEvaluator(ABC):
@@ -48,7 +51,16 @@ class VyperEvaluator(BaseEvaluator):
         res = eval(left, right)
         return res
 
+    # rewrite to smth like dict for const-time dispatch
     def default_value(self, typ):
         if isinstance(typ, IntegerT):
             return 0
+        if isinstance(typ, _SequenceT):
+            return []
+        if isinstance(typ, BytesT):
+            return b""
+        if isinstance(typ, StringT):
+            return ""
+        if isinstance(typ, StructT):
+            pass
         return None
