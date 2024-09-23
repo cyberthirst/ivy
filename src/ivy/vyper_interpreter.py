@@ -278,6 +278,7 @@ class VyperInterpreter(BaseInterpreter):
         self._execute_function(func_t, *args)
 
     def _return(self):
+        # TODO encode based on return type
         return abi_encode("(int256)", (self.returndata,))
 
     @property
@@ -384,28 +385,52 @@ class VyperInterpreter(BaseInterpreter):
         var = Variable(self.evaluator.default_value(typ), typ, DataLocation.MEMORY)
         self.exec_ctx.new_variable(node.id, var)
 
-    def handle_call(self, func: ast.Call, args, kws):
+    def handle_call(
+        self,
+        func: ast.Call,
+        args,
+        kws,
+        is_external: Optional[bool] = False,
+        is_static: Optional[bool] = False,
+    ):
         print(f"Handling function call to {func} with arguments {args}")
         func_t = func.func._metadata.get("type")
 
         if func_t is not None:
             if isinstance(func_t, BuiltinFunctionT):
                 return self.builtins[func_t._id](*args)
-            elif isinstance(func_t, ContractFunctionT):
+
+            elif is_external:
+                assert func_t.is_external
+                assert isinstance(func_t, ContractFunctionT)
+                return self.handle_external_call(func, args, kws, is_static)
+
+            else:
                 assert func_t.is_internal
                 return self._execute_function(func_t, args)
-            raise NotImplementedError(f"Function type {func_t} not supported")
-        else:  # range()
+        else:  # TODO feels like a kludge, should we handle `range()` elsewhere?
             return self.builtins[func.func.id](*args, **kws)
 
-    def handle_external_call(self, node):
-        print(f"Handling external call with node {node}")
-        return None
+    def handle_external_call(self, node, args, kws, is_static: Optional[bool] = False):
+        # TODO return the decoded returndata
+        call_node = node.value
+        assert isinstance(call_node, ast.Call)
 
-    def handle_static_call(self, node):
-        print(f"Handling static call with node {node}")
-        return None
+        func_t = call_node.func._metadata["type"]
+
+        # return external_call.ir_for_external_call(call_node, context)
 
     def handle_unaryop(self, op, operand):
         print(f"Handling unary operation: {op} on operand {operand}")
         return None
+
+    def generic_call(
+        value: int,
+        caller: Address,
+        to: Address,
+        code_address: Address,
+        is_staticcall: bool,
+    ) -> None:
+        # TODO create the message
+        # TODO execute the call
+        pass

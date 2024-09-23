@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from typing import Optional
 
 from vyper.ast import nodes as ast
 
@@ -67,12 +68,6 @@ class ExprVisitor(BaseVisitor):
         op = node.op.__class__.__name__
         return self.evaluator.eval_unaryop(op, operand)
 
-    def visit_Call(self, node: ast.Call):
-        # func = self.visit(node.func)
-        args = [self.visit(arg) for arg in node.args]
-        kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-        return self.handle_call(node, args, kws)
-
     def visit_List(self, node: ast.List):
         return [self.visit(elem) for elem in node.elements]
 
@@ -86,21 +81,33 @@ class ExprVisitor(BaseVisitor):
         else:
             return self.visit(node.orelse)
 
-    # Additional methods for handling external calls, static calls, etc.
     def visit_ExtCall(self, node: ast.ExtCall):
-        return self.handle_external_call(node)
+        return self._visit_generic_call(node.value, is_external=True, is_static=False)
 
     def visit_StaticCall(self, node: ast.StaticCall):
-        return self.handle_static_call(node)
+        return self._visit_generic_call(node.value, is_external=True, is_static=True)
+
+    def visit_Call(self, node: ast.Call):
+        return self._visit_generic_call(node)
+
+    def _visit_generic_call(
+        self,
+        node,
+        is_external: Optional[bool] = False,
+        is_static: Optional[bool] = False,
+    ):
+        assert isinstance(node, ast.Call)
+        args = [self.visit(arg) for arg in node.args]
+        kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        return self.handle_call(node, args, kws, is_external, is_static)
 
     @abstractmethod
-    def handle_call(self, func, args, kws):
-        pass
-
-    @abstractmethod
-    def handle_external_call(self, node):
-        pass
-
-    @abstractmethod
-    def handle_static_call(self, node):
+    def handle_call(
+        self,
+        func,
+        args,
+        kws,
+        is_external: Optional[bool] = False,
+        is_static: Optional[bool] = False,
+    ):
         pass
