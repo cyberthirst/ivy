@@ -8,6 +8,7 @@ from vyper.semantics.types.function import ContractFunctionT, _FunctionArg
 from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
 
+from ivy.utils import compute_args_abi_type
 from titanoboa.boa.util.abi import Address, abi_encode
 
 import eth.constants as constants
@@ -19,6 +20,7 @@ from ivy.stmt import StmtVisitor, ReturnException
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
+from ivy.utils import compute_args_abi_type
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -411,18 +413,11 @@ class VyperInterpreter(BaseInterpreter):
         else:  # TODO feels like a kludge, should we handle `range()` elsewhere?
             return self.builtins[func.func.id](*args, **kws)
 
-    def handle_external_call(self, node, args, kws, is_static: Optional[bool] = False):
-        # TODO return the decoded returndata
-        call_node = node.value
-        assert isinstance(call_node, ast.Call)
-
-        func_t = call_node.func._metadata["type"]
-
-        # return external_call.ir_for_external_call(call_node, context)
-
-    def handle_unaryop(self, op, operand):
-        print(f"Handling unary operation: {op} on operand {operand}")
-        return None
+    def handle_external_call(
+        self, func_t: ContractFunctionT, args, kws, is_static: Optional[bool] = False
+    ):
+        _method_id, args_abi_type = compute_args_abi_type(func_t, len(args))
+        data = abi_encode(args_abi_type, args)
 
     def generic_call(
         value: int,

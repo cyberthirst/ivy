@@ -11,6 +11,7 @@ from vyper.utils import method_id
 from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 
 from ivy.env import Env
+from ivy.utils import compute_args_abi_type
 
 
 class BaseDeployer(ABC):
@@ -132,23 +133,16 @@ class VyperFunction:
     def func_t(self):
         return self.fn_ast._metadata["func_type"]
 
-    # hotspot, cache the signature computation
     def args_abi_type(self, num_kwargs):
+        # hotspot, cache the signature computation
         if not hasattr(self, "_signature_cache"):
             self._signature_cache = {}
 
         if num_kwargs in self._signature_cache:
             return self._signature_cache[num_kwargs]
 
-        # align the kwargs with the signature
-        sig_kwargs = self.func_t.keyword_args[:num_kwargs]
-        sig_args = self.func_t.positional_args + sig_kwargs
-        args_abi_type = (
-            "(" + ",".join(arg.typ.abi_type.selector_name() for arg in sig_args) + ")"
-        )
-        abi_sig = self.func_t.name + args_abi_type
+        _method_id, args_abi_type = compute_args_abi_type(self.func_t, num_kwargs)
 
-        _method_id = method_id(abi_sig)
         self._signature_cache[num_kwargs] = (_method_id, args_abi_type)
 
         return _method_id, args_abi_type
