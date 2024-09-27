@@ -13,12 +13,12 @@ from vyper.compiler.settings import Settings
 
 from titanoboa.boa.contracts.vvm.vvm_contract import _detect_version
 
-from ivy.vyper_contract import VyperDeployer, VyperContract
-from ivy.env import Env
+from ivy.frontend.vyper_contract import VyperDeployer, VyperContract
+from ivy.frontend.env import Env
 
 
 if TYPE_CHECKING:
-    from vyper.semantics.analysis.base import ImportInfo
+    pass
 
 _Contract = Union[VyperContract]
 

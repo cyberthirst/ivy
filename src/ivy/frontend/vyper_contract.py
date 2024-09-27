@@ -6,11 +6,10 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
-from vyper.utils import method_id
 
 from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 
-from ivy.env import Env
+from ivy.frontend.env import Env
 from ivy.utils import compute_args_abi_type
 
 
@@ -179,11 +178,9 @@ class VyperFunction:
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
 
         res = self.env.execute_code(
-            self.func_t.name,
-            *args,
             to_address=self.contract._address,
             sender=sender,
-            raw_args=calldata_bytes,
+            calldata=calldata_bytes,
             value=value,
             is_modifying=self.func_t.is_mutable,
         )

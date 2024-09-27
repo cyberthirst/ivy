@@ -1,6 +1,6 @@
 import sys
 
-import ivy.loader as itp
+import ivy.frontend.loader as itp
 
 
 def main():

@@ -7,8 +7,8 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import ContractFunctionT, _FunctionArg
 from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
+from vyper.codegen.core import calculate_type_for_external_return
 
-from ivy.utils import compute_args_abi_type
 from titanoboa.boa.util.abi import Address, abi_encode
 
 import eth.constants as constants
@@ -21,6 +21,7 @@ from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_args_abi_type
+from ivy.abi import abi_decode
 
 
 class BaseInterpreter(ExprVisitor, StmtVisitor):
@@ -39,7 +40,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
-    def _extcall(self, func_name: str, raw_args: Optional[bytes], *args: Any):
+    def _extcall(self):
         pass
 
     @abstractmethod
@@ -124,21 +125,14 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
         self.state[target_address].contract_data = contract
 
-        print("deployed contract!")
-
     def execute_code(
         self,
         sender: Address,
         to: Address,
         value: int,
-        code: ContractFunctionT,
-        func_name: str,
-        *args: Any,
-        raw_args: Optional[bytes],
+        calldata: bytes,
         is_static: bool = False,
     ):
-        print("executing code!")
-
         self.env = Environment(
             caller=sender,
             block_hashes=[],
@@ -150,12 +144,14 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
+        code = self.get_code(to)
+
         msg = Message(
             caller=sender,
             to=to,
             create_address=to,
             value=value,
-            data=args,
+            data=calldata,
             code_address=to,
             code=code,
             depth=0,
@@ -165,7 +161,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         self._init_execution(self.state[to], msg)
 
         # TODO return value from this call
-        self._extcall(func_name, raw_args, args)
+        self._extcall()
 
         # return abi_encode("(int256)", (42,))
         return self._return()
@@ -193,7 +189,7 @@ class VyperInterpreter(BaseInterpreter):
 
     @property
     def deployer(self):
-        from ivy.vyper_contract import VyperDeployer
+        from ivy.frontend.vyper_contract import VyperDeployer
 
         return VyperDeployer
 
@@ -214,17 +210,17 @@ class VyperInterpreter(BaseInterpreter):
     def msg(self):
         return self.execution_ctxs[-1].msg
 
-    def _dispatch(self, function_name, *args):
-        functions = self.execution_ctxs[-1].contract.ext_funs
+    def _dispatch(self, selector):
+        entry_points = self.exec_ctx.contract.entry_points
 
-        if function_name not in functions:
+        if selector not in entry_points:
             # TODO check fallback
-            # TODO rollback the evm journal
-            raise Exception(f"function {function_name} not found")
+            # TODO rollback the journal
+            raise Exception(f"function {selector} not found")
         else:
-            function = functions[function_name]
+            entry_point = entry_points[selector]
 
-        if function.is_payable:
+        if entry_point.function.is_payable:
             if self.msg.value != 0:
                 # TODO raise and rollback
                 pass
@@ -233,7 +229,7 @@ class VyperInterpreter(BaseInterpreter):
 
         # check decorators
 
-        return function
+        return entry_point
 
     def _prologue(self, func_t, args):
         self._push_fun_ctx(func_t)
@@ -269,19 +265,37 @@ class VyperInterpreter(BaseInterpreter):
 
         return self.returndata
 
-    def _extcall(self, func_name: str, raw_args: Optional[bytes], *args: Any):
-        if raw_args:
-            # TODO decode args and continue as normal
-            # args = abi_decode(raw_args, schema based on func_name)
+    def _extcall(self):
+        if len(self.msg.data) < 4:
+            # TODO goto fallback or revert
             pass
 
-        func_t = self._dispatch(func_name, args)
+        selector = self.msg.data[:4]
+        entry_point = self._dispatch(selector)
 
-        self._execute_function(func_t, *args)
+        if entry_point.calldata_min_size > len(self.msg.data):
+            raise BufferError(
+                f"Provided calldata is too small, minsize is {entry_point.calldata_min_size}"
+            )
+
+        func_t = entry_point.function
+        args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
+
+        self.exec_ctx.function = func_t
+
+        self._execute_function(func_t, args)
 
     def _return(self):
-        # TODO encode based on return type
-        return abi_encode("(int256)", (self.returndata,))
+        typ = self.exec_ctx.function.return_type
+        typ = calculate_type_for_external_return(typ)
+        typ = typ.abi_type.selector_name()
+        returndata = (
+            self.returndata
+            if isinstance(self.returndata, tuple) and len(self.returndata) > 1
+            else (self.returndata,)
+        )
+        # TODO use custom abi encoder
+        return abi_encode(typ, returndata)
 
     @property
     def var_locations(self):
@@ -402,8 +416,8 @@ class VyperInterpreter(BaseInterpreter):
             if isinstance(func_t, BuiltinFunctionT):
                 return self.builtins[func_t._id](*args)
 
-            elif is_external:
-                assert func_t.is_external
+            elif func_t.is_external:
+                assert is_external
                 assert isinstance(func_t, ContractFunctionT)
                 return self.handle_external_call(func, args, kws, is_static)
 

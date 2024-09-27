@@ -83,19 +83,15 @@ class Env:
 
     def execute_code(
         self,
-        func_name: str,
-        *args: Any,
         to_address: _AddressType = constants.ZERO_ADDRESS,
         sender: Optional[_AddressType] = None,
         value: int = 0,
-        raw_args: bytes = b"",
+        calldata: bytes = b"",
         is_modifying: bool = True,
     ) -> Any:
         sender = self._get_sender(sender)
 
         to = Address(to_address)
-
-        code = self.interpreter.get_code(to)
 
         is_static = not is_modifying
 
@@ -103,10 +99,7 @@ class Env:
             sender,
             to,
             value,
-            code,
-            func_name,
-            *args,
-            raw_args=raw_args,
+            calldata=calldata,
             is_static=is_static,
         )
 

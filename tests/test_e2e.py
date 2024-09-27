@@ -1,6 +1,4 @@
-import pytest
-
-from ivy.loader import loads
+from ivy.frontend.loader import loads
 
 
 def test_if_control_flow():
@@ -284,3 +282,83 @@ def foo() -> uint256:
     for i in range(1, 5):
         expected += i
     assert c.foo() == expected
+
+
+def test_len_builtin():
+    src = """
+@external
+def foo() -> uint256:
+    a: DynArray[uint256, 3] = [1, 2, 3]
+    return len(a)
+    """
+    c = loads(src)
+    assert c.foo() == 3
+
+
+def test_len_builtin2():
+    src = """
+d: DynArray[uint256, 3]
+@external
+def foo() -> uint256:
+    return len(self.d)
+    """
+    c = loads(src)
+    assert c.foo() == 0
+
+
+def test_len_builtin3():
+    src = """
+s: String[10]
+@external
+def foo() -> uint256:
+    self.s = "hello"
+    return len(self.s)
+    """
+    c = loads(src)
+    assert c.foo() == 5
+
+
+def test_len_builtin4():
+    src = """
+s: Bytes[10]
+@external
+def foo() -> uint256:
+    self.s = b"hello"
+    return len(self.s)
+    """
+    c = loads(src)
+    assert c.foo() == 5
+
+
+def test_return_abi_encode():
+    src = """
+@external
+def foo() -> String[32]:
+    return "hello"
+    """
+
+    c = loads(src)
+    assert c.foo() == "hello"
+
+
+def test_return_abi_encode2():
+    src = """
+@external
+def foo() -> DynArray[uint256, 3]:
+    a: DynArray[uint256, 3] = [1, 2, 3]
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo() == [1, 2, 3]
+
+
+def test_return_abi_encode3():
+    src = """
+@external
+def foo() -> (uint256, uint256):
+    return 666, 666
+    """
+
+    c = loads(src)
+    assert c.foo() == (666, 666)

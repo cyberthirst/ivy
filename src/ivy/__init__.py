@@ -1,4 +1,4 @@
-from ivy.env import Env
+from ivy.frontend.env import Env
 
 
 env = Env.get_singleton()

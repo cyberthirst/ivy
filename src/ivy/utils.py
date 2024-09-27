@@ -1,4 +1,5 @@
 from vyper.utils import method_id
+from vyper.semantics.types.function import KeywordArg
 
 
 def compute_args_abi_type(func_t, num_kwargs):
@@ -11,3 +12,13 @@ def compute_args_abi_type(func_t, num_kwargs):
 
     _method_id = method_id(abi_sig)
     return (_method_id, args_abi_type)
+
+
+def abi_signature_for_kwargs(self, kwargs: list[KeywordArg]) -> str:
+    args = self.positional_args + kwargs  # type: ignore
+    return (
+        self.name
+        + "("
+        + ",".join([arg.typ.abi_type.selector_name() for arg in args])
+        + ")"
+    )
