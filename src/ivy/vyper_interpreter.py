@@ -56,11 +56,9 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         pass
 
     @abstractmethod
-    def _return(self):
-        pass
-
-    @abstractmethod
-    def _init_execution(self, acc: Account, msg: Message, module: ModuleT = None):
+    def _init_execution(
+        self, acc: Account, msg: Message, sender, module: ModuleT = None
+    ):
         pass
 
     @property
@@ -112,7 +110,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             is_static=False,
         )
 
-        self._init_execution(self.state[target_address], msg, module_t)
+        self._init_execution(self.state[target_address], msg, sender, module_t)
 
         if module_t.init_function is not None:
             constructor = module_t.init_function
@@ -129,21 +127,11 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
         self,
         sender: Address,
         to: Address,
+        code_address: Address,
         value: int,
         calldata: bytes,
         is_static: bool = False,
     ):
-        self.env = Environment(
-            caller=sender,
-            block_hashes=[],
-            origin=sender,
-            coinbase=sender,
-            number=0,
-            time=0,
-            prev_randao=b"",
-            chain_id=0,
-        )
-
         code = self.get_code(to)
 
         msg = Message(
@@ -152,19 +140,22 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             create_address=to,
             value=value,
             data=calldata,
-            code_address=to,
+            code_address=code_address,
             code=code,
             depth=0,
             is_static=is_static,
         )
 
-        self._init_execution(self.state[to], msg)
+        self._init_execution(self.state[to], msg, sender)
 
-        # TODO return value from this call
         self._extcall()
 
-        # return abi_encode("(int256)", (42,))
-        return self._return()
+        # return the value to the frontend, otherwise just incorporate
+        # the return value into the parent evm
+        if self.exec_ctx.msg.depth == 0:
+            return self.exec_ctx.output
+        else:
+            self.execution_ctxs[-2].returndata = self.exec_ctx.output
 
 
 class VyperInterpreter(BaseInterpreter):
@@ -209,6 +200,10 @@ class VyperInterpreter(BaseInterpreter):
     @property
     def msg(self):
         return self.execution_ctxs[-1].msg
+
+    @property
+    def current_address(self):
+        return self.exec_ctx.msg.to
 
     def _dispatch(self, selector):
         entry_points = self.exec_ctx.contract.entry_points
@@ -255,7 +250,7 @@ class VyperInterpreter(BaseInterpreter):
                 self.visit(stmt)
             except ReturnException as e:
                 # TODO handle the return value
-                self.returndata = e.value
+                self.exec_ctx.output = e.value
                 break
 
     def _execute_function(self, func_t, args):
@@ -263,7 +258,7 @@ class VyperInterpreter(BaseInterpreter):
         self._exec_body()
         self._epilogue()
 
-        return self.returndata
+        return self.exec_ctx.output
 
     def _extcall(self):
         if len(self.msg.data) < 4:
@@ -275,7 +270,7 @@ class VyperInterpreter(BaseInterpreter):
 
         if entry_point.calldata_min_size > len(self.msg.data):
             raise BufferError(
-                f"Provided calldata is too small, minsize is {entry_point.calldata_min_size}"
+                f"Provided calldata is too small, min_size is {entry_point.calldata_min_size}"
             )
 
         func_t = entry_point.function
@@ -285,17 +280,13 @@ class VyperInterpreter(BaseInterpreter):
 
         self._execute_function(func_t, args)
 
-    def _return(self):
+        # abi-encode output
         typ = self.exec_ctx.function.return_type
         typ = calculate_type_for_external_return(typ)
         typ = typ.abi_type.selector_name()
-        returndata = (
-            self.returndata
-            if isinstance(self.returndata, tuple) and len(self.returndata) > 1
-            else (self.returndata,)
-        )
-        # TODO use custom abi encoder
-        return abi_encode(typ, returndata)
+        output = self.exec_ctx.output
+        output = output if isinstance(output, tuple) and len(output) > 1 else (output,)
+        self.exec_ctx.output = abi_encode(typ, output)
 
     @property
     def var_locations(self):
@@ -314,7 +305,21 @@ class VyperInterpreter(BaseInterpreter):
         else:
             raise KeyError(f"Variable {name} not found")
 
-    def _init_execution(self, acc: Account, msg: Message, module_t: ModuleT = None):
+    def _init_execution(
+        self, acc: Account, msg: Message, sender, module_t: ModuleT = None
+    ):
+        if not self.env:
+            self.env = Environment(
+                caller=sender,
+                block_hashes=[],
+                origin=sender,
+                coinbase=sender,
+                number=0,
+                time=0,
+                prev_randao=b"",
+                chain_id=0,
+            )
+
         self.execution_ctxs.append(ExecutionContext(acc, msg, module_t))
 
         # intialize variables to default values
@@ -406,8 +411,8 @@ class VyperInterpreter(BaseInterpreter):
         func: ast.Call,
         args,
         kws,
-        is_external: Optional[bool] = False,
-        is_static: Optional[bool] = False,
+        target: Optional[Address] = None,
+        is_static: Optional[bool] = None,
     ):
         print(f"Handling function call to {func} with arguments {args}")
         func_t = func.func._metadata.get("type")
@@ -417,21 +422,36 @@ class VyperInterpreter(BaseInterpreter):
                 return self.builtins[func_t._id](*args)
 
             elif func_t.is_external:
-                assert is_external
+                assert target is not None
                 assert isinstance(func_t, ContractFunctionT)
-                return self.handle_external_call(func, args, kws, is_static)
+                return self.handle_external_call(func_t, args, kws, is_static, target)
 
             else:
                 assert func_t.is_internal
                 return self._execute_function(func_t, args)
-        else:  # TODO feels like a kludge, should we handle `range()` elsewhere?
+        else:  # TODO feels like a kludge, should we handle `range()` elsewh/ere?
             return self.builtins[func.func.id](*args, **kws)
 
+    # TODO add support for delegatecall
     def handle_external_call(
-        self, func_t: ContractFunctionT, args, kws, is_static: Optional[bool] = False
+        self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address
     ):
-        _method_id, args_abi_type = compute_args_abi_type(func_t, len(args))
-        data = abi_encode(args_abi_type, args)
+        num_kwargs = len(args) - func_t.n_positional_args
+        _method_id, args_abi_type = compute_args_abi_type(func_t, num_kwargs)
+        data = _method_id
+        # TODO use custom abi encoder
+        data += abi_encode(args_abi_type, args)
+
+        self.execute_code(
+            self.msg.to, target, target, kwargs.get("value", 0), data, is_static
+        )
+
+        if len(self.returndata) == 0:
+            if "default_return_value" in kwargs:
+                return kwargs["default_return_value"]
+        else:
+            # TODO decode the return value and return it
+            pass
 
     def generic_call(
         value: int,

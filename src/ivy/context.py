@@ -60,6 +60,7 @@ class ExecutionContext:
         self.immutables = self.contract.immutables
         self.constants = self.contract.constants
         self.returndata: bytes = b""
+        self.output: bytes = b""
         self.msg = msg
 
     def push_fun_context(self, func_t: ContractFunctionT):

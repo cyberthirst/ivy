@@ -4,6 +4,7 @@ from typing import Optional
 from vyper.ast import nodes as ast
 
 from ivy.visitor import BaseVisitor
+from titanoboa.boa.util.abi import Address
 
 
 class ExprVisitor(BaseVisitor):
@@ -27,7 +28,7 @@ class ExprVisitor(BaseVisitor):
 
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
-            return self.interpreter.contract_address
+            return self.current_address
         return self.get_variable(node.id)
 
     def visit_Attribute(self, node: ast.Attribute):
@@ -82,10 +83,15 @@ class ExprVisitor(BaseVisitor):
             return self.visit(node.orelse)
 
     def visit_ExtCall(self, node: ast.ExtCall):
-        return self._visit_generic_call(node.value, is_external=True, is_static=False)
+        return self._visit_external_call(node, is_static=False)
 
     def visit_StaticCall(self, node: ast.StaticCall):
-        return self._visit_generic_call(node.value, is_external=True, is_static=True)
+        return self._visit_external_call(node, is_static=True)
+
+    def _visit_external_call(self, node, is_static: bool):
+        # TODO properly handle target - currently we only support Interface(expr).method()
+        target = self.visit(node.value.func.value.args[0])
+        return self._visit_generic_call(node.value, target=target, is_static=is_static)
 
     def visit_Call(self, node: ast.Call):
         return self._visit_generic_call(node)
@@ -93,13 +99,13 @@ class ExprVisitor(BaseVisitor):
     def _visit_generic_call(
         self,
         node,
-        is_external: Optional[bool] = False,
-        is_static: Optional[bool] = False,
+        target: Optional[Address] = None,
+        is_static: Optional[bool] = None,
     ):
         assert isinstance(node, ast.Call)
         args = [self.visit(arg) for arg in node.args]
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-        return self.handle_call(node, args, kws, is_external, is_static)
+        return self.handle_call(node, args, kws, target, is_static)
 
     @abstractmethod
     def handle_call(
@@ -107,7 +113,12 @@ class ExprVisitor(BaseVisitor):
         func,
         args,
         kws,
-        is_external: Optional[bool] = False,
-        is_static: Optional[bool] = False,
+        target: Optional[Address] = None,
+        is_static: Optional[bool] = None,
     ):
+        pass
+
+    @property
+    @abstractmethod
+    def current_address(self):
         pass

@@ -22,3 +22,13 @@ def abi_signature_for_kwargs(self, kwargs: list[KeywordArg]) -> str:
         + ",".join([arg.typ.abi_type.selector_name() for arg in args])
         + ")"
     )
+
+
+def needs_external_call_wrap(typ):
+    return not (isinstance(typ, tuple) and len(typ) > 1)
+
+
+def calculate_type_for_external_return(typ):
+    if needs_external_call_wrap(typ):
+        return tuple([typ])
+    return typ

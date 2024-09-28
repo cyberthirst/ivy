@@ -96,9 +96,10 @@ class Env:
         is_static = not is_modifying
 
         ret = self.interpreter.execute_code(
-            sender,
-            to,
-            value,
+            sender=sender,
+            to=to,
+            code_address=to,
+            value=value,
             calldata=calldata,
             is_static=is_static,
         )
