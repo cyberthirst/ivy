@@ -1,4 +1,5 @@
-from typing import Any, Optional, Union
+from dbm import error
+from typing import Any, Optional, Union, Tuple
 import inspect
 
 import vyper.ast.nodes as ast
@@ -18,6 +19,10 @@ from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_args_abi_type
 from ivy.abi import abi_decode
+
+
+class EVMException(Exception):
+    pass
 
 
 class VyperInterpreter(BaseInterpreter):
@@ -66,6 +71,83 @@ class VyperInterpreter(BaseInterpreter):
     @property
     def current_address(self):
         return self.exec_ctx.msg.to
+
+    def process_message(
+        self, message: Message, env: Environment
+    ) -> Tuple[Optional[bytes], Optional[Exception]]:
+        account = self.state.get(message.to, Account(0, 0, {}, {}, None))
+        exec_ctx = ExecutionContext(
+            account,
+            message,
+            account.contract_data.module if account.contract_data else None,
+        )
+        self.execution_ctxs.append(exec_ctx)
+
+        output = None
+        error = None
+
+        try:
+            if message.value > 0:
+                if self.state[message.caller].balance < message.value:
+                    raise EVMException("Insufficient balance for transfer")
+                self.state[message.caller].balance -= message.value
+                self.state[message.to].balance += message.value
+
+            if message.code:
+                self._extcall()
+
+            output = self.exec_ctx.output
+
+        except Exception as e:
+            # TODO rollback the journal
+            error = e
+
+        finally:
+            self.execution_ctxs.pop()
+
+        return output, error
+
+    def process_create_message(
+        self, message: Message, env: Environment
+    ) -> Optional[Exception]:
+        if message.create_address in self.state:
+            raise EVMException("Address already taken")
+
+        new_account = Account(0, message.value, {}, {}, None)
+        self.state[message.create_address] = new_account
+
+        module_t = message.code._metadata["type"]
+        assert isinstance(module_t, ModuleT)
+        new_account.contract_data = ContractData(module_t)
+        exec_ctx = ExecutionContext(new_account, message, module_t)
+        self.execution_ctxs.append(exec_ctx)
+
+        error = None
+
+        try:
+            if message.value > 0:
+                if self.state[message.caller].balance < message.value:
+                    raise EVMException("Insufficient balance for contract creation")
+                self.state[message.caller].balance -= message.value
+
+            for decl in module_t.variable_decls:
+                self._new_variable(decl)
+
+            if module_t.init_function is not None:
+                self._execute_function(module_t.init_function, message.data)
+
+        except Exception as error:
+            # TODO rollback the journal
+            self.exec_ctx.error = error
+            del self.state[message.create_address]
+
+        finally:
+            self.execution_ctxs.pop()
+
+        return error
+
+    def get_code(self, address):
+        return self.state[address].contract_data.module
 
     def _dispatch(self, selector):
         entry_points = self.exec_ctx.contract.entry_points
@@ -166,29 +248,6 @@ class VyperInterpreter(BaseInterpreter):
                 return loc[name].value
         else:
             raise KeyError(f"Variable {name} not found")
-
-    def _init_execution(
-        self, acc: Account, msg: Message, sender, module_t: ModuleT = None
-    ):
-        if not self.env:
-            self.env = Environment(
-                caller=sender,
-                block_hashes=[],
-                origin=sender,
-                coinbase=sender,
-                number=0,
-                time=0,
-                prev_randao=b"",
-                chain_id=0,
-            )
-
-        self.execution_ctxs.append(ExecutionContext(acc, msg, module_t))
-
-        # intialize variables to default values
-        if module_t:
-            decls = module_t.variable_decls
-            for d in decls:
-                self._new_variable(d)
 
     def set_variable(self, name: str, value):
         for loc in self.var_locations:

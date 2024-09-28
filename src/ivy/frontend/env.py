@@ -67,16 +67,12 @@ class Env:
 
         target_address = self.interpreter.generate_create_address(sender)
 
-        origin = sender
-
         self.interpreter.deploy(
-            sender,
-            origin,
-            target_address,
-            module,
-            value,
-            *args,
-            raw_args=raw_args,
+            sender=sender,
+            to=target_address,
+            module=module,
+            value=value,
+            calldata=raw_args,
         )
 
         return target_address

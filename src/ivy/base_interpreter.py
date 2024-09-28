@@ -22,12 +22,13 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     def __init__(self):
         self.state = {}
 
-    def get_code(self, address):
-        pass
-
     @property
     @abstractmethod
     def deployer(self):
+        pass
+
+    @abstractmethod
+    def get_code(self, address):
         pass
 
     @abstractmethod
@@ -44,12 +45,6 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
 
     @abstractmethod
     def increment_nonce(self, address):
-        pass
-
-    @abstractmethod
-    def _init_execution(
-        self, acc: Account, msg: Message, sender, module: ModuleT = None
-    ):
         pass
 
     @property
@@ -76,43 +71,41 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     def deploy(
         self,
         sender: Address,
-        origin: Address,
-        target_address: Address,
+        to: Address,
         module: ast.Module,
         value: int,
-        *args: Any,
-        raw_args=None,  # abi-encoded constructor args
+        calldata=None,  # abi-encoded constructor args
     ):
         module_t = module._metadata["type"]
         assert isinstance(module_t, ModuleT)
 
-        # TODO follow the evm semantics for nonce, value, storage etc..)
-        self.state[target_address] = Account(1, 0, {}, {}, None)
-
-        msg = Message(
+        message = Message(
             caller=sender,
-            to=constants.CREATE_CONTRACT_ADDRESS,
-            create_address=target_address,
+            to=b"",
+            create_address=to,
             value=value,
-            data=args,
-            code_address=target_address,
-            code=module_t.init_function,
+            data=calldata,
+            code_address=to,
+            code=module,
             depth=0,
             is_static=False,
         )
 
-        self._init_execution(self.state[target_address], msg, sender, module_t)
+        env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=to,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
 
-        if module_t.init_function is not None:
-            constructor = module_t.init_function
+        error = self.process_create_message(message, env)
 
-            # TODO this probably should return ContractData?
-            self._execute_function(constructor, args)
-
-        # module's immutables were fixed upon upon constructor execution
-        contract = self.exec_ctx.contract
-
-        self.state[target_address].contract_data = contract
+        if error:
+            raise error
 
     def execute_code(
         self,
@@ -125,7 +118,7 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
     ):
         code = self.get_code(to)
 
-        msg = Message(
+        message = Message(
             caller=sender,
             to=to,
             create_address=to,
@@ -137,13 +130,28 @@ class BaseInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        self._init_execution(self.state[to], msg, sender)
+        env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=sender,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
 
-        self._extcall()
+        output, error = self.process_message(message, env)
 
-        # return the value to the frontend, otherwise just incorporate
-        # the return value into the parent evm
-        if self.exec_ctx.msg.depth == 0:
-            return self.exec_ctx.output
-        else:
-            self.execution_ctxs[-2].returndata = self.exec_ctx.output
+        if error:
+            raise error
+
+        return output
+
+    @abstractmethod
+    def process_message(self, message: Message, env: Environment):
+        pass
+
+    @abstractmethod
+    def process_create_message(self, message: Message, env: Environment):
+        pass
