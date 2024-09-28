@@ -329,29 +329,25 @@ class VyperInterpreter(BaseInterpreter):
 
     def handle_call(
         self,
-        func: ast.Call,
+        call: ast.Call,
         args,
         kws,
         target: Optional[Address] = None,
         is_static: Optional[bool] = None,
     ):
-        print(f"Handling function call to {func} with arguments {args}")
-        func_t = func.func._metadata.get("type")
+        # special case: range not assigned `type`
+        func_t = call.func._metadata.get("type", None)
 
-        if func_t is not None:
-            if isinstance(func_t, BuiltinFunctionT):
-                return self.builtins[func_t._id](*args)
+        if func_t is None or isinstance(func_t, BuiltinFunctionT):
+            return self.builtins[call.func.id](*args, **kws)
 
-            elif func_t.is_external:
-                assert target is not None
-                assert isinstance(func_t, ContractFunctionT)
-                return self.handle_external_call(func_t, args, kws, is_static, target)
+        if func_t.is_external:
+            assert target is not None
+            assert isinstance(func_t, ContractFunctionT)
+            return self.handle_external_call(func_t, args, kws, is_static, target)
 
-            else:
-                assert func_t.is_internal
-                return self._execute_function(func_t, args)
-        else:  # TODO feels like a kludge, should we handle `range()` elsewh/ere?
-            return self.builtins[func.func.id](*args, **kws)
+        assert func_t.is_internal
+        return self._execute_function(func_t, args)
 
     # TODO add support for delegatecall
     def handle_external_call(
