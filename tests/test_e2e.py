@@ -405,3 +405,43 @@ def foo() -> uint256:
 
     c = loads(src)
     assert c.foo() == 52
+
+
+def test_default_arg_value():
+    src = """
+    @internal
+    def baz(a: uint256, b:uint256=10) -> uint256:
+        return a + b
+
+    @internal
+    def bar(a: uint256, b: uint256=20) -> uint256:
+        return a + b + self.baz(3)
+
+    @external
+    def foo() -> uint256:
+        a: uint256 = 1
+        return a + self.bar(2)
+    """
+
+    c = loads(src)
+    assert c.foo() == 36
+
+
+def test_default_arg_value2():
+    src = """
+    @internal
+    def baz(a:uint256=3, b:uint256=4) -> uint256:
+        return a + b
+
+    @internal
+    def bar(a:uint256=1, b: uint256=2) -> uint256:
+        return a + b + self.baz()
+
+    @external
+    def foo() -> uint256:
+        a: uint256 = 0
+        return a + self.bar()
+    """
+
+    c = loads(src)
+    assert c.foo() == 0 + 1 + 2 + 3 + 4

@@ -177,10 +177,17 @@ class VyperInterpreter(BaseInterpreter):
         self._push_scope()
 
         # TODO handle reentrancy lock
-
-        for arg, param in zip(args, func_t.arguments):
+        func_args = func_t.arguments
+        for arg, param in zip(args, func_args):
             self._new_variable(param)
             self.set_variable(param.name, arg)
+
+        # check if we need to assign default values
+        if len(args) < len(func_args):
+            for param in func_args[len(args) :]:
+                self._new_variable(param)
+                default_value = self.visit(param.default_value)
+                self.set_variable(param.name, default_value)
 
     def _epilogue(self, *args):
         # TODO handle reentrancy lock
@@ -338,7 +345,7 @@ class VyperInterpreter(BaseInterpreter):
         target: Optional[Address] = None,
         is_static: Optional[bool] = None,
     ):
-        # special case: range not assigned `type`
+        # `None` is a special case: range is not assigned `type` in Vyper's frontend
         func_t = call.func._metadata.get("type", None)
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
@@ -379,6 +386,7 @@ class VyperInterpreter(BaseInterpreter):
 
         output, error = self.process_message(msg, self.env)
 
+        # TODO: for raw_call and revert_on_failure=False this doesn't hold
         if error:
             raise error
 
