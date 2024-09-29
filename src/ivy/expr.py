@@ -103,7 +103,7 @@ class ExprVisitor(BaseVisitor):
         is_static: Optional[bool] = None,
     ):
         assert isinstance(node, ast.Call)
-        args = [self.visit(arg) for arg in node.args]
+        args = tuple(self.visit(arg) for arg in node.args)
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
         return self.handle_call(node, args, kws, target, is_static)
 

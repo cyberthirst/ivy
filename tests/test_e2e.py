@@ -362,3 +362,46 @@ def foo() -> (uint256, uint256):
 
     c = loads(src)
     assert c.foo() == (666, 666)
+
+
+def test_self_call():
+    src = """
+interface Foo:
+    def bar() -> uint256: payable
+
+@external
+def bar() -> uint256:
+    return 1
+
+@external
+def foo() -> uint256:
+    a: uint256 = 0
+    a = extcall Foo(self).bar()
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo() == 1
+
+
+def test_self_call2():
+    src = """
+interface Foo:
+    def bar() -> String[32]: payable
+    
+a: uint256
+
+@external
+def bar() -> String[32]:
+    self.a += 42
+    return "hello"
+
+@external
+def foo() -> uint256:
+    self.a = 10 
+    s: String[32] = extcall Foo(self).bar()
+    return self.a
+    """
+
+    c = loads(src)
+    assert c.foo() == 52

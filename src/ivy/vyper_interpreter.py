@@ -230,7 +230,9 @@ class VyperInterpreter(BaseInterpreter):
         typ = self.exec_ctx.function.return_type
         typ = calculate_type_for_external_return(typ)
         output = self.exec_ctx.output
-        output = output if isinstance(output, tuple) and len(output) > 1 else (output,)
+        output = (
+            (output,) if (not isinstance(output, tuple) or len(output) <= 1) else output
+        )
         self.exec_ctx.output = abi_encode(typ, output)
 
     @property
@@ -387,4 +389,7 @@ class VyperInterpreter(BaseInterpreter):
 
         typ = func_t.return_type
         typ = calculate_type_for_external_return(typ)
-        return abi_decode(typ, output)
+        decoded = abi_decode(typ, output)
+        assert len(decoded) == 1
+        # unwrap the tuple
+        return decoded[0]
