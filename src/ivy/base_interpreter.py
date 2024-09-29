@@ -1,7 +1,6 @@
 from abc import abstractmethod
-from typing import Any, Optional
+from typing import Optional
 
-import eth.constants as constants
 from eth._utils.address import generate_contract_address
 
 from titanoboa.boa.util.abi import Address
@@ -11,7 +10,7 @@ import vyper.ast.nodes as ast
 
 from ivy.expr import ExprVisitor
 from ivy.stmt import StmtVisitor
-from ivy.evm_structures import Account, Message, Environment
+from ivy.evm_structures import Message, Environment
 from ivy.context import ExecutionContext
 
 

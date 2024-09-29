@@ -6,23 +6,12 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
-from vyper.utils import method_id
 
-from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
+from titanoboa.boa.util.abi import Address
 
 from ivy.frontend.env import Env
-
-
-def compute_args_abi_type(func_t, num_kwargs):
-    sig_kwargs = func_t.keyword_args[:num_kwargs]
-    sig_args = func_t.positional_args + sig_kwargs
-    args_abi_type = (
-        "(" + ",".join(arg.typ.abi_type.selector_name() for arg in sig_args) + ")"
-    )
-    abi_sig = func_t.name + args_abi_type
-
-    _method_id = method_id(abi_sig)
-    return (_method_id, args_abi_type)
+from ivy.abi import abi_decode, abi_encode
+from ivy.utils import compute_call_abi_data
 
 
 class BaseDeployer(ABC):
@@ -98,7 +87,7 @@ class VyperContract:
             return None
 
         return_typ = calculate_type_for_external_return(vyper_typ)
-        ret = abi_decode(return_typ.abi_type.selector_name(), computation)
+        ret = abi_decode(return_typ, computation)
 
         # unwrap the tuple if needed
         if not isinstance(vyper_typ, TupleT):
@@ -152,7 +141,7 @@ class VyperFunction:
         if num_kwargs in self._signature_cache:
             return self._signature_cache[num_kwargs]
 
-        _method_id, args_abi_type = compute_args_abi_type(self.func_t, num_kwargs)
+        _method_id, args_abi_type = compute_call_abi_data(self.func_t, num_kwargs)
 
         self._signature_cache[num_kwargs] = (_method_id, args_abi_type)
 
@@ -176,7 +165,7 @@ class VyperFunction:
 
         total_non_base_args = len(kwargs) + len(args) - n_pos_args
 
-        args = [getattr(arg, "address", arg) for arg in args]
+        args = tuple(getattr(arg, "address", arg) for arg in args)
 
         method_id, args_abi_type = self.args_abi_type(total_non_base_args)
         encoded_args = abi_encode(args_abi_type, args)

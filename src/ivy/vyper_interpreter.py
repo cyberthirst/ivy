@@ -6,13 +6,10 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
     ContractFunctionT,
     _FunctionArg,
-    _generate_method_id,
 )
-from vyper.semantics.types.subscriptable import TupleT
 from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
-from vyper.utils import method_id
 
 from titanoboa.boa.util.abi import Address
 
@@ -23,8 +20,7 @@ from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data
-from ivy.abi.abi_decoder import abi_decode
-from ivy.abi.abi_encoder import abi_encode
+from ivy.abi import abi_decode, abi_encode
 
 
 class EVMException(Exception):

@@ -18,6 +18,7 @@ from vyper.abi_types import (
     ABIType,
 )
 from vyper.utils import int_bounds, unsigned_to_signed
+from vyper.semantics.types import VyperType
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -42,7 +43,7 @@ def _read_int(payload, ofst):
 
 
 # vyper abi_decode spec implementation
-def abi_decode(typ: "VyperType", payload: bytes):
+def abi_decode(typ: VyperType, payload: bytes):
     abi_t = typ.abi_type
 
     lo, hi = abi_t.static_size(), abi_t.size_bound()

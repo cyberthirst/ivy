@@ -13,13 +13,14 @@ from vyper.abi_types import (
     ABIType,
 )
 from vyper.utils import int_bounds
+from vyper.semantics.types import VyperType
 
 
 class EncodeError(Exception):
     pass
 
 
-def abi_encode(typ: "VyperType", value: Any) -> bytes:
+def abi_encode(typ: VyperType, value: Any) -> bytes:
     abi_t = typ.abi_type
     return _encode_r(abi_t, value)
 
@@ -87,6 +88,7 @@ def _encode_string(abi_t: ABI_String, value: str) -> bytes:
         raise EncodeError(f"Expected str, got {type(value)}")
 
     encoded_str = value.encode("utf-8")
+    # TODO is it correct to pass the len() here?
     return _encode_bytes(ABI_Bytes(len(encoded_str)), encoded_str)
 
 
