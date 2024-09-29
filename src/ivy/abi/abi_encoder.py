@@ -20,6 +20,7 @@ class EncodeError(Exception):
     pass
 
 
+# spec: https://docs.soliditylang.org/en/latest/abi-spec.html
 def abi_encode(typ: VyperType, value: Any) -> bytes:
     abi_t = typ.abi_type
     return _encode_r(abi_t, value)
@@ -53,7 +54,6 @@ def _encode_static_array(abi_t: ABI_StaticArray, value: List) -> bytes:
             f"Static array length mismatch: expected {abi_t.m_elems}, got {len(value)}"
         )
 
-    # For static arrays: enc(X) = enc((X[0], ..., X[k-1]))
     tuple_abi_t = ABI_Tuple(subtyps=[abi_t.subtyp for _ in range(abi_t.m_elems)])
     return _encode_tuple(tuple_abi_t, tuple(value))
 
@@ -62,19 +62,16 @@ def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: List) -> bytes:
     if not isinstance(value, list):
         raise EncodeError(f"Expected list, got {type(value)}")
 
-    # Encode the length of the array
     length = len(value).to_bytes(32, "big")
 
-    # Create a tuple ABI type with the same subtype as the dynamic array
     tuple_abi_t = ABI_Tuple(subtyps=[abi_t.subtyp for _ in range(len(value))])
 
-    # Encode the array contents as if it were a tuple
     encoded_items = _encode_tuple(tuple_abi_t, tuple(value))
 
     return length + encoded_items
 
 
-def _encode_bytes(abi_t: ABI_Bytes, value: bytes) -> bytes:
+def _encode_bytes(_: ABI_Bytes, value: bytes) -> bytes:
     if not isinstance(value, bytes):
         raise EncodeError(f"Expected bytes, got {type(value)}")
 
@@ -83,7 +80,7 @@ def _encode_bytes(abi_t: ABI_Bytes, value: bytes) -> bytes:
     return length + padded_value
 
 
-def _encode_string(abi_t: ABI_String, value: str) -> bytes:
+def _encode_string(_: ABI_String, value: str) -> bytes:
     if not isinstance(value, str):
         raise EncodeError(f"Expected str, got {type(value)}")
 
@@ -114,14 +111,14 @@ def _encode_bytesM(abi_t: ABI_BytesM, value: bytes) -> bytes:
     return value.ljust(32, b"\x00")
 
 
-def _encode_bool(abi_t: ABI_Bool, value: bool) -> bytes:
+def _encode_bool(_: ABI_Bool, value: bool) -> bytes:
     if not isinstance(value, bool):
         raise EncodeError(f"Expected bool, got {type(value)}")
 
     return (1 if value else 0).to_bytes(32, "big")
 
 
-def _encode_address(abi_t: ABI_Address, value: str) -> bytes:
+def _encode_address(_: ABI_Address, value: str) -> bytes:
     try:
         address_bytes = to_canonical_address(value)
         return address_bytes.rjust(32, b"\x00")
@@ -129,6 +126,7 @@ def _encode_address(abi_t: ABI_Address, value: str) -> bytes:
         raise EncodeError(f"Invalid address: {value}")
 
 
+# NOTE: bc of the dict dispatch some of the args are not used and are there just to match the signature
 ENCODE_FUNCTIONS: Dict[type, Callable] = {
     ABI_Tuple: _encode_tuple,
     ABI_StaticArray: _encode_static_array,
