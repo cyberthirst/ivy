@@ -1,15 +1,20 @@
-from dbm import error
 from typing import Any, Optional, Union, Tuple
 import inspect
 
 import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
-from vyper.semantics.types.function import ContractFunctionT, _FunctionArg
+from vyper.semantics.types.function import (
+    ContractFunctionT,
+    _FunctionArg,
+    _generate_method_id,
+)
+from vyper.semantics.types.subscriptable import TupleT
 from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
+from vyper.utils import method_id
 
-from titanoboa.boa.util.abi import Address, abi_encode
+from titanoboa.boa.util.abi import Address
 
 from ivy.base_interpreter import BaseInterpreter
 from ivy.evm_structures import Account, Environment, Message, ContractData
@@ -17,8 +22,9 @@ from ivy.stmt import ReturnException
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
-from ivy.utils import compute_args_abi_type
-from ivy.abi import abi_decode
+from ivy.utils import compute_call_abi_data
+from ivy.abi.abi_decoder import abi_decode
+from ivy.abi.abi_encoder import abi_encode
 
 
 class EVMException(Exception):
@@ -227,7 +233,6 @@ class VyperInterpreter(BaseInterpreter):
         # abi-encode output
         typ = self.exec_ctx.function.return_type
         typ = calculate_type_for_external_return(typ)
-        typ = typ.abi_type.selector_name()
         output = self.exec_ctx.output
         output = output if isinstance(output, tuple) and len(output) > 1 else (output,)
         self.exec_ctx.output = abi_encode(typ, output)
@@ -354,29 +359,36 @@ class VyperInterpreter(BaseInterpreter):
         self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address
     ):
         num_kwargs = len(args) - func_t.n_positional_args
-        _method_id, args_abi_type = compute_args_abi_type(func_t, num_kwargs)
-        data = _method_id
-        # TODO use custom abi encoder
-        data += abi_encode(args_abi_type, args)
 
-        self.execute_code(
-            self.msg.to, target, target, kwargs.get("value", 0), data, is_static
+        selector, calldata_args_t = compute_call_abi_data(func_t, num_kwargs)
+
+        data = selector
+        data += abi_encode(calldata_args_t, args)
+
+        code = self.get_code(target)
+
+        msg = Message(
+            caller=self.msg.to,
+            to=target,
+            create_address=None,
+            value=kwargs.get("value", 0),
+            data=data,
+            code_address=target,
+            code=code,
+            depth=self.exec_ctx.msg.depth + 1,
+            is_static=is_static,
         )
 
-        if len(self.returndata) == 0:
+        output, error = self.process_message(msg, self.env)
+
+        if error:
+            raise error
+
+        if len(output) == 0:
             if "default_return_value" in kwargs:
                 return kwargs["default_return_value"]
-        else:
-            # TODO decode the return value and return it
-            pass
+            return None
 
-    def generic_call(
-        value: int,
-        caller: Address,
-        to: Address,
-        code_address: Address,
-        is_staticcall: bool,
-    ) -> None:
-        # TODO create the message
-        # TODO execute the call
-        pass
+        typ = func_t.return_type
+        typ = calculate_type_for_external_return(typ)
+        return abi_decode(typ, output)

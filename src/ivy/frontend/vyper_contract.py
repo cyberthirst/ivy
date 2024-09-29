@@ -6,11 +6,23 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
+from vyper.utils import method_id
 
 from titanoboa.boa.util.abi import Address, abi_decode, abi_encode
 
 from ivy.frontend.env import Env
-from ivy.utils import compute_args_abi_type
+
+
+def compute_args_abi_type(func_t, num_kwargs):
+    sig_kwargs = func_t.keyword_args[:num_kwargs]
+    sig_args = func_t.positional_args + sig_kwargs
+    args_abi_type = (
+        "(" + ",".join(arg.typ.abi_type.selector_name() for arg in sig_args) + ")"
+    )
+    abi_sig = func_t.name + args_abi_type
+
+    _method_id = method_id(abi_sig)
+    return (_method_id, args_abi_type)
 
 
 class BaseDeployer(ABC):

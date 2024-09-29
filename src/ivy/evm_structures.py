@@ -4,13 +4,13 @@ from dataclasses import dataclass
 from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.subscriptable import TupleT
-from vyper.utils import method_id
+
+from ivy.utils import compute_call_abi_data
 
 
 @dataclass
 class EntryPointInfo:
     function: ContractFunctionT
-    sig: str
     calldata_args_t: TupleT
     calldata_min_size: int
 
@@ -38,41 +38,35 @@ class ContractData:
         self._generate_entry_points()
 
     def _generate_entry_points(self):
-        def process(func_t, calldata_kwargs, default_kwargs):
-            calldata_args = func_t.positional_args + calldata_kwargs
-            # create a fake type so that get_element_ptr works
-            calldata_args_t = TupleT(list(arg.typ for arg in calldata_args))
-
-            abi_sig = func_t.abi_signature_for_kwargs(calldata_kwargs)
+        def process(func_t, calldata_kwargs):
+            selector, calldata_args_t = compute_call_abi_data(
+                func_t, len(calldata_kwargs)
+            )
 
             args_abi_t = calldata_args_t.abi_type
             calldata_min_size = args_abi_t.static_size() + 4
 
-            return abi_sig, calldata_min_size, calldata_args_t
+            return selector, calldata_min_size, calldata_args_t
 
         for f in self.module.exposed_functions:
             keyword_args = f.keyword_args
 
             for i, _ in enumerate(keyword_args):
                 calldata_kwargs = keyword_args[:i]
-                default_kwargs = keyword_args[i:]
 
-                sig, calldata_min_size, calldata_args_t = process(
-                    f, calldata_kwargs, default_kwargs
+                selector, calldata_min_size, calldata_args_t = process(
+                    f, calldata_kwargs
                 )
-
-                selector = method_id(sig)
 
                 assert selector not in self.entry_points
                 self.entry_points[selector] = EntryPointInfo(
-                    f, sig, calldata_args_t, calldata_min_size
+                    f, calldata_args_t, calldata_min_size
                 )
 
-            sig, calldata_min_size, calldata_args_t = process(f, keyword_args, [])
-            selector = method_id(sig)
+            selector, calldata_min_size, calldata_args_t = process(f, keyword_args)
             assert selector not in self.entry_points
             self.entry_points[selector] = EntryPointInfo(
-                f, sig, calldata_args_t, calldata_min_size
+                f, calldata_args_t, calldata_min_size
             )
 
 
