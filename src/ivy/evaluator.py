@@ -31,28 +31,33 @@ class BaseEvaluator(ABC):
 
 
 class VyperEvaluator(BaseEvaluator):
-    def eval_boolop(self, op, values):
+    @classmethod
+    def eval_boolop(cls, op, values):
         eval = op.op._op
         res = eval(values)
         return res
 
-    def eval_unaryop(self, op, operand):
+    @classmethod
+    def eval_unaryop(cls, op, operand):
         eval = op.op._op
         res = eval(operand)
         return res
 
-    def eval_binop(self, op: ast.BinOp, left: Any, right: Any):
+    @classmethod
+    def eval_binop(cls, op: ast.BinOp, left: Any, right: Any):
         eval = op.op._op
         res = eval(left, right)
         return res
 
-    def eval_compare(self, op: ast.Compare, left, right):
+    @classmethod
+    def eval_compare(cls, op: ast.Compare, left, right):
         eval = op.op._op
         res = eval(left, right)
         return res
 
     # rewrite to smth like dict for const-time dispatch
-    def default_value(self, typ):
+    @classmethod
+    def default_value(cls, typ):
         if isinstance(typ, IntegerT):
             return 0
         if isinstance(typ, _SequenceT):

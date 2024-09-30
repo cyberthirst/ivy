@@ -47,41 +47,58 @@ def foo() -> uint256:
 
 def test_internal_call():
     src = """
-    @internal
-    def bar() -> uint256:
-        a: DynArray[uint256, 10] = [1, 2, 3]
-        counter: uint256 = 0
-        for i: uint256 in a:
-            counter += i
-        return counter
+@internal
+def bar() -> uint256:
+    a: DynArray[uint256, 10] = [1, 2, 3]
+    counter: uint256 = 0
+    for i: uint256 in a:
+        counter += i
+    return counter
 
 
-    @external
-    def foo() -> uint256:
-        a: DynArray[uint256, 10] = [1, 2, 3]
-        counter: uint256 = 0
-        for i: uint256 in a:
-            counter += i
-        return counter + self.bar()
+@external
+def foo() -> uint256:
+    a: DynArray[uint256, 10] = [1, 2, 3]
+    counter: uint256 = 0
+    for i: uint256 in a:
+        counter += i
+    return counter + self.bar()
     """
     c = loads(src)
     assert c.foo() == 12
 
 
+def test_internal_call_without_return():
+    src = """
+a: uint256
+    
+@internal
+def bar():
+    self.a = 42
+
+@external
+def foo() -> uint256:
+    self.bar()
+    return self.a
+    """
+    c = loads(src)
+    assert c.foo() == 42
+
+
 def test_internal_call_with_args():
     src = """
-    @internal
-    def baz(a: uint256) -> uint256:
-        return a 
-    
-    @internal
-    def bar(a: uint256) -> uint256:
-        return a + self.baz(3)
+@internal
+def baz(a: uint256) -> uint256:
+    return a 
 
-    @external
-    def foo() -> uint256:
-        a: uint256 = 1
-        return a + self.bar(2)
+@internal
+def bar(a: uint256) -> uint256:
+    return a + self.baz(3)
+
+@external
+def foo() -> uint256:
+    a: uint256 = 1
+    return a + self.bar(2)
     """
 
     c = loads(src)
@@ -542,3 +559,36 @@ def foo(a: DynArray[uint256, 10], s: String[100], b: {tuple_t}) -> (DynArray[uin
         "hello",
         complex_tuple,
     )
+
+
+def test_empty_builtin():
+    src = """
+@external
+def foo() -> uint256:
+    return empty(uint256)
+    """
+
+    c = loads(src)
+    assert c.foo() == 0
+
+
+def test_empty_builtin2():
+    src = """
+@external
+def foo() -> String[56]:
+    return empty(String[56])
+    """
+
+    c = loads(src)
+    assert c.foo() == ""
+
+
+def test_empty_builtin3():
+    src = """
+@external
+def foo() -> DynArray[String[32], 10]:
+    return empty(DynArray[String[32], 10])
+    """
+
+    c = loads(src)
+    assert c.foo() == []

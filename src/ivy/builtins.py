@@ -3,6 +3,7 @@ from vyper.codegen.core import calculate_type_for_external_return
 
 
 from ivy.abi import abi_decode
+from ivy.evaluator import VyperEvaluator
 
 
 def builtin_range(*args, bound=None):
@@ -43,3 +44,7 @@ def builtin_abi_decode(*args, unwrap_tuple=True):
 
 def builtin__abi_decode(args, unwrap_tuple=True):
     return builtin_abi_decode(args, unwrap_tuple)
+
+
+def builtin_empty(typ):
+    return VyperEvaluator.default_value(typ)
