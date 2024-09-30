@@ -35,7 +35,6 @@ def _strict_slice(payload, start, length):
     end = start + length
     if end > len(payload):
         raise DecodeError(f"OOB {start} + {length} (=={end}) > {len(payload)}")
-    tmp = payload[start:end]
     return payload[start:end]
 
 

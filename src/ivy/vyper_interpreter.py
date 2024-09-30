@@ -1,5 +1,8 @@
-from typing import Any, Optional, Union, Tuple
+from typing import Any, Optional, Union, Tuple, Type
 import inspect
+
+
+from eth._utils.address import generate_contract_address
 
 import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
@@ -11,11 +14,11 @@ from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 
+from ivy.expr import ExprVisitor
 from titanoboa.boa.util.abi import Address
 
-from ivy.base_interpreter import BaseInterpreter
 from ivy.evm_structures import Account, Environment, Message, ContractData
-from ivy.stmt import ReturnException
+from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext, Variable
 import ivy.builtins as vyper_builtins
@@ -27,13 +30,15 @@ class EVMException(Exception):
     pass
 
 
-class VyperInterpreter(BaseInterpreter):
+class VyperInterpreter(ExprVisitor, StmtVisitor):
+    execution_ctxs: list[ExecutionContext]
+    env: Optional[Environment]
     contract: Optional[ContractData]
-    evaluator: VyperEvaluator
+    evaluator: Type[VyperEvaluator]
     vars: dict[str, Any]
 
     def __init__(self):
-        super().__init__()
+        self.state = {}
         self.returndata = None
         self.evaluator = VyperEvaluator
         self.execution_ctxs = []
@@ -53,15 +58,6 @@ class VyperInterpreter(BaseInterpreter):
 
         return VyperDeployer
 
-    def get_nonce(self, address):
-        if address not in self.state:
-            self.state[address] = Account(0, 0, {}, {}, None)
-        return self.state[address].nonce
-
-    def increment_nonce(self, address):
-        assert address in self.state
-        self.state[address].nonce += 1
-
     @property
     def fun_ctx(self):
         return self.execution_ctxs[-1].current_fun_context()
@@ -73,6 +69,116 @@ class VyperInterpreter(BaseInterpreter):
     @property
     def current_address(self):
         return self.exec_ctx.msg.to
+
+    @property
+    def exec_ctx(self):
+        return self.execution_ctxs[-1]
+
+    def get_nonce(self, address):
+        if address not in self.state:
+            self.state[address] = Account(0, 0, {}, {}, None)
+        return self.state[address].nonce
+
+    def increment_nonce(self, address):
+        assert address in self.state
+        self.state[address].nonce += 1
+
+    def _push_fun_ctx(self, func_t):
+        self.execution_ctxs[-1].push_fun_context(func_t)
+
+    def _pop_fun_ctx(self):
+        self.execution_ctxs[-1].pop_fun_context()
+
+    def _push_scope(self):
+        self.execution_ctxs[-1].push_scope()
+
+    def _pop_scope(self):
+        self.execution_ctxs[-1].pop_scope()
+
+    def generate_create_address(self, sender):
+        nonce = self.get_nonce(sender.canonical_address)
+        self.increment_nonce(sender.canonical_address)
+        return Address(generate_contract_address(sender.canonical_address, nonce))
+
+    def deploy(
+        self,
+        sender: Address,
+        to: Address,
+        module: ast.Module,
+        value: int,
+        calldata=None,  # abi-encoded constructor args
+    ):
+        module_t = module._metadata["type"]
+        assert isinstance(module_t, ModuleT)
+
+        message = Message(
+            caller=sender,
+            to=b"",
+            create_address=to,
+            value=value,
+            data=calldata,
+            code_address=to,
+            code=module,
+            depth=0,
+            is_static=False,
+        )
+
+        env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=to,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
+
+        error = self.process_create_message(message, env)
+
+        if error:
+            raise error
+
+    def execute_code(
+        self,
+        sender: Address,
+        to: Address,
+        code_address: Address,
+        value: int,
+        calldata: bytes,
+        is_static: bool = False,
+    ):
+        code = self.get_code(to)
+
+        message = Message(
+            caller=sender,
+            to=to,
+            create_address=to,
+            value=value,
+            data=calldata,
+            code_address=code_address,
+            code=code,
+            depth=0,
+            is_static=is_static,
+        )
+
+        env = Environment(
+            caller=sender,
+            block_hashes=[],
+            origin=sender,
+            coinbase=sender,
+            number=0,
+            time=0,
+            prev_randao=b"",
+            chain_id=0,
+        )
+
+        output, error = self.process_message(message, env)
+
+        if error:
+            raise error
+
+        return output
 
     def process_message(
         self, message: Message, env: Environment
@@ -194,7 +300,6 @@ class VyperInterpreter(BaseInterpreter):
         # TODO handle return value
         self._pop_scope()
         self._pop_fun_ctx()
-        # TODO register arguments as local variables
         pass
 
     def _exec_body(self):
@@ -236,7 +341,7 @@ class VyperInterpreter(BaseInterpreter):
         # abi-encode output
         typ = self.exec_ctx.function.return_type
         if typ is None:
-            assert self.exec_ctx.output == None
+            assert self.exec_ctx.output is None
             return None
         typ = calculate_type_for_external_return(typ)
         output = self.exec_ctx.output

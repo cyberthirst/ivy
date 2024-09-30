@@ -10,6 +10,7 @@ def builtin_range(*args, bound=None):
     if len(args) == 2:
         start, stop = args
     else:
+        assert len(args) == 1
         start, stop = 0, args[0]
 
     if bound:
@@ -31,10 +32,11 @@ def builtin_print(*args):
 
 def builtin_abi_decode(*args, unwrap_tuple=True):
     assert len(args) == 2
-    typ = args[1]
-    data = args[0]
+    data, typ = args
+
     assert isinstance(data, bytes)
     assert isinstance(typ, VyperType)
+
     if unwrap_tuple is True:
         typ = calculate_type_for_external_return(typ)
         return abi_decode(typ, data)[0]

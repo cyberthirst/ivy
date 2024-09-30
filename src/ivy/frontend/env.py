@@ -10,7 +10,7 @@ from vyper import ast as vy_ast
 
 from titanoboa.boa.util.abi import Address
 
-from ivy.vyper_interpreter import VyperInterpreter, BaseInterpreter
+from ivy.vyper_interpreter import VyperInterpreter
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes | PYEVM_Address
@@ -20,7 +20,7 @@ class Env:
     _singleton = None
     _random = random.Random("ivy")
 
-    interpreter: BaseInterpreter
+    interpreter: VyperInterpreter
 
     def __init__(
         self,

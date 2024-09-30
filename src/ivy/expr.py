@@ -13,7 +13,7 @@ class ExprVisitor(BaseVisitor):
         return node.value
 
     def visit_Decimal(self, node: ast.Decimal):
-        return node.value * self.interpreter.DECIMAL_DIVISOR
+        raise NotImplementedError("Decimal not implemented")
 
     def visit_Hex(self, node: ast.Hex):
         return int(node.value, 16)
