@@ -35,7 +35,7 @@ class VyperInterpreter(BaseInterpreter):
     def __init__(self):
         super().__init__()
         self.returndata = None
-        self.evaluator = VyperEvaluator()
+        self.evaluator = VyperEvaluator
         self.execution_ctxs = []
         self.builtins = {}
         self._collect_builtins()
@@ -235,6 +235,9 @@ class VyperInterpreter(BaseInterpreter):
 
         # abi-encode output
         typ = self.exec_ctx.function.return_type
+        if typ is None:
+            assert self.exec_ctx.output == None
+            return None
         typ = calculate_type_for_external_return(typ)
         output = self.exec_ctx.output
         # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
@@ -391,14 +394,22 @@ class VyperInterpreter(BaseInterpreter):
         if error:
             raise error
 
-        if len(output) == 0:
-            if "default_return_value" in kwargs:
-                return kwargs["default_return_value"]
-            return None
+        self.exec_ctx.returndata = output if output is not None else b""
+
+        if len(self.exec_ctx.returndata) == 0 and "default_return_value" in kwargs:
+            return kwargs["default_return_value"]
 
         typ = func_t.return_type
         typ = calculate_type_for_external_return(typ)
-        decoded = abi_decode(typ, output)
+        abi_typ = typ.abi_type
+
+        max_return_size = abi_typ.size_bound()
+
+        actual_output_size = min(max_return_size, len(self.exec_ctx.returndata))
+        to_decode = self.exec_ctx.returndata[:actual_output_size]
+
+        # NOTE: abi_decode implicitly checks minimum return size
+        decoded = abi_decode(typ, to_decode)
         assert len(decoded) == 1
         # unwrap the tuple
         return decoded[0]
