@@ -36,13 +36,17 @@ def _encode_tuple(abi_t: ABI_Tuple, value: Tuple) -> bytes:
 
     head = b""
     tail = b""
+    dynamic_head_size = sum(subtyp.embedded_static_size() for subtyp in abi_t.subtyps)
+
     for subtyp, subval in zip(abi_t.subtyps, value):
         if subtyp.is_dynamic():
-            head += (len(head) + len(tail) + 32).to_bytes(32, "big")
+            head += (dynamic_head_size + len(tail)).to_bytes(32, "big")
             encoded = _encode_r(subtyp, subval)
             tail += encoded
         else:
-            head += _encode_r(subtyp, subval)
+            encoded = _encode_r(subtyp, subval)
+            head += encoded
+
     return head + tail
 
 

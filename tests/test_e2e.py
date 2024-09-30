@@ -445,3 +445,100 @@ def test_default_arg_value2():
 
     c = loads(src)
     assert c.foo() == 0 + 1 + 2 + 3 + 4
+
+
+def test_default_arg_value3():
+    src = """
+@external
+def foo(a: uint256=42) -> uint256:
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo() == 42
+
+
+def test_default_arg_value4():
+    src = """
+@external
+def foo(a: uint256=34, b: uint256=48) -> uint256:
+    return a + b
+    """
+
+    c = loads(src)
+    assert c.foo(42) == 90
+
+
+def test_default_arg_value5():
+    src = """
+interface Foo:
+    def bar(s: String[32]="hello") -> String[32]: payable
+
+@external
+def bar(s: String[32]="hello") -> String[32]:
+    return "hello"
+
+@external
+def foo(a:uint256=10) -> uint256:
+    s: String[32] = extcall Foo(self).bar()
+    return a + len(s)
+    """
+
+    c = loads(src)
+    assert c.foo() == 15
+
+
+def test_external_func_arg():
+    src = """
+@external
+def foo(a: uint256) -> uint256:
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo(42) == 42
+
+
+def test_external_func_arg2():
+    src = """
+@external
+def foo(a: DynArray[uint256, 10], s: String[100]) -> (DynArray[uint256, 10], String[100]):
+    return a, s
+    """
+
+    c = loads(src)
+    assert c.foo([1, 2, 3], "hello") == ([1, 2, 3], "hello")
+
+
+def test_external_func_arg3():
+    dynarray_t = "DynArray[DynArray[uint256, 10], 10]"
+    src = f"""
+@external
+def foo(a: DynArray[uint256, 10], s: String[100], b: {dynarray_t}) -> (DynArray[uint256, 10], String[100], {dynarray_t}):
+    return a, s, b
+    """
+
+    c = loads(src)
+    complex_array = [[4, 5, 6], [7, 8, 9, 10, 11], [], [12]]
+    assert c.foo([1, 2, 3], "hello", complex_array) == (
+        [1, 2, 3],
+        "hello",
+        complex_array,
+    )
+
+
+def test_external_func_arg4():
+    tuple_t = "(String[93], DynArray[DynArray[uint256, 10], 10])"
+    src = f"""
+@external
+def foo(a: DynArray[uint256, 10], s: String[100], b: {tuple_t}) -> (DynArray[uint256, 10], String[100], {tuple_t}):
+    return a, s, b
+    """
+
+    c = loads(src)
+    complex_tuple = ("apollo", [[4, 5, 6], [7, 8, 9, 10, 11], [], [12]])
+    assert c.foo([1, 2, 3], "hello", complex_tuple) == (
+        [1, 2, 3],
+        "hello",
+        complex_tuple,
+    )

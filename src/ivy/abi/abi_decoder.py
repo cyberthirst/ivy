@@ -35,6 +35,7 @@ def _strict_slice(payload, start, length):
     end = start + length
     if end > len(payload):
         raise DecodeError(f"OOB {start} + {length} (=={end}) > {len(payload)}")
+    tmp = payload[start:end]
     return payload[start:end]
 
 
@@ -152,6 +153,3 @@ def _decode_multi_r(
         static_ofst += sub_t.embedded_static_size()
 
     return ret
-
-
-# TODO: implement abi_encode

@@ -237,6 +237,7 @@ class VyperInterpreter(BaseInterpreter):
         typ = self.exec_ctx.function.return_type
         typ = calculate_type_for_external_return(typ)
         output = self.exec_ctx.output
+        # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
         output = (
             (output,) if (not isinstance(output, tuple) or len(output) <= 1) else output
         )
