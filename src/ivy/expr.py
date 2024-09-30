@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types import TYPE_T
 
 from ivy.visitor import BaseVisitor
 from titanoboa.boa.util.abi import Address
@@ -103,7 +104,13 @@ class ExprVisitor(BaseVisitor):
         is_static: Optional[bool] = None,
     ):
         assert isinstance(node, ast.Call)
-        args = tuple(self.visit(arg) for arg in node.args)
+        args = ()
+        for arg in node.args:
+            typ = arg._metadata["type"]
+            if isinstance(typ, TYPE_T):
+                args += (typ.typedef,)
+            else:
+                args += (self.visit(arg),)
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
         return self.handle_call(node, args, kws, target, is_static)
 
