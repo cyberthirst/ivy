@@ -45,6 +45,7 @@ class VyperEvaluator(BaseEvaluator):
 
     @classmethod
     def eval_binop(cls, op: ast.BinOp, left: Any, right: Any):
+        print(f"eval_binop: {op.op._op}, {left}, {right}")
         eval = op.op._op
         res = eval(left, right)
         return res

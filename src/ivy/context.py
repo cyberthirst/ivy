@@ -1,35 +1,11 @@
 from typing import Any, Optional
 
-from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
 
-from ivy.evm_structures import Account, Message, ContractData
 from ivy.evaluator import VyperEvaluator
-
-
-# TODO probably move this elsewhere
-class Variable:
-    # TODO add a reference to execution journal
-    name: str
-    typ: VyperType
-    location: dict  # TODO is dict precise?
-
-    def __init__(self, name: str, typ: VyperType, location: DataLocation):
-        self.typ = typ
-        self.location = location
-        self.name = name
-        self.location[self.name] = VyperEvaluator.default_value(typ)
-
-    @property
-    def value(self):
-        return self.location[self.name]
-
-    @value.setter
-    def value(self, new_value):
-        # TODO register old value in execution journal
-        self.location[self.name] = new_value
+from ivy.evm_structures import Account, Message, ContractData
 
 
 class FunctionContext:
@@ -37,7 +13,7 @@ class FunctionContext:
     function: ContractFunctionT
 
     def __init__(self, function: ContractFunctionT):
-        self.scopes = [{}]
+        self.scopes = []
         self.function = function
 
     def push(self):
@@ -46,6 +22,11 @@ class FunctionContext:
     def pop(self):
         self.scopes.pop()
 
+    def new_variable(self, key, typ: VyperType):
+        value = VyperEvaluator.default_value(typ)
+        assert key not in self.scopes[-1]
+        self.scopes[-1][key] = value
+
     def __contains__(self, item):
         for scope in reversed(self.scopes):
             if item in scope:
@@ -53,6 +34,10 @@ class FunctionContext:
         return False
 
     def __setitem__(self, key, value):
+        for scope in reversed(self.scopes):
+            if key in scope:
+                scope[key] = value
+                return
         self.scopes[-1][key] = value
 
     def __getitem__(self, key):
@@ -93,6 +78,3 @@ class ExecutionContext:
 
     def pop_scope(self):
         self.current_fun_context().pop()
-
-    def new_variable(self, key, value):
-        self.function_contexts[-1][key] = value

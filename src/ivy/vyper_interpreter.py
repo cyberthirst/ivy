@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union, Tuple, Type
+from typing import Any, Optional, Tuple, Type
 import inspect
 
 
@@ -9,9 +9,7 @@ from vyper.semantics.types import VyperType
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
     ContractFunctionT,
-    _FunctionArg,
 )
-from vyper.semantics.data_locations import DataLocation
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 
@@ -21,7 +19,8 @@ from titanoboa.boa.util.abi import Address
 from ivy.evm_structures import Account, Environment, Message, ContractData
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-from ivy.context import ExecutionContext, Variable
+from ivy.variable import GlobalVariable
+from ivy.context import ExecutionContext
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
@@ -36,7 +35,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     env: Optional[Environment]
     contract: Optional[ContractData]
     evaluator: Type[VyperEvaluator]
-    vars: dict[str, Any]
+    global_vars: dict[str, GlobalVariable]
 
     def __init__(self):
         self.state = {}
@@ -46,7 +45,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.builtins = {}
         self._collect_builtins()
         self.env = None
-        self.vars = {}
+        self.global_vars = {}
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -255,9 +254,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             if module_t.init_function is not None:
                 self._execute_function(module_t.init_function, message.data)
 
-        except Exception as error:
+        except Exception as e:
             # TODO rollback the journal
-            self.exec_ctx.error = error
+            error = e
             del self.state[message.create_address]
 
         finally:
@@ -296,13 +295,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         # TODO handle reentrancy lock
         func_args = func_t.arguments
         for arg, param in zip(args, func_args):
-            self._new_variable(param.name, param.typ, self.memory)
+            self._new_variable(param.name, param.typ)
             self.set_variable(param.name, arg)
 
         # check if we need to assign default values
         if len(args) < len(func_args):
             for param in func_args[len(args) :]:
-                self._new_variable(param)
+                self._new_variable(param.name, param.typ)
                 default_value = self.visit(param.default_value)
                 self.set_variable(param.name, default_value)
 
@@ -363,11 +362,19 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.exec_ctx.output = abi_encode(typ, output)
 
     def get_variable(self, name: str):
-        return self.vars[name].value
+        print(self.memory)
+        if name in self.global_vars:
+            return self.global_vars[name].value
+        else:
+            return self.memory[name]
 
     def set_variable(self, name: str, value):
-        var = self.vars[name]
-        var.value = value
+        print(f"assigning {name} = {value}")
+        if name in self.global_vars:
+            var = self.global_vars[name]
+            var.value = value
+        else:
+            self.memory[name] = value
 
     def _assign_target(self, target, value):
         if isinstance(target, ast.Name):
@@ -405,16 +412,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             return self.exec_ctx.storage
 
-    def _new_variable(self, name: str, typ: VyperType, location: dict):
-        var = Variable(name, typ, location)
-        self.vars = var
-
-    # TODO can we just merge this with _new_variable?
-    def _new_internal_variable(self, node):
-        info = node._expr_info
-        typ = info.typ
-        var = Variable(node.id, typ, self.memory)
-        self.exec_ctx.new_variable(node.id, var)
+    def _new_variable(self, name: str, typ: VyperType, global_loc: dict = None):
+        if global_loc is not None:
+            var = GlobalVariable(name, typ, global_loc)
+            assert name not in self.global_vars
+            self.global_vars[name] = var
+        else:
+            self.memory.new_variable(name, typ)
 
     def handle_call(
         self,

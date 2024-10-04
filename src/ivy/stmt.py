@@ -2,6 +2,7 @@ from abc import abstractmethod
 
 from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
+from vyper.semantics.types import VyperType
 
 from ivy.visitor import BaseVisitor
 
@@ -29,7 +30,7 @@ class StmtVisitor(BaseVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
         typ = node.target._expr_info.typ
-        self._new_variable(node.target.id, typ, self.memory)
+        self._new_variable(node.target.id, typ)
         self.set_variable(node.target.id, value)
         return None
 
@@ -70,9 +71,11 @@ class StmtVisitor(BaseVisitor):
         self._push_scope()
 
         try:
-            self._new_internal_variable(node.target.target)
+            target_name = node.target.target
+            target_typ = target_name._expr_info.typ
+            self._new_variable(target_name.id, target_typ)
             for item in iterable:
-                self._assign_target(node.target.target, item)
+                self._assign_target(target_name, item)
 
                 try:
                     for stmt in node.body:
@@ -125,11 +128,7 @@ class StmtVisitor(BaseVisitor):
         pass
 
     @abstractmethod
-    def _new_variable(self, target):
-        pass
-
-    @abstractmethod
-    def _new_internal_variable(self, target):
+    def _new_variable(self, name: str, typ: VyperType, location: dict):
         pass
 
     @property
