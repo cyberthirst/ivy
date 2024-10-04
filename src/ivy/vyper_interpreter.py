@@ -5,6 +5,7 @@ import inspect
 from eth._utils.address import generate_contract_address
 
 import vyper.ast.nodes as ast
+from vyper.semantics.types import VyperType
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
     ContractFunctionT,
@@ -45,6 +46,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.builtins = {}
         self._collect_builtins()
         self.env = None
+        self.vars = {}
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -69,6 +71,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     @property
     def current_address(self):
         return self.exec_ctx.msg.to
+
+    @property
+    def memory(self):
+        # function variables are located in memory
+        # fun ctx has set/get methods which are used to access the variables from scopes
+        return self.fun_ctx
 
     @property
     def exec_ctx(self):
@@ -239,7 +247,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 self.state[message.caller].balance -= message.value
 
             for decl in module_t.variable_decls:
-                self._new_variable(decl)
+                name = decl.target.id
+                typ = decl._metadata["type"]
+                loc = self.get_location_from_decl(decl)
+                self._new_variable(name, typ, loc)
 
             if module_t.init_function is not None:
                 self._execute_function(module_t.init_function, message.data)
@@ -285,7 +296,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         # TODO handle reentrancy lock
         func_args = func_t.arguments
         for arg, param in zip(args, func_args):
-            self._new_variable(param)
+            self._new_variable(param.name, param.typ, self.memory)
             self.set_variable(param.name, arg)
 
         # check if we need to assign default values
@@ -351,30 +362,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
         self.exec_ctx.output = abi_encode(typ, output)
 
-    @property
-    def var_locations(self):
-        return (
-            self.fun_ctx,
-            self.exec_ctx.storage,
-            self.exec_ctx.transient,
-            self.exec_ctx.immutables,
-            self.exec_ctx.constants,
-        )
-
     def get_variable(self, name: str):
-        for loc in self.var_locations:
-            if name in loc:
-                return loc[name].value
-        else:
-            raise KeyError(f"Variable {name} not found")
+        return self.vars[name].value
 
     def set_variable(self, name: str, value):
-        for loc in self.var_locations:
-            if name in loc:
-                loc[name].value = value
-                break
-        else:
-            raise KeyError(f"Variable {name} not found")
+        var = self.vars[name]
+        var.value = value
 
     def _assign_target(self, target, value):
         if isinstance(target, ast.Name):
@@ -402,48 +395,25 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
-    def _new_variable(self, target: Union[ast.Name, ast.VariableDecl, _FunctionArg]):
-        if isinstance(target, ast.Name):
-            info = target._expr_info
-            var = Variable(
-                self.evaluator.default_value(info.typ), info.typ, DataLocation.MEMORY
-            )
-            self.fun_ctx[target.id] = var
-        elif isinstance(target, _FunctionArg):
-            var = Variable(
-                self.evaluator.default_value(target.typ),
-                target.typ,
-                DataLocation.MEMORY,
-            )
-            self.fun_ctx[target.name] = var
-        elif isinstance(target, ast.VariableDecl):
-            # TODO handle public variables
-            id = target.target.id
-            typ = target._metadata["type"]
-            default_value = self.evaluator.default_value(typ)
-            if target.is_immutable:
-                self.exec_ctx.immutables[id] = Variable(
-                    default_value, typ, DataLocation.CODE
-                )
-            elif target.is_constant:
-                self.exec_ctx.contract.constants[id] = Variable(
-                    self.visit(target.value), typ, DataLocation.CODE
-                )
-            elif target.is_transient:
-                self.exec_ctx.transient[id] = Variable(
-                    default_value, typ, DataLocation.TRANSIENT
-                )
-            else:  # storage
-                self.exec_ctx.storage[id] = Variable(
-                    default_value, typ, DataLocation.STORAGE
-                )
+    def get_location_from_decl(self, decl: ast.VariableDecl):
+        if decl.is_immutable:
+            return self.exec_ctx.contract.immutables
+        elif decl.is_constant:
+            return self.exec_ctx.contract.constants
+        elif decl.is_transient:
+            return self.exec_ctx.transient
         else:
-            raise RuntimeError(f"Cannot create variable for {type(target)}")
+            return self.exec_ctx.storage
 
+    def _new_variable(self, name: str, typ: VyperType, location: dict):
+        var = Variable(name, typ, location)
+        self.vars = var
+
+    # TODO can we just merge this with _new_variable?
     def _new_internal_variable(self, node):
         info = node._expr_info
         typ = info.typ
-        var = Variable(self.evaluator.default_value(typ), typ, DataLocation.MEMORY)
+        var = Variable(node.id, typ, self.memory)
         self.exec_ctx.new_variable(node.id, var)
 
     def handle_call(

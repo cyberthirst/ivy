@@ -28,7 +28,8 @@ class StmtVisitor(BaseVisitor):
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
-        self._new_variable(node.target)
+        typ = node.target._expr_info.typ
+        self._new_variable(node.target.id, typ, self.memory)
         self.set_variable(node.target.id, value)
         return None
 
@@ -129,4 +130,9 @@ class StmtVisitor(BaseVisitor):
 
     @abstractmethod
     def _new_internal_variable(self, target):
+        pass
+
+    @property
+    @abstractmethod
+    def memory(self):
         pass

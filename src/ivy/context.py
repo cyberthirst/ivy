@@ -1,5 +1,4 @@
 from typing import Any, Optional
-from dataclasses import dataclass
 
 from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType
@@ -7,13 +6,30 @@ from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
 
 from ivy.evm_structures import Account, Message, ContractData
+from ivy.evaluator import VyperEvaluator
 
 
-@dataclass
+# TODO probably move this elsewhere
 class Variable:
-    value: Any
+    # TODO add a reference to execution journal
+    name: str
     typ: VyperType
-    location: DataLocation
+    location: dict  # TODO is dict precise?
+
+    def __init__(self, name: str, typ: VyperType, location: DataLocation):
+        self.typ = typ
+        self.location = location
+        self.name = name
+        self.location[self.name] = VyperEvaluator.default_value(typ)
+
+    @property
+    def value(self):
+        return self.location[self.name]
+
+    @value.setter
+    def value(self, new_value):
+        # TODO register old value in execution journal
+        self.location[self.name] = new_value
 
 
 class FunctionContext:
