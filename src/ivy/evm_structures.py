@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 from dataclasses import dataclass
 
 from vyper.semantics.types.function import ContractFunctionT
@@ -6,6 +6,7 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.subscriptable import TupleT
 
 from ivy.utils import compute_call_abi_data
+from ivy.variable import GlobalVariable
 
 
 @dataclass
@@ -17,25 +18,27 @@ class EntryPointInfo:
 
 class ContractData:
     module: ModuleT
-    ext_funs: Dict[str, ContractFunctionT]
-    internal_funs: Dict[str, ContractFunctionT]
-    immutables: Dict[str, Any]
-    constants: Dict[str, Any]
-    entry_points: Dict[bytes, EntryPointInfo]
+    ext_funs: dict[str, ContractFunctionT]
+    internal_funs: dict[str, ContractFunctionT]
+    immutables: dict[str, Any]
+    constants: dict[str, Any]
+    entry_points: dict[bytes, EntryPointInfo]
+    global_vars: dict[str, GlobalVariable]
 
     def __init__(self, module: ModuleT):
         self.module = module
 
-        self.ext_funs: Dict[str, ContractFunctionT] = {
+        self.ext_funs: dict[str, ContractFunctionT] = {
             f.name: f for f in module.exposed_functions
         }
-        self.internal_funs: Dict[str, ContractFunctionT] = {
+        self.internal_funs: dict[str, ContractFunctionT] = {
             f: f for f in module.functions if f not in self.ext_funs.values()
         }
         self.immutables = {}
         self.constants = {}
         self.entry_points = {}
         self._generate_entry_points()
+        self.global_vars = {}
 
     def _generate_entry_points(self):
         def process(func_t, calldata_kwargs):

@@ -1,3 +1,5 @@
+import pytest
+
 from ivy.frontend.loader import loads
 
 
@@ -105,6 +107,26 @@ def foo() -> uint256:
     assert c.foo() == 6
 
 
+def test_internal_call_with_args2():
+    src = """
+@internal
+def baz(a: uint256) -> uint256:
+    return a 
+
+@internal
+def bar(a: uint256) -> uint256:
+    return self.baz(3) + a
+
+@external
+def foo() -> uint256:
+    a: uint256 = 1
+    return self.bar(2) + a
+    """
+
+    c = loads(src)
+    assert c.foo() == 6
+
+
 def test_storage_variables():
     src = """
 d: uint256
@@ -163,6 +185,66 @@ def foo() -> uint256:
     """
     c = loads(src)
     assert c.foo() == 12
+
+
+def test_statefulness_of_storage():
+    src = """
+d: uint256
+
+@external
+def foo() -> uint256:
+    self.d += 1
+    return self.d
+    """
+
+    c = loads(src)
+    for i in range(5):
+        assert c.foo() == i + 1
+
+
+def test_statefulness_of_storage2():
+    src = """
+d: uint256
+
+@external
+def foo() -> uint256:
+    self.d += 1
+    return self.d
+    
+@external
+def bar() -> uint256:
+    self.d += 1
+    return self.d
+    """
+
+    c = loads(src)
+    for i in range(5):
+        assert c.foo() == i * 2 + 1
+        assert c.bar() == i * 2 + 2
+
+
+@pytest.mark.xfail(reason="Transient storage clearing is not implemented yet")
+def test_statefulness_of_tstorage():
+    src = """
+d: transient(uint256)
+
+interface Bar:
+    def bar() -> uint256: payable
+
+@external
+def foo() -> uint256:
+    self.d += 1
+    return extcall Bar(self).bar()
+
+@external
+def bar() -> uint256:
+    self.d += 1
+    return self.d
+    """
+
+    c = loads(src)
+    for i in range(5):
+        assert c.foo() == 2
 
 
 def test_tstorage_variables0():

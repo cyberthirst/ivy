@@ -1,4 +1,4 @@
-from typing import Any, List, Tuple, Callable, Dict
+from typing import Any, Callable
 from eth_utils import to_canonical_address
 from vyper.abi_types import (
     ABI_Address,
@@ -26,7 +26,7 @@ def abi_encode(typ: VyperType, value: Any) -> bytes:
     return _encode_r(abi_t, value)
 
 
-def _encode_tuple(abi_t: ABI_Tuple, value: Tuple) -> bytes:
+def _encode_tuple(abi_t: ABI_Tuple, value: tuple) -> bytes:
     if not isinstance(value, tuple):
         raise EncodeError(f"Expected tuple, got {type(value)}")
     if len(value) != len(abi_t.subtyps):
@@ -50,7 +50,7 @@ def _encode_tuple(abi_t: ABI_Tuple, value: Tuple) -> bytes:
     return head + tail
 
 
-def _encode_static_array(abi_t: ABI_StaticArray, value: List) -> bytes:
+def _encode_static_array(abi_t: ABI_StaticArray, value: list) -> bytes:
     if not isinstance(value, list):
         raise EncodeError(f"Expected list, got {type(value)}")
     if len(value) != abi_t.m_elems:
@@ -62,7 +62,7 @@ def _encode_static_array(abi_t: ABI_StaticArray, value: List) -> bytes:
     return _encode_tuple(tuple_abi_t, tuple(value))
 
 
-def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: List) -> bytes:
+def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: list) -> bytes:
     if not isinstance(value, list):
         raise EncodeError(f"Expected list, got {type(value)}")
 
@@ -131,7 +131,7 @@ def _encode_address(_: ABI_Address, value: str) -> bytes:
 
 
 # NOTE: bc of the dict dispatch some of the args are not used and are there just to match the signature
-ENCODE_FUNCTIONS: Dict[type, Callable] = {
+ENCODE_FUNCTIONS: dict[type, Callable] = {
     ABI_Tuple: _encode_tuple,
     ABI_StaticArray: _encode_static_array,
     ABI_DynamicArray: _encode_dynamic_array,

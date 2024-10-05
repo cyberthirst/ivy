@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, Type
+from typing import Optional, Type
 import inspect
 
 
@@ -35,7 +35,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     env: Optional[Environment]
     contract: Optional[ContractData]
     evaluator: Type[VyperEvaluator]
-    global_vars: dict[str, GlobalVariable]
 
     def __init__(self):
         self.state = {}
@@ -45,7 +44,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.builtins = {}
         self._collect_builtins()
         self.env = None
-        self.global_vars = {}
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -62,6 +60,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     @property
     def fun_ctx(self):
         return self.execution_ctxs[-1].current_fun_context()
+
+    @property
+    def globals(self):
+        return self.exec_ctx.contract.global_vars
 
     @property
     def msg(self):
@@ -189,7 +191,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     def process_message(
         self, message: Message, env: Environment
-    ) -> Tuple[Optional[bytes], Optional[Exception]]:
+    ) -> tuple[Optional[bytes], Optional[Exception]]:
         account = self.state.get(message.to, Account(0, 0, {}, {}, None))
         exec_ctx = ExecutionContext(
             account,
@@ -363,15 +365,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     def get_variable(self, name: str):
         print(self.memory)
-        if name in self.global_vars:
-            return self.global_vars[name].value
+        if name in self.globals:
+            return self.globals[name].value
         else:
             return self.memory[name]
 
     def set_variable(self, name: str, value):
         print(f"assigning {name} = {value}")
-        if name in self.global_vars:
-            var = self.global_vars[name]
+        if name in self.globals:
+            var = self.globals[name]
             var.value = value
         else:
             self.memory[name] = value
@@ -415,8 +417,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def _new_variable(self, name: str, typ: VyperType, global_loc: dict = None):
         if global_loc is not None:
             var = GlobalVariable(name, typ, global_loc)
-            assert name not in self.global_vars
-            self.global_vars[name] = var
+            assert name not in self.globals
+            self.globals[name] = var
         else:
             self.memory.new_variable(name, typ)
 
