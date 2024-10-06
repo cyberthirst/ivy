@@ -14,6 +14,7 @@ from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 
 from ivy.expr import ExprVisitor
+from ivy.journal import Journal
 from titanoboa.boa.util.abi import Address
 
 from ivy.evm_structures import Account, Environment, Message, ContractData
@@ -24,6 +25,7 @@ from ivy.context import ExecutionContext
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
+from ivy.journal import Journal
 
 
 class EVMException(Exception):
@@ -35,6 +37,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     env: Optional[Environment]
     contract: Optional[ContractData]
     evaluator: Type[VyperEvaluator]
+    accessed_accounts: dict[Address, Account]
+    journal: Journal
 
     def __init__(self):
         self.state = {}
@@ -44,6 +48,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.builtins = {}
         self._collect_builtins()
         self.env = None
+        self.journal = Journal()
+        self.accessed_accounts = {}
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -82,6 +88,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     @property
     def exec_ctx(self):
         return self.execution_ctxs[-1]
+
+    def clear_transient_storage(self):
+        for address in self.accessed_accounts:
+            self.state[address].transient.clear()
+        self.accessed_accounts.clear()
 
     def get_nonce(self, address):
         if address not in self.state:
@@ -143,7 +154,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
-        error = self.process_create_message(message, env)
+        with self.journal.nested_call:
+            error = self.process_create_message(message, env)
 
         if error:
             raise error
@@ -182,7 +194,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
-        output, error = self.process_message(message, env)
+        with self.journal.nested_call:
+            output, error = self.process_message(message, env)
 
         if error:
             raise error
@@ -469,7 +482,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        output, error = self.process_message(msg, self.env)
+        with self.journal.nested_call:
+            output, error = self.process_message(msg, self.env)
 
         # TODO: for raw_call and revert_on_failure=False this doesn't hold
         if error:

@@ -1,19 +1,21 @@
 from vyper.semantics.types import VyperType
 
 from ivy.evaluator import VyperEvaluator
+from ivy.journal import Journal, JournalEntryType
 
 
 class GlobalVariable:
-    # TODO add a reference to execution journal
     name: str
     typ: VyperType
     location: dict  # TODO can we make this more specific?
+    journal: Journal
 
-    def __init__(self, name: str, typ: VyperType, location: dict):
+    def __init__(self, name: str, typ: VyperType, location: dict, journal: Journal):
         self.typ = typ
         self.location = location
         self.name = name
         self.location[self.name] = VyperEvaluator.default_value(typ)
+        self.journal = journal
 
     @property
     def value(self):
@@ -21,5 +23,8 @@ class GlobalVariable:
 
     @value.setter
     def value(self, new_value):
-        # TODO register old value in execution journal
+        old_value = self.location.get(self.name, None)
+        self.journal.record(
+            JournalEntryType.STORAGE, self.location, self.name, old_value
+        )
         self.location[self.name] = new_value
