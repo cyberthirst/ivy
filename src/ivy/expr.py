@@ -112,10 +112,10 @@ class ExprVisitor(BaseVisitor):
             else:
                 args += (self.visit(arg),)
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-        return self.handle_call(node, args, kws, target, is_static)
+        return self.generic_call_handler(node, args, kws, target, is_static)
 
     @abstractmethod
-    def handle_call(
+    def generic_call_handler(
         self,
         func,
         args,

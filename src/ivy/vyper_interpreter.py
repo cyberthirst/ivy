@@ -435,7 +435,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory.new_variable(name, typ)
 
-    def handle_call(
+    def generic_call_handler(
         self,
         call: ast.Call,
         args,
@@ -447,18 +447,21 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         func_t = call.func._metadata.get("type", None)
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
-            return self.builtins[call.func.id](*args, **kws)
+            id = call.func.id
+            if id == "raw_call":
+                # dependency injection
+                args = [self.message_call] + args
+            return self.builtins[id](*args, **kws)
 
         if func_t.is_external:
             assert target is not None
             assert isinstance(func_t, ContractFunctionT)
-            return self.handle_external_call(func_t, args, kws, is_static, target)
+            return self.external_function_call(func_t, args, kws, is_static, target)
 
         assert func_t.is_internal
         return self._execute_function(func_t, args)
 
-    # TODO add support for delegatecall
-    def handle_external_call(
+    def external_function_call(
         self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address
     ):
         num_kwargs = len(args) - func_t.n_positional_args
@@ -468,24 +471,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         data = selector
         data += abi_encode(calldata_args_t, args)
 
-        code = self.get_code(target)
-
-        msg = Message(
-            caller=self.msg.to,
-            to=target,
-            create_address=None,
-            value=kwargs.get("value", 0),
-            data=data,
-            code_address=target,
-            code=code,
-            depth=self.exec_ctx.msg.depth + 1,
-            is_static=is_static,
+        output, error = self.message_call(
+            target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
-        with self.journal.nested_call():
-            output, error = self.process_message(msg, self.env)
-
-        # TODO: for raw_call and revert_on_failure=False this doesn't hold
         if error:
             raise error
 
@@ -508,3 +497,34 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         assert len(decoded) == 1
         # unwrap the tuple
         return decoded[0]
+
+    def message_call(
+        self,
+        target: Address,
+        value: int,
+        data: bytes,
+        is_static: bool = False,
+        is_delegate=False,
+    ):
+        code_address = target
+        code = self.get_code(code_address)
+
+        if is_delegate:
+            target = self.current_address
+
+        msg = Message(
+            caller=self.msg.to,
+            to=target,
+            create_address=None,
+            value=value,
+            data=data,
+            code_address=code_address,
+            code=code,
+            depth=self.exec_ctx.msg.depth + 1,
+            is_static=is_static,
+        )
+
+        with self.journal.nested_call():
+            output, error = self.process_message(msg, self.env)
+
+        return output, error
