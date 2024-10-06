@@ -154,7 +154,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
-        with self.journal.nested_call:
+        with self.journal.nested_call():
             error = self.process_create_message(message, env)
 
         if error:
@@ -194,7 +194,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
-        with self.journal.nested_call:
+        with self.journal.nested_call():
             output, error = self.process_message(message, env)
 
         if error:
@@ -482,7 +482,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        with self.journal.nested_call:
+        with self.journal.nested_call():
             output, error = self.process_message(msg, self.env)
 
         # TODO: for raw_call and revert_on_failure=False this doesn't hold

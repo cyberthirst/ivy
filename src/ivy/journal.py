@@ -22,7 +22,15 @@ class JournalEntry:
 
 
 class Journal:
-    def __init__(self):
+    _instance = None
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(Journal, cls).__new__(cls)
+            cls._instance.initialize()
+        return cls._instance
+
+    def initialize(self):
         self.stack: List[List[JournalEntry]] = [[]]
         self.recorded_entries: List[Dict[Tuple[int, Any, Any], bool]] = [{}]
 
@@ -64,3 +72,6 @@ class Journal:
             entry.obj[entry.key] = entry.old_value
         else:
             setattr(entry.obj, entry.key, entry.old_value)
+
+    def reset(self):
+        self.initialize()
