@@ -105,14 +105,17 @@ class ExprVisitor(BaseVisitor):
     ):
         assert isinstance(node, ast.Call)
         args = ()
+        typs = ()
         for arg in node.args:
             typ = arg._metadata["type"]
             if isinstance(typ, TYPE_T):
                 args += (typ.typedef,)
+                typs += (typ,)
             else:
                 args += (self.visit(arg),)
+                typs += (typ,)
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
-        return self.generic_call_handler(node, args, kws, target, is_static)
+        return self.generic_call_handler(node, args, kws, typs, target, is_static)
 
     @abstractmethod
     def generic_call_handler(
@@ -120,6 +123,7 @@ class ExprVisitor(BaseVisitor):
         func,
         args,
         kws,
+        typs,
         target: Optional[Address] = None,
         is_static: Optional[bool] = None,
     ):

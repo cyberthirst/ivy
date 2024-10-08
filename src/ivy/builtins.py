@@ -1,11 +1,11 @@
-from typing import Callable
+from typing import Callable, Any
 
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, TupleT
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.utils import method_id
 
 
-from ivy.abi import abi_decode
+from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
 from titanoboa.boa.util.abi import Address
 
@@ -49,23 +49,38 @@ def builtin__abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
     return builtin_abi_decode(data, typ, unwrap_tuple)
 
 
-"""
-*args: Arbitrary arguments
+# we don't follow the api of vyper's abi_encode - this is because we also need the
+# types of the arguments which in the case of the compiler are available as metadata
+# of the arguments
+# however, in ivy, we represent values as python objects, and we don't associate them
+# with the corresponding vyper type. thus, we have to retrieve the types from
+# the ast nodes and pass them through
+def builtin_abi_encode(
+    typs: tuple[VyperType], values: tuple[Any], ensure_tuple=True, method_id=None
+):
+    assert len(typs) == len(values)
+    assert isinstance(values, tuple) == isinstance(typs, tuple) == True
+    if len(values) == 1 and not ensure_tuple:
+        # unwrap tuple
+        typs = typs[0]
+        encode_input = values[0]
+    else:
+        typs = TupleT(list(arg for arg in typs))
+        # values are already a tuple
+        encode_input = values
 
-ensure_tuple: If set to True, ensures that even a single argument is encoded as a tuple.
-In other words, bytes gets encoded as (bytes,), and (bytes,) gets encoded as ((bytes,),)
-This is the calling convention for Vyper and Solidity functions.
- Except for very specific use cases, this should be set to True. Must be a literal.
-"""
+    ret = abi_encode(typs, encode_input)
+
+    if method_id is not None:
+        ret = method_id + ret
+
+    return ret
 
 
-def builtin_abi_encode(typ: VyperType, value):
-    pass
-
-
-def builtin__abi_encode(*args, value):
-    # return abi_encode(*args, value)
-    pass
+def builtin__abi_encode(
+    typs: tuple[VyperType], values: tuple[Any], ensure_tuple=True, method_id=None
+):
+    return builtin_abi_encode(typs, values, ensure_tuple, method_id)
 
 
 def builtin_empty(typ):

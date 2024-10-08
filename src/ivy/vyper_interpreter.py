@@ -440,6 +440,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         call: ast.Call,
         args,
         kws,
+        typs,
         target: Optional[Address] = None,
         is_static: Optional[bool] = None,
     ):
@@ -450,7 +451,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             id = call.func.id
             if id == "raw_call":
                 # dependency injection
-                args = [self.message_call] + args
+                args = (self.message_call,) + args
+            elif id == "abi_encode" or id == "_abi_encode":
+                args = (typs, args)
             return self.builtins[id](*args, **kws)
 
         if func_t.is_external:

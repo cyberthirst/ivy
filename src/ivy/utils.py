@@ -1,6 +1,5 @@
 from vyper.utils import method_id
 from vyper.semantics.types.subscriptable import TupleT
-import vyper.ast.nodes as ast
 
 
 def compute_call_abi_data(func_t, num_kwargs):
