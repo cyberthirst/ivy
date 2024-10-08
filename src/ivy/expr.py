@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TYPE_T
+from vyper.semantics.types import TYPE_T, InterfaceT
 
 from ivy.visitor import BaseVisitor
 from titanoboa.boa.util.abi import Address
@@ -90,9 +90,13 @@ class ExprVisitor(BaseVisitor):
         return self._visit_external_call(node, is_static=True)
 
     def _visit_external_call(self, node, is_static: bool):
-        # TODO properly handle target - currently we only support Interface(expr).method()
-        target = self.visit(node.value.func.value.args[0])
-        return self._visit_generic_call(node.value, target=target, is_static=is_static)
+        call_node = node.value
+        # `func` always is an `Attribute` node so to get the target we need to visit the `value` of the `Attribute`
+        assert isinstance(call_node.func, ast.Attribute)
+        typ = call_node.func.value._metadata["type"]
+        assert isinstance(typ, InterfaceT)
+        address = self.visit(call_node.func.value)
+        return self._visit_generic_call(call_node, target=address, is_static=is_static)
 
     def visit_Call(self, node: ast.Call):
         return self._visit_generic_call(node)

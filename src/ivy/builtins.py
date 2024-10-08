@@ -60,6 +60,7 @@ def builtin_abi_encode(
 ):
     assert len(typs) == len(values)
     assert isinstance(values, tuple) == isinstance(typs, tuple) == True
+
     if len(values) == 1 and not ensure_tuple:
         # unwrap tuple
         typs = typs[0]
@@ -107,6 +108,7 @@ def builtin_raw_call(
         raise NotImplementedError("Gas is not supported in AST interpreter!")
 
     assert not (is_static_call and is_delegate_call)
+    assert not (value != 0 and (is_static_call or is_delegate_call))
 
     output, error = message_call(to, value, data, is_static_call, is_delegate_call)
 

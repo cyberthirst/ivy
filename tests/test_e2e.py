@@ -731,3 +731,59 @@ def foo(foo: {typ}) -> {typ}:
     for i in range(10):
         arr = [i for i in range(i)]
         assert c.foo(arr) == arr
+
+
+def test_interface_call():
+    src = """
+interface Foo:
+    def bar() -> uint256: payable
+    def foobar() -> uint256: view
+
+@external
+def bar() -> uint256:
+    return 1
+    
+@external
+def foobar() -> uint256:
+    return 2
+
+@external
+def foo() -> uint256:
+    a: uint256 = 0
+    i: Foo = Foo(self)
+    a = extcall i.bar()
+    a += staticcall i.foobar()
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo() == 3
+
+
+def test_interface_call2():
+    src = """
+interface Foo:
+    def bar() -> uint256: payable
+    def foobar() -> uint256: view
+    
+i: public(Foo)
+
+@external
+def bar() -> uint256:
+    return 1
+    
+@external
+def foobar() -> uint256:
+    return 2
+
+@external
+def foo() -> uint256:
+    a: uint256 = 0
+    self.i = Foo(self)
+    a = extcall self.i.bar()
+    a += staticcall self.i.foobar()
+    return a
+    """
+
+    c = loads(src)
+    assert c.foo() == 3
