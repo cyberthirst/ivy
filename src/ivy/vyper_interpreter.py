@@ -5,7 +5,7 @@ import inspect
 from eth._utils.address import generate_contract_address
 
 import vyper.ast.nodes as ast
-from vyper.semantics.types import VyperType, TYPE_T, InterfaceT
+from vyper.semantics.types import VyperType, TYPE_T, InterfaceT, StructT
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
     ContractFunctionT,
@@ -458,10 +458,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         if isinstance(func_t, TYPE_T):
             # struct & interface constructors
-            if isinstance(func_t.typedef, InterfaceT):
-                # TODO should we return an address here? or an interface object?
+            typedef = func_t.typedef
+            if isinstance(typedef, InterfaceT):
+                # TODO should we return an address here? or an interface object wrapping the address?
                 assert len(args) == 1
                 return args[0]
+            else:
+                assert isinstance(typedef, StructT)
+                assert len(args) == 0
+                return VyperEvaluator.construct_struct(typedef.name, kws)
 
         if func_t.is_external:
             assert target is not None

@@ -68,5 +68,12 @@ class VyperEvaluator(BaseEvaluator):
         if isinstance(typ, StringT):
             return ""
         if isinstance(typ, StructT):
-            pass
+            kws = {k: cls.default_value(v) for k, v in typ.members.items()}
+            return cls.construct_struct(typ.name, kws)
+
         return None
+
+    @classmethod
+    def construct_struct(cls, name, kws):
+        StructType = type(name, (object,), kws)
+        return StructType()

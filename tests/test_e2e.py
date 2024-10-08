@@ -290,7 +290,7 @@ struct S:
 a: uint256
 b: uint256
 c: DynArray[uint256, 10]
-#d: S
+d: S
 e: Bytes[10]
 f: String[10]
 
@@ -299,7 +299,7 @@ def foo() -> uint256:
     assert self.a == 0
     assert self.b == 0
     assert len(self.c) == 0
-    #assert self.d.a == 0
+    assert self.d.a == 0
     assert len(self.e) == 0
     assert len(self.f) == 0
     return 1
@@ -787,3 +787,67 @@ def foo() -> uint256:
 
     c = loads(src)
     assert c.foo() == 3
+
+
+def test_struct():
+    src = """
+struct S:
+    a: uint256
+    b: uint256
+
+@external
+def foo() -> uint256:
+    s: S = S(a=1, b=2)
+    return s.a
+    """
+
+    c = loads(src)
+    assert c.foo() == 1
+
+
+def test_struct2():
+    src = """
+struct S:
+    a: uint256
+    b: uint256
+    
+struct T:
+    s: S
+    c: uint256
+
+@external
+def foo() -> uint256:
+    s: S = S(a=1, b=2)
+    t: T = T(s=s, c=3)
+    return t.s.a + t.s.b + t.c
+    """
+
+    c = loads(src)
+    assert c.foo() == 6
+
+
+def test_struct3():
+    length = 3
+
+    src = f"""
+struct S:
+    a: uint256
+    b: uint256
+
+d: DynArray[S, {length}]
+
+@external
+def foo() -> uint256:
+    self.d = [S(a=0, b=1), S(a=2, b=3), S(a=4, b=5)]
+        
+    acc: uint256 = 0
+    for s: S in self.d:
+        acc += s.a + s.b
+    return acc
+    """
+
+    c = loads(src)
+
+    expected = 1 + 2 + 3 + 4 + 5
+
+    assert c.foo() == expected
