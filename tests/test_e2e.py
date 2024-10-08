@@ -674,3 +674,60 @@ def foo() -> DynArray[String[32], 10]:
 
     c = loads(src)
     assert c.foo() == []
+
+
+def test_raw_call_builtin():
+    src = """
+@external
+def bar() -> uint256:
+    return 66
+
+@external
+def foo() -> uint256:
+    b: Bytes[32] = raw_call(self, abi_encode(method_id=method_id("bar()")), max_outsize=32)
+    return abi_decode(b, uint256)
+    """
+
+    c = loads(src)
+    assert c.foo() == 66
+
+
+def test_raw_call_builtin2():
+    src = """
+@external
+def bar(a: uint256) -> uint256:
+    return a
+
+@external
+def foo(foo: uint256) -> uint256:
+    b: Bytes[32] = raw_call(self, abi_encode(foo, method_id=method_id("bar(uint256)")), max_outsize=32)
+    return abi_decode(b, uint256)
+    """
+
+    c = loads(src)
+    assert c.foo(66) == 66
+
+
+def test_abi_encode_builtin():
+    src = """
+@external
+def foo(foo: uint256) -> uint256:
+    return abi_decode(abi_encode(foo), uint256)
+    """
+
+    c = loads(src)
+    assert c.foo(66) == 66
+
+
+def test_abi_encode_builtin2():
+    typ = "DynArray[uint256, 10]"
+    src = f"""
+@external
+def foo(foo: {typ}) -> {typ}:
+    return abi_decode(abi_encode(foo), {typ})
+    """
+
+    c = loads(src)
+    for i in range(10):
+        arr = [i for i in range(i)]
+        assert c.foo(arr) == arr
