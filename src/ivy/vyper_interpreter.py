@@ -1,5 +1,6 @@
 from typing import Optional, Type
 import inspect
+from collections import defaultdict
 
 
 from eth._utils.address import generate_contract_address
@@ -41,7 +42,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     journal: Journal
 
     def __init__(self):
-        self.state = {}
+        self.state = defaultdict(lambda: Account(0, 0, {}, {}, None))
         self.returndata = None
         self.evaluator = VyperEvaluator
         self.execution_ctxs = []
@@ -95,12 +96,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.accessed_accounts.clear()
 
     def get_nonce(self, address):
-        if address not in self.state:
-            self.state[address] = Account(0, 0, {}, {}, None)
         return self.state[address].nonce
 
     def increment_nonce(self, address):
-        assert address in self.state
         self.state[address].nonce += 1
 
     def _push_fun_ctx(self, func_t):
