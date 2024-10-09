@@ -70,7 +70,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     @property
     def globals(self):
-        return self.exec_ctx.contract.global_vars
+        return self.exec_ctx.globals
 
     @property
     def msg(self):
@@ -136,12 +136,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             value=value,
             data=calldata,
             code_address=to,
-            code=module,
+            code=ContractData(module_t),
             depth=0,
             is_static=False,
         )
 
-        env = Environment(
+        self.env = Environment(
             caller=sender,
             block_hashes=[],
             origin=to,
@@ -153,7 +153,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output = self.process_create_message(message, env)
+            output = self.process_create_message(message)
 
         if output.is_error:
             raise output.error
@@ -181,7 +181,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        env = Environment(
+        self.env = Environment(
             caller=sender,
             block_hashes=[],
             origin=sender,
@@ -193,16 +193,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output = self.process_message(message, env)
+            output = self.process_message(message)
 
         return output.bytes_output
 
-    def process_message(self, message: Message, env: Environment) -> EVMOutput:
-        account = self.state.get(message.to, Account(0, 0, {}, {}, None))
+    def process_message(self, message: Message) -> EVMOutput:
+        account = self.state[message.to]
         exec_ctx = ExecutionContext(
             account,
             message,
-            account.contract_data.module if account.contract_data else None,
+            account.contract_data.module_t if account.contract_data else None,
         )
         self.execution_ctxs.append(exec_ctx)
 
@@ -229,14 +229,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         return output
 
-    def process_create_message(self, message: Message, env: Environment) -> EVMOutput:
+    def process_create_message(self, message: Message) -> EVMOutput:
         if message.create_address in self.state:
             raise EVMException("Address already taken")
 
         new_account = Account(0, message.value, {}, {}, None)
         self.state[message.create_address] = new_account
 
-        module_t = message.code._metadata["type"]
+        module_t = message.code.module_t
         assert isinstance(module_t, ModuleT)
         new_account.contract_data = ContractData(module_t)
         exec_ctx = ExecutionContext(new_account, message, module_t)
@@ -270,10 +270,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return output
 
     def get_code(self, address):
-        return self.state[address].contract_data.module
+        return self.state[address].contract_data
 
     def _dispatch(self, selector):
-        entry_points = self.exec_ctx.contract.entry_points
+        entry_points = self.exec_ctx.entry_points
 
         if selector not in entry_points:
             # TODO check fallback
@@ -409,9 +409,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     def get_location_from_decl(self, decl: ast.VariableDecl):
         if decl.is_immutable:
-            return self.exec_ctx.contract.immutables
+            return self.exec_ctx.immutables
         elif decl.is_constant:
-            return self.exec_ctx.contract.constants
+            return self.exec_ctx.constants
         elif decl.is_transient:
             return self.exec_ctx.transient
         else:
@@ -527,6 +527,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output = self.process_message(msg, self.env)
+            output = self.process_message(msg)
 
         return output

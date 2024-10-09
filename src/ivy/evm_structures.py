@@ -17,7 +17,7 @@ class EntryPointInfo:
 
 
 class ContractData:
-    module: ModuleT
+    module_t: ModuleT
     ext_funs: dict[str, ContractFunctionT]
     internal_funs: dict[str, ContractFunctionT]
     immutables: dict[str, Any]
@@ -26,7 +26,7 @@ class ContractData:
     global_vars: dict[str, GlobalVariable]
 
     def __init__(self, module: ModuleT):
-        self.module = module
+        self.module_t = module
 
         self.ext_funs: dict[str, ContractFunctionT] = {
             f.name: f for f in module.exposed_functions
@@ -51,7 +51,7 @@ class ContractData:
 
             return selector, calldata_min_size, calldata_args_t
 
-        for f in self.module.exposed_functions:
+        for f in self.module_t.exposed_functions:
             keyword_args = f.keyword_args
 
             for i, _ in enumerate(keyword_args):
@@ -130,7 +130,7 @@ class Message:  # msg from execution specs
     value: Any  # U256
     data: Any  # Bytes
     code_address: Any  # Optional[Address]
-    code: Any  # Bytes
+    code: ContractData
     depth: Any  # Uint
     # should_transfer_value: bool
     is_static: bool

@@ -1,5 +1,6 @@
 from typing import Any, Optional
 
+from attr import dataclass
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
@@ -50,16 +51,34 @@ class FunctionContext:
         return f"Ctx({self.scopes})"
 
 
+@dataclass
+class Storage:
+    transient: dict[str, Any]
+    storage: dict[str, Any]
+
+
+@dataclass
+class Code:
+    immutables: dict[str, Any]
+    constants: dict[str, Any]
+
+
 class ExecutionContext:
     def __init__(self, acc: Account, msg: Message, module: Optional[ModuleT]):
         self.acc = acc
-        self.contract = acc.contract_data or ContractData(module)
+        if acc.contract_data is None:
+            assert module is not None
+            acc.contract_data = ContractData(module)
+        else:
+            self.contract = acc.contract_data
         self.function = None
         self.function_contexts = []
         self.storage = acc.storage
         self.transient = acc.transient
-        self.immutables = self.contract.immutables
-        self.constants = self.contract.constants
+        self.globals = self.contract.global_vars
+        self.immutables = msg.code.immutables
+        self.constants = msg.code.constants
+        self.entry_points = msg.code.entry_points
         self.returndata: bytes = b""
         self.output: Optional[bytes] = None
         self.msg = msg

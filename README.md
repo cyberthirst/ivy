@@ -28,3 +28,11 @@ def foo(a: uint256=42) -> uint256:
     c = loads(src)
     assert c.foo() == 42
 ```
+
+
+### Implementation notes
+- the concept of `gas` is not supported (can't map gas costs to AST interpretation)
+- `delegatecall` support is basic - it's true semantics are tied to the storage layout, 
+   however, in `Ivy` we represent storage as a map from names to values, i.e., the concept of variable addresses is
+   not present. It is thus impossible to map variables from the caller to the callee. Therefore, `delegatecall` works
+   as expected only if the contracts have the same layout and use the same names.

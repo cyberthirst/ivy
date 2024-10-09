@@ -748,6 +748,34 @@ def foo(target: address) -> uint256:
     assert c.foo(c2) == value
 
 
+def test_raw_call_delegate2():
+    value = 66
+    src = f"""
+c: uint256 
+a: DynArray[uint256, 10]
+
+@external
+def foo(target: address) -> (uint256, DynArray[uint256, 10]):
+    arg: uint256 = {value}
+    raw_call(target, abi_encode(arg, method_id=method_id("bar(uint256)")), is_delegate_call=True)
+    return self.c, self.a
+    """
+
+    src2 = """
+c: uint256 
+a: DynArray[uint256, 10]
+
+@external
+def bar(a: uint256):
+    self.c = a
+    self.a = [a, a, a]
+    """
+
+    c = loads(src)
+    c2 = loads(src2)
+    assert c.foo(c2) == (value, [value, value, value])
+
+
 def test_abi_encode_builtin():
     src = """
 @external
