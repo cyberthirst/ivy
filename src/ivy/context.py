@@ -73,15 +73,17 @@ class ExecutionContext:
             self.contract = acc.contract_data
         self.function = None
         self.function_contexts = []
+        # set storage-related attributes based on the target account
         self.storage = acc.storage
         self.transient = acc.transient
         self.globals = self.contract.global_vars
+        # set code-related attributes based on message.code
+        self.msg = msg
         self.immutables = msg.code.immutables
         self.constants = msg.code.constants
         self.entry_points = msg.code.entry_points
         self.returndata: bytes = b""
         self.output: Optional[bytes] = None
-        self.msg = msg
 
     def push_fun_context(self, func_t: ContractFunctionT):
         self.function_contexts.append(FunctionContext(func_t))

@@ -1,6 +1,7 @@
 from typing import Optional, Type
 import inspect
 from collections import defaultdict
+from contextlib import contextmanager
 
 
 from eth._utils.address import generate_contract_address
@@ -27,10 +28,7 @@ import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.journal import Journal
-
-
-class EVMException(Exception):
-    pass
+from ivy.exceptions import EVMException, StaticCallViolation
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor):
@@ -366,6 +364,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
         self.exec_ctx.output = abi_encode(typ, output)
 
+    @contextmanager
+    def modifiable_context(self, target):
+        if self.msg.is_static:
+            raise StaticCallViolation(f"Cannot modify {target} in a static context")
+        try:
+            yield
+        finally:
+            pass
+
     def get_variable(self, name: str):
         print(self.memory)
         if name in self.globals:
@@ -376,8 +383,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def set_variable(self, name: str, value):
         print(f"assigning {name} = {value}")
         if name in self.globals:
-            var = self.globals[name]
-            var.value = value
+            with self.modifiable_context(name):
+                var = self.globals[name]
+                var.value = value
         else:
             self.memory[name] = value
 

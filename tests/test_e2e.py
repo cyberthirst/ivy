@@ -1,6 +1,7 @@
 import pytest
 
 from ivy.frontend.loader import loads
+from ivy.exceptions import StaticCallViolation
 
 
 def test_if_control_flow():
@@ -774,6 +775,113 @@ def bar(a: uint256):
     c = loads(src)
     c2 = loads(src2)
     assert c.foo(c2) == (value, [value, value, value])
+
+
+def test_raw_call_static():
+    value = 66
+    src = f"""
+c: uint256 
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    raw_call(target, abi_encode(arg, method_id=method_id("bar(uint256)")), is_static_call=True)
+    return self.c
+    """
+
+    src2 = """
+c: uint256 
+
+@external
+def bar(a: uint256):
+    self.c = a
+    """
+
+    c = loads(src)
+    c2 = loads(src2)
+    with pytest.raises(StaticCallViolation):
+        c.foo(c2)
+
+
+def test_raw_call_static2():
+    value = 66
+    src = f"""
+c: uint256 
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    res: Bytes[32] = raw_call(target, abi_encode(arg, method_id=method_id("bar(uint256)")), max_outsize=32, is_static_call=True)
+    return abi_decode(res, uint256)
+    """
+
+    src2 = """
+c: uint256 
+
+@external
+def bar(a: uint256) -> uint256:
+    return self.c + a
+    """
+
+    c = loads(src)
+    c2 = loads(src2)
+    assert c.foo(c2) == value
+
+
+def test_external_static_call():
+    value = 66
+    src = f"""
+interface Bar:
+    def bar(a: uint256) -> uint256: view
+    
+c: uint256 
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    return staticcall Bar(target).bar(arg)
+    """
+
+    src2 = """
+c: uint256 
+
+@external
+def bar(a: uint256) -> uint256:
+    return self.c + a
+    """
+
+    c = loads(src)
+    c2 = loads(src2)
+    assert c.foo(c2) == value
+
+
+def test_external_static_call2():
+    value = 66
+    src = f"""
+interface Bar:
+    def bar(a: uint256) -> uint256: view
+
+c: uint256 
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    return staticcall Bar(target).bar(arg)
+    """
+
+    src2 = """
+c: uint256 
+
+@external
+def bar(a: uint256) -> uint256:
+    self.c = a
+    return self.c + a
+    """
+
+    c = loads(src)
+    c2 = loads(src2)
+    with pytest.raises(StaticCallViolation):
+        c.foo(c2)
 
 
 def test_abi_encode_builtin():
