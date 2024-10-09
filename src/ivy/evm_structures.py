@@ -73,6 +73,28 @@ class ContractData:
             )
 
 
+class EVMOutput:
+    data: bytes
+    error: Exception
+
+    def __init__(self, data: bytes = None, error: Exception = None):
+        self.data = data
+        self.error = error
+
+    @property
+    def is_error(self):
+        return self.error is not None
+
+    @property
+    def bytes_output(self, safe=True):
+        if safe and self.is_error:
+            raise self.error
+
+        if self.data is None:
+            return b""
+        return self.data
+
+
 @dataclass
 class Account:
     nonce: Any

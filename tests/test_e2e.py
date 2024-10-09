@@ -727,6 +727,27 @@ def foo(target: address) -> uint256:
     assert c.foo(c2) == value
 
 
+def test_raw_call_delegate():
+    value = 66
+    src = f"""
+c: uint256 
+    
+@external
+def bar(a: uint256):
+    self.c = a
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    raw_call(target, abi_encode(arg, method_id=method_id("bar(uint256)")), is_delegate_call=True)
+    return self.c
+    """
+
+    c = loads(src)
+    c2 = loads(src)
+    assert c.foo(c2) == value
+
+
 def test_abi_encode_builtin():
     src = """
 @external

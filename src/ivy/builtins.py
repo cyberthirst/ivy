@@ -7,6 +7,7 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
+from ivy.evm_structures import EVMOutput
 from titanoboa.boa.util.abi import Address
 
 
@@ -110,14 +111,14 @@ def builtin_raw_call(
     assert not (is_static_call and is_delegate_call)
     assert not (value != 0 and (is_static_call or is_delegate_call))
 
-    output, error = message_call(to, value, data, is_static_call, is_delegate_call)
+    output: EVMOutput = message_call(to, value, data, is_static_call, is_delegate_call)
 
-    success = error is None
+    success = not output.is_error
 
     if not revert_on_failure:
-        return success, output[:max_outsize]
+        return success, output.bytes_output(safe=False)[:max_outsize]
 
     if not success:
-        raise error
+        raise output.error
 
-    return output[:max_outsize]
+    return output.bytes_output[:max_outsize]

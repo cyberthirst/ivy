@@ -17,7 +17,7 @@ from ivy.expr import ExprVisitor
 from ivy.journal import Journal
 from titanoboa.boa.util.abi import Address
 
-from ivy.evm_structures import Account, Environment, Message, ContractData
+from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
 from ivy.variable import GlobalVariable
@@ -155,10 +155,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            error = self.process_create_message(message, env)
+            output = self.process_create_message(message, env)
 
-        if error:
-            raise error
+        if output.is_error:
+            raise output.error
 
     def execute_code(
         self,
@@ -195,16 +195,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output, error = self.process_message(message, env)
+            output = self.process_message(message, env)
 
-        if error:
-            raise error
+        return output.bytes_output
 
-        return output
-
-    def process_message(
-        self, message: Message, env: Environment
-    ) -> tuple[Optional[bytes], Optional[Exception]]:
+    def process_message(self, message: Message, env: Environment) -> EVMOutput:
         account = self.state.get(message.to, Account(0, 0, {}, {}, None))
         exec_ctx = ExecutionContext(
             account,
@@ -213,8 +208,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
         self.execution_ctxs.append(exec_ctx)
 
-        output = None
-        error = None
+        output = EVMOutput()
 
         try:
             if message.value > 0:
@@ -226,20 +220,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             if message.code:
                 self._extcall()
 
-            output = self.exec_ctx.output
+            output.data = self.exec_ctx.output
 
         except Exception as e:
             # TODO rollback the journal
-            error = e
+            output.error = e
 
         finally:
             self.execution_ctxs.pop()
 
-        return output, error
+        return output
 
-    def process_create_message(
-        self, message: Message, env: Environment
-    ) -> Optional[Exception]:
+    def process_create_message(self, message: Message, env: Environment) -> EVMOutput:
         if message.create_address in self.state:
             raise EVMException("Address already taken")
 
@@ -252,7 +244,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         exec_ctx = ExecutionContext(new_account, message, module_t)
         self.execution_ctxs.append(exec_ctx)
 
-        error = None
+        output = EVMOutput()
 
         try:
             if message.value > 0:
@@ -271,13 +263,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         except Exception as e:
             # TODO rollback the journal
-            error = e
+            output.error = e
             del self.state[message.create_address]
 
         finally:
             self.execution_ctxs.pop()
 
-        return error
+        return output
 
     def get_code(self, address):
         return self.state[address].contract_data.module
@@ -486,14 +478,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         data = selector
         data += abi_encode(calldata_args_t, args)
 
-        output, error = self.message_call(
+        output = self.message_call(
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
-        if error:
-            raise error
-
-        self.exec_ctx.returndata = output if output is not None else b""
+        self.exec_ctx.returndata = output.bytes_output
 
         if len(self.exec_ctx.returndata) == 0 and "default_return_value" in kwargs:
             return kwargs["default_return_value"]
@@ -520,7 +509,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         data: bytes,
         is_static: bool = False,
         is_delegate=False,
-    ):
+    ) -> EVMOutput:
         code_address = target
         code = self.get_code(code_address)
 
@@ -540,6 +529,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output, error = self.process_message(msg, self.env)
+            output = self.process_message(msg, self.env)
 
-        return output, error
+        return output
