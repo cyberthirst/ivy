@@ -708,6 +708,25 @@ def foo(foo: uint256) -> uint256:
     assert c.foo(66) == 66
 
 
+def test_raw_call_builtin3():
+    value = 66
+    src = f"""
+@external
+def bar(a: uint256) -> uint256:
+    return a
+
+@external
+def foo(target: address) -> uint256:
+    arg: uint256 = {value}
+    b: Bytes[32] = raw_call(target, abi_encode(arg, method_id=method_id("bar(uint256)")), max_outsize=32)
+    return abi_decode(b, uint256)
+    """
+
+    c = loads(src)
+    c2 = loads(src)
+    assert c.foo(c2) == value
+
+
 def test_abi_encode_builtin():
     src = """
 @external

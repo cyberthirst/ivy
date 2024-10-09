@@ -82,6 +82,13 @@ class VyperContract:
     def abi(self):
         return build_abi_output(self.compiler_data)
 
+    @property
+    def address(self) -> Address:
+        if self._address is None:
+            # avoid assert, in pytest it would call repr(self) which segfaults
+            raise RuntimeError("Contract address is not set")
+        return self._address
+
     def marshal_to_python(self, computation, vyper_typ):
         if vyper_typ is None:
             return None
@@ -165,6 +172,7 @@ class VyperFunction:
 
         total_non_base_args = len(kwargs) + len(args) - n_pos_args
 
+        # enable to pass Contract instances as arguments to external functions
         args = tuple(getattr(arg, "address", arg) for arg in args)
 
         method_id, args_abi_type = self.args_abi_type(total_non_base_args)
