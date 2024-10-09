@@ -65,17 +65,15 @@ class Env:
     ):
         sender = self._get_sender(sender)
 
-        target_address = self.interpreter.generate_create_address(sender)
-
-        self.interpreter.deploy(
+        contract_address = self.interpreter.execute_tx(
             sender=sender,
-            to=target_address,
+            to=b"",
             module=module,
             value=value,
             calldata=raw_args,
         )
 
-        return target_address
+        return contract_address
 
     def execute_code(
         self,
@@ -91,10 +89,9 @@ class Env:
 
         is_static = not is_modifying
 
-        ret = self.interpreter.execute_code(
+        ret = self.interpreter.execute_tx(
             sender=sender,
             to=to,
-            code_address=to,
             value=value,
             calldata=calldata,
             is_static=is_static,

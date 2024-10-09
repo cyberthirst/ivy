@@ -17,6 +17,8 @@ class GlobalVariable:
 
     @property
     def value(self):
+        if self.name not in self.location:
+            self.location[self.name] = VyperEvaluator.default_value(self.typ)
         return self.location[self.name]
 
     @value.setter

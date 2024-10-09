@@ -1,4 +1,4 @@
-from typing import Optional, Type
+from typing import Optional, Type, Union
 import inspect
 from collections import defaultdict
 from contextlib import contextmanager
@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from eth._utils.address import generate_contract_address
 
 import vyper.ast.nodes as ast
+from pydantic.v1 import create_model
 from vyper.semantics.types import VyperType, TYPE_T, InterfaceT, StructT
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
@@ -116,27 +117,36 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.increment_nonce(sender.canonical_address)
         return Address(generate_contract_address(sender.canonical_address, nonce))
 
-    def deploy(
+    def execute_tx(
         self,
         sender: Address,
-        to: Address,
-        module: ast.Module,
+        to: Union[Address, bytes],
         value: int,
-        calldata=None,  # abi-encoded constructor args
+        calldata: bytes = b"",
+        is_static: bool = False,
+        module: Optional[ast.Module] = None,
     ):
-        module_t = module._metadata["type"]
-        assert isinstance(module_t, ModuleT)
+        is_deploy = to == b""
+        create_address, code = None, None
+
+        if is_deploy:
+            module_t = module._metadata["type"]
+            assert isinstance(module_t, ModuleT)
+            create_address = self.generate_create_address(sender)
+            code = ContractData(module_t)
+        else:
+            code = self.get_code(to)
 
         message = Message(
             caller=sender,
-            to=b"",
-            create_address=to,
+            to=b"" if is_deploy else to,
+            create_address=create_address,
             value=value,
             data=calldata,
             code_address=to,
-            code=ContractData(module_t),
+            code=code,
             depth=0,
-            is_static=False,
+            is_static=is_static,
         )
 
         self.env = Environment(
@@ -151,49 +161,17 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
         with self.journal.nested_call():
-            output = self.process_create_message(message)
+            output = (
+                self.process_create_message(message)
+                if is_deploy
+                else self.process_message(message)
+            )
 
         if output.is_error:
             raise output.error
 
-    def execute_code(
-        self,
-        sender: Address,
-        to: Address,
-        code_address: Address,
-        value: int,
-        calldata: bytes,
-        is_static: bool = False,
-    ):
-        code = self.get_code(to)
-
-        message = Message(
-            caller=sender,
-            to=to,
-            create_address=to,
-            value=value,
-            data=calldata,
-            code_address=code_address,
-            code=code,
-            depth=0,
-            is_static=is_static,
-        )
-
-        self.env = Environment(
-            caller=sender,
-            block_hashes=[],
-            origin=sender,
-            coinbase=sender,
-            number=0,
-            time=0,
-            prev_randao=b"",
-            chain_id=0,
-        )
-
-        with self.journal.nested_call():
-            output = self.process_message(message)
-
-        return output.bytes_output
+        print(f"create_address: {create_address}")
+        return create_address if is_deploy else output.bytes_output
 
     def process_message(self, message: Message) -> EVMOutput:
         account = self.state[message.to]
