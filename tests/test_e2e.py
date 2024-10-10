@@ -1027,3 +1027,61 @@ def foo() -> uint256:
     expected = 1 + 2 + 3 + 4 + 5
 
     assert c.foo() == expected
+
+
+def test_tstorage_clearing():
+    src = """
+    
+t: transient(uint256)
+
+@external
+def foo() -> uint256:
+    self.t = 42
+    return self.t
+    
+@external
+def bar() -> uint256:
+    return self.t
+    """
+
+    c = loads(src)
+    assert c.foo() == 42
+    assert c.bar() == 0
+    assert c.foo() == 42
+
+
+def test_tstorage_clearing2():
+    src = """
+struct S:
+    a: uint256 
+
+a: transient(uint256)
+b: transient(uint256)
+c: transient(DynArray[uint256, 10])
+d: transient(S)
+e: transient(Bytes[10])
+f: transient(String[10])
+
+@external
+def foo():
+    assert self.a == 0
+    assert self.b == 0
+    assert len(self.c) == 0
+    assert self.d.a == 0
+    assert len(self.e) == 0
+    assert len(self.f) == 0
+
+@external
+def bar():
+    self.a = 1
+    self.b = 1
+    self.c = [1, 2, 3]
+    self.d.a = 1
+    self.e = b"hello"
+    self.f = "hello"
+    """
+
+    c = loads(src)
+    c.foo()
+    c.bar()
+    c.foo()

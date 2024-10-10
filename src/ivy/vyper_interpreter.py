@@ -37,7 +37,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     env: Optional[Environment]
     contract: Optional[ContractData]
     evaluator: Type[VyperEvaluator]
-    accessed_accounts: dict[Address, Account]
+    accessed_accounts: set[Account]
     journal: Journal
 
     def __init__(self):
@@ -49,7 +49,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self._collect_builtins()
         self.env = None
         self.journal = Journal()
-        self.accessed_accounts = {}
+        self.accessed_accounts = set()
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -167,14 +167,21 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 else self.process_message(message)
             )
 
+        for a in self.accessed_accounts:
+            # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
+            # it might be better to refactor GlobalVariable to receive a function to retrieve storage
+            # instaed of receiving the storage directly
+            a.transient.clear()
+        self.accessed_accounts.clear()
+
         if output.is_error:
             raise output.error
 
-        print(f"create_address: {create_address}")
         return create_address if is_deploy else output.bytes_output
 
     def process_message(self, message: Message) -> EVMOutput:
         account = self.state[message.to]
+        self.accessed_accounts.add(account)
         exec_ctx = ExecutionContext(
             account,
             message,
@@ -209,8 +216,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if message.create_address in self.state:
             raise EVMException("Address already taken")
 
-        new_account = Account(0, message.value, {}, {}, None)
-        self.state[message.create_address] = new_account
+        new_account = self.state[message.create_address]
+        self.accessed_accounts.add(new_account)
 
         module_t = message.code.module_t
         assert isinstance(module_t, ModuleT)
