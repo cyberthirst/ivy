@@ -121,4 +121,4 @@ def builtin_raw_call(
     if not success:
         raise output.error
 
-    return output.bytes_output[:max_outsize]
+    return output.bytes_output()[:max_outsize]

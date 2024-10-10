@@ -85,7 +85,6 @@ class EVMOutput:
     def is_error(self):
         return self.error is not None
 
-    @property
     def bytes_output(self, safe=True):
         if safe and self.is_error:
             raise self.error

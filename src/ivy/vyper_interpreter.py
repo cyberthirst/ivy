@@ -177,7 +177,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if output.is_error:
             raise output.error
 
-        return create_address if is_deploy else output.bytes_output
+        return create_address if is_deploy else output.bytes_output()
 
     def process_message(self, message: Message) -> EVMOutput:
         account = self.state[message.to]
@@ -199,7 +199,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 self.state[message.to].balance += message.value
 
             if message.code:
-                self._extcall()
+                self._handle_incomming_extcall()
 
             output.data = self.exec_ctx.output
 
@@ -316,7 +316,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         return self.exec_ctx.output
 
-    def _extcall(self):
+    def _handle_incomming_extcall(self):
         if len(self.msg.data) < 4:
             # TODO goto fallback or revert
             pass
@@ -380,9 +380,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         elif isinstance(target, ast.Tuple):
             if not isinstance(value, tuple):
                 raise TypeError("Cannot unpack non-iterable to tuple")
-            if len(target.elts) != len(value):
+            if len(target.elements) != len(value):
                 raise ValueError("Mismatch in number of items to unpack")
-            for t, v in zip(target.elts, value):
+            for t, v in zip(target.elements, value):
                 self._assign_target(t, v)
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
@@ -473,7 +473,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
-        self.exec_ctx.returndata = output.bytes_output
+        self.exec_ctx.returndata = output.bytes_output()
 
         if len(self.exec_ctx.returndata) == 0 and "default_return_value" in kwargs:
             return kwargs["default_return_value"]

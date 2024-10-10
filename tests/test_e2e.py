@@ -728,6 +728,26 @@ def foo(target: address) -> uint256:
     assert c.foo(c2) == value
 
 
+def test_raw_call_revert_on_failure():
+    src = """
+@external
+def bar(u: uint256) -> uint256:
+    assert u == 666
+    return 66
+
+@external
+def foo() -> bool:
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s
+    """
+
+    c = loads(src)
+    assert c.foo() == False
+
+
 def test_raw_call_delegate():
     value = 66
     src = f"""

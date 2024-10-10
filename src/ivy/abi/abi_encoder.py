@@ -118,7 +118,6 @@ def _encode_bytesM(abi_t: ABI_BytesM, value: bytes) -> bytes:
 def _encode_bool(_: ABI_Bool, value: bool) -> bytes:
     if not isinstance(value, bool):
         raise EncodeError(f"Expected bool, got {type(value)}")
-
     return (1 if value else 0).to_bytes(32, "big")
 
 
