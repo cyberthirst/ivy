@@ -1,11 +1,15 @@
 from abc import ABC, abstractmethod
 from typing import Any
+from collections import defaultdict
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types import BoolT, InterfaceT
 from vyper.semantics.types.primitives import IntegerT
-from vyper.semantics.types.subscriptable import _SequenceT
+from vyper.semantics.types.subscriptable import _SequenceT, HashMapT
 from vyper.semantics.types.bytestrings import BytesT, StringT
 from vyper.semantics.types.user import StructT
+
+from titanoboa.boa.util.abi import Address
 
 
 class BaseEvaluator(ABC):
@@ -70,8 +74,16 @@ class VyperEvaluator(BaseEvaluator):
         if isinstance(typ, StructT):
             kws = {k: cls.default_value(v) for k, v in typ.members.items()}
             return cls.construct_struct(typ.name, kws)
-
+        if isinstance(typ, HashMapT):
+            return defaultdict(lambda: cls.default_value(typ.value_type))
+        if isinstance(typ, BoolT):
+            return False
+        if isinstance(typ, Address) or isinstance(typ, InterfaceT):
+            # return Address(0)
+            return None
         return None
+
+        raise NotImplementedError(f"Default value for {typ} not implemented")
 
     @classmethod
     def construct_struct(cls, name, kws):

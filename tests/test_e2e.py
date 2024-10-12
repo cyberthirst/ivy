@@ -1,4 +1,5 @@
 import pytest
+import hypothesis
 
 from ivy.frontend.loader import loads
 from ivy.exceptions import StaticCallViolation
@@ -1109,7 +1110,7 @@ def bar():
 
 def test_storage_rollback():
     src = """
-c: uint256 
+c: public(uint256)
     
 @external
 def bar(u: uint256) -> uint256:
@@ -1124,20 +1125,16 @@ def foo() -> bool:
     u: uint256 = 0
     s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
     return s
-
-@external
-def get() -> uint256:
-    return self.c
     """
 
     c = loads(src)
     assert c.foo() == False
-    assert c.get() == 0
+    assert c.c() == 0
 
 
 def test_storage_rollback2():
     src = """
-c: uint256 
+c: public(uint256)
 
 @external
 def foobar(u: uint256) -> uint256:
@@ -1159,20 +1156,16 @@ def foo() -> bool:
     u: uint256 = 0
     s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
     return s
-
-@external
-def get() -> uint256:
-    return self.c
     """
 
     c = loads(src)
     assert c.foo() == False
-    assert c.get() == 0
+    assert c.c() == 0
 
 
 def test_storage_rollback3():
     src = """
-c: uint256 
+c: public(uint256)
 
 @external
 def foobar(u: uint256) -> uint256:
@@ -1195,12 +1188,61 @@ def foo() -> bool:
     u: uint256 = 0
     s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
     return s
-
-@external
-def get() -> uint256:
-    return self.c
     """
 
     c = loads(src)
     assert c.foo() == False
-    assert c.get() == 20
+    assert c.c() == 20
+
+
+def test_hash_map():
+    src = f"""
+
+var: public(HashMap[uint256, uint256])
+
+@external
+def foo() -> uint256:
+    self.var[0] = 42
+    return self.var[0] + self.var[1] 
+        """
+
+    c = loads(src)
+    assert c.foo() == 42
+    assert c.var(0) == 42
+    assert c.var(1) == 0
+
+
+@pytest.mark.parametrize(
+    "public,typ,value",
+    [
+        (True, "uint256", 42),
+        (False, "uint256", 42),
+        (True, "DynArray[uint256, 10]", [1, 2, 3]),
+        (False, "DynArray[uint256, 10]", [1, 2, 3]),
+        (True, "String[10]", "hello"),
+        (False, "String[10]", "hello"),
+        (True, "Bytes[10]", b"hello"),
+        (False, "Bytes[10]", b"hello"),
+    ],
+)
+def test_public_var_getter(public, typ, value):
+    src = f"""
+    var: {"public(" + typ + ")" if public else typ}
+
+    @external
+    def foo():
+        self.var = {repr(value)}
+        """
+
+    c = loads(src)
+    c.foo()
+
+    if public:
+        if isinstance(value, list):
+            for i, v in enumerate(value):
+                assert c.var(i) == v
+        else:
+            assert c.var() == value
+    else:
+        with pytest.raises(AttributeError):
+            c.var()

@@ -7,7 +7,6 @@ from contextlib import contextmanager
 from eth._utils.address import generate_contract_address
 
 import vyper.ast.nodes as ast
-from pydantic.v1 import create_model
 from vyper.semantics.types import VyperType, TYPE_T, InterfaceT, StructT
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
