@@ -160,12 +160,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             chain_id=0,
         )
 
-        with self.journal.nested_call():
-            output = (
-                self.process_create_message(message)
-                if is_deploy
-                else self.process_message(message)
-            )
+        self.journal.begin_call()
+        output = (
+            self.process_create_message(message)
+            if is_deploy
+            else self.process_message(message)
+        )
+        self.journal.finalize_call(output.is_error)
 
         for a in self.accessed_accounts:
             # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
@@ -519,7 +520,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             is_static=is_static,
         )
 
-        with self.journal.nested_call():
-            output = self.process_message(msg)
+        self.journal.begin_call()
+        output = self.process_message(msg)
+        self.journal.finalize_call(output.is_error)
 
         return output

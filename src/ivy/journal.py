@@ -1,6 +1,5 @@
-from typing import Any, Dict, List, Tuple
+from typing import Any
 from enum import Enum
-import contextlib
 
 
 class JournalEntryType(Enum):
@@ -31,47 +30,45 @@ class Journal:
         return cls._instance
 
     def initialize(self):
-        self.stack: List[List[JournalEntry]] = [[]]
-        self.recorded_entries: List[Dict[Tuple[int, Any, Any], bool]] = [{}]
+        self.recorded_entries: list[dict[tuple[int, Any, Any], JournalEntry]] = [{}]
 
     def record(self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any):
         entry_key = (id(obj), key, entry_type.value)
         if entry_key not in self.recorded_entries[-1]:
             entry = JournalEntry(entry_type, obj, key, old_value)
-            self.stack[-1].append(entry)
-            self.recorded_entries[-1][entry_key] = True
+            self.recorded_entries[-1][entry_key] = entry
 
-    @contextlib.contextmanager
-    def nested_call(self):
-        self.stack.append([])
+    def begin_call(self):
         self.recorded_entries.append({})
-        try:
-            yield
-        except Exception as e:
+
+    def finalize_call(self, is_error):
+        if is_error:
             self.rollback()
-            raise e
         else:
             self.commit()
 
     def commit(self):
-        if len(self.stack) > 1:
-            committed_entries = self.stack.pop()
-            self.stack[-1].extend(committed_entries)
-
+        if len(self.recorded_entries) > 1:
             committed_records = self.recorded_entries.pop()
             self.recorded_entries[-1].update(committed_records)
 
     def rollback(self):
-        self.stack.pop()
-        self.recorded_entries.pop()
+        if self.recorded_entries:
+            entries_to_rollback = self.recorded_entries.pop()
+            for entry in reversed(entries_to_rollback.values()):
+                self.apply_rollback(entry)
 
     def apply_rollback(self, entry: JournalEntry):
-        if entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
-            del entry.obj[entry.key]
-        elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
-            entry.obj[entry.key] = entry.old_value
+        if False:
+            pass
+        # if entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
+        #    del entry.obj[entry.key]
+        # elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
+        #    entry.obj[entry.key] = entry.old_value
+        # elif entry.entry_type == JournalEntryType.BALANCE:
+        #    entry.obj.balance = entry.old_value
         else:
-            setattr(entry.obj, entry.key, entry.old_value)
+            entry.obj[entry.key] = entry.old_value
 
     def reset(self):
         self.initialize()

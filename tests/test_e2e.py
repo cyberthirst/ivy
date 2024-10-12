@@ -1105,3 +1105,102 @@ def bar():
     c.foo()
     c.bar()
     c.foo()
+
+
+def test_storage_rollback():
+    src = """
+c: uint256 
+    
+@external
+def bar(u: uint256) -> uint256:
+    self.c = 10
+    assert False
+    return 66
+
+@external
+def foo() -> bool:
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s
+
+@external
+def get() -> uint256:
+    return self.c
+    """
+
+    c = loads(src)
+    assert c.foo() == False
+    assert c.get() == 0
+
+
+def test_storage_rollback2():
+    src = """
+c: uint256 
+
+@external
+def foobar(u: uint256) -> uint256:
+    self.c = 10
+    return 66
+
+@external
+def bar(u: uint256) -> uint256:
+    b: Bytes[32] = b""
+    s: bool = False
+    s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
+    assert False
+    return 66
+
+@external
+def foo() -> bool:
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s
+
+@external
+def get() -> uint256:
+    return self.c
+    """
+
+    c = loads(src)
+    assert c.foo() == False
+    assert c.get() == 0
+
+
+def test_storage_rollback3():
+    src = """
+c: uint256 
+
+@external
+def foobar(u: uint256) -> uint256:
+    self.c = 10
+    return 66
+
+@external
+def bar(u: uint256) -> uint256:
+    self.c = 20
+    b: Bytes[32] = b""
+    s: bool = False
+    s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
+    assert False
+    return 66
+
+@external
+def foo() -> bool:
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s
+
+@external
+def get() -> uint256:
+    return self.c
+    """
+
+    c = loads(src)
+    assert c.foo() == False
+    assert c.get() == 20
