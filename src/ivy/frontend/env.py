@@ -1,19 +1,13 @@
 import random
-
 from typing import Any, Optional, TypeAlias
-
-from eth_account import Account
-from eth_typing import Address as PYEVM_Address  # it's just bytes.
-import eth.constants as constants
 
 from vyper import ast as vy_ast
 
-from titanoboa.boa.util.abi import Address
-
 from ivy.vyper_interpreter import VyperInterpreter
+from ivy.types import Address
 
 # make mypy happy
-_AddressType: TypeAlias = Address | str | bytes | PYEVM_Address
+_AddressType: TypeAlias = Address | str | bytes
 
 
 class Env:
@@ -24,11 +18,9 @@ class Env:
 
     def __init__(
         self,
-        accounts: dict[str, Account] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._accounts = accounts or {}
         self.interpreter = VyperInterpreter()
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
@@ -77,7 +69,7 @@ class Env:
 
     def execute_code(
         self,
-        to_address: _AddressType = constants.ZERO_ADDRESS,
+        to_address: _AddressType = Address(0),
         sender: Optional[_AddressType] = None,
         value: int = 0,
         calldata: bytes = b"",

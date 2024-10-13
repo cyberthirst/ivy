@@ -9,6 +9,9 @@ dependencies = [
     "ruff>=0.6.4",
     "pre-commit>=3.8.0",
     "pytest>=8.3.2",
+    "eth-utils>=5.0.0",
+    "hypothesis>=6.114.1",
+    "rlp>=4.0.1",
 ]
 
 

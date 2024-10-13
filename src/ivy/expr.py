@@ -5,7 +5,7 @@ from vyper.ast import nodes as ast
 from vyper.semantics.types import TYPE_T, InterfaceT
 
 from ivy.visitor import BaseVisitor
-from titanoboa.boa.util.abi import Address
+from ivy.types import Address
 
 
 class ExprVisitor(BaseVisitor):

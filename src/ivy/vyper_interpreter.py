@@ -3,9 +3,6 @@ import inspect
 from collections import defaultdict
 from contextlib import contextmanager
 
-
-from eth._utils.address import generate_contract_address
-
 import vyper.ast.nodes as ast
 from vyper.semantics.types import VyperType, TYPE_T, InterfaceT, StructT
 from vyper.semantics.types.module import ModuleT
@@ -17,18 +14,17 @@ from vyper.codegen.core import calculate_type_for_external_return
 
 from ivy.expr import ExprVisitor
 from ivy.journal import Journal
-from titanoboa.boa.util.abi import Address
-
 from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
 from ivy.variable import GlobalVariable
 from ivy.context import ExecutionContext
 import ivy.builtins as vyper_builtins
-from ivy.utils import compute_call_abi_data
+from ivy.utils import compute_call_abi_data, compute_contract_address
 from ivy.abi import abi_decode, abi_encode
 from ivy.journal import Journal
 from ivy.exceptions import EVMException, StaticCallViolation
+from ivy.types import Address
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor):
@@ -114,7 +110,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def generate_create_address(self, sender):
         nonce = self.get_nonce(sender.canonical_address)
         self.increment_nonce(sender.canonical_address)
-        return Address(generate_contract_address(sender.canonical_address, nonce))
+        return Address(compute_contract_address(sender.canonical_address, nonce))
 
     def execute_tx(
         self,

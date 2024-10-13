@@ -7,11 +7,10 @@ from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
 
-from titanoboa.boa.util.abi import Address
-
 from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
+from ivy.types import Address
 
 
 class BaseDeployer(ABC):

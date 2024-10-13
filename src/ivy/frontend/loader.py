@@ -11,10 +11,9 @@ from vyper.compiler.input_bundle import (
 from vyper.compiler.phases import CompilerData
 from vyper.compiler.settings import Settings
 
-from titanoboa.boa.contracts.vvm.vvm_contract import _detect_version
-
 from ivy.frontend.vyper_contract import VyperDeployer, VyperContract
 from ivy.frontend.env import Env
+from ivy.utils import _detect_version
 
 
 if TYPE_CHECKING:

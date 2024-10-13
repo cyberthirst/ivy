@@ -9,7 +9,7 @@ from vyper.semantics.types.subscriptable import _SequenceT, HashMapT
 from vyper.semantics.types.bytestrings import BytesT, StringT
 from vyper.semantics.types.user import StructT
 
-from titanoboa.boa.util.abi import Address
+from ivy.types import Address
 
 
 class BaseEvaluator(ABC):
@@ -79,8 +79,7 @@ class VyperEvaluator(BaseEvaluator):
         if isinstance(typ, BoolT):
             return False
         if isinstance(typ, Address) or isinstance(typ, InterfaceT):
-            # return Address(0)
-            return None
+            return Address(0)
         return None
 
         raise NotImplementedError(f"Default value for {typ} not implemented")

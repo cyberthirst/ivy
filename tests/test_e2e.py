@@ -1,5 +1,4 @@
 import pytest
-import hypothesis
 
 from ivy.frontend.loader import loads
 from ivy.exceptions import StaticCallViolation
@@ -1246,3 +1245,14 @@ def test_public_var_getter(public, typ, value):
     else:
         with pytest.raises(AttributeError):
             c.var()
+
+
+def test_encode_address():
+    src = """
+    @external
+    def foo() -> address:
+        return self
+        """
+
+    c = loads(src)
+    assert c.foo() == c.address
