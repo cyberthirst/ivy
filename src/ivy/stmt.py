@@ -92,7 +92,9 @@ class StmtVisitor(BaseVisitor):
     def visit_AugAssign(self, node: ast.AugAssign):
         target_value = self.visit(node.target)
         value = self.visit(node.value)
-        new_value = self.evaluator.eval_binop(node, target_value, value)
+        new_value = self.evaluator.eval_binop(
+            node, target_value, value, aug_assign=True
+        )
         self._assign_target(node.target, new_value)
         return None
 

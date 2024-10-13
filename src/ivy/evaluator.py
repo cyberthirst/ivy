@@ -22,7 +22,7 @@ class BaseEvaluator(ABC):
         pass
 
     @abstractmethod
-    def eval_binop(self, op, left, right):
+    def eval_binop(self, op, left, right, aug_assign=False):
         pass
 
     @abstractmethod
@@ -35,29 +35,87 @@ class BaseEvaluator(ABC):
 
 
 class VyperEvaluator(BaseEvaluator):
+    @staticmethod
+    def validate_integer(value, typ):
+        # For now, just return True
+        return True
+
+    @staticmethod
+    def validate_bool(value, typ):
+        return True
+
+    @staticmethod
+    def validate_bytes(value, typ):
+        return True
+
+    @staticmethod
+    def validate_string(value, typ):
+        return True
+
+    @staticmethod
+    def validate_sequence(value, typ):
+        return True
+
+    @staticmethod
+    def validate_struct(value, typ):
+        return True
+
+    @staticmethod
+    def validate_hashmap(value, typ):
+        return True
+
+    @staticmethod
+    def validate_interface(value, typ):
+        return True
+
+    type_validators = {
+        "IntegerT": validate_integer,
+        "BoolT": validate_bool,
+        "BytesT": validate_bytes,
+        "StringT": validate_string,
+        "_SequenceT": validate_sequence,
+        "StructT": validate_struct,
+        "HashMapT": validate_hashmap,
+        "InterfaceT": validate_interface,
+    }
+
+    @classmethod
+    def validate_value(cls, node, value):
+        typ = node._metadata["type"]
+        typ_name = typ.__class__.__name__
+        cls.type_validators[typ_name](value, typ)
+
     @classmethod
     def eval_boolop(cls, op, values):
         eval = op.op._op
         res = eval(values)
+        cls.validate_value(op, res)
         return res
 
     @classmethod
     def eval_unaryop(cls, op, operand):
         eval = op.op._op
         res = eval(operand)
+        cls.validate_value(op, res)
         return res
 
+    # aug_assign node is not annotated with a type, so we take the type from the target
+    # alternatively we could fetch the type at the call site and have it passed in
     @classmethod
-    def eval_binop(cls, op: ast.BinOp, left: Any, right: Any):
-        print(f"eval_binop: {op.op._op}, {left}, {right}")
+    def eval_binop(cls, op: ast.BinOp, left: Any, right: Any, aug_assign=False):
         eval = op.op._op
         res = eval(left, right)
+        if aug_assign:
+            cls.validate_value(op.target, res)
+        else:
+            cls.validate_value(op, res)
         return res
 
     @classmethod
     def eval_compare(cls, op: ast.Compare, left, right):
         eval = op.op._op
         res = eval(left, right)
+        cls.validate_value(op, res)
         return res
 
     # rewrite to smth like dict for const-time dispatch

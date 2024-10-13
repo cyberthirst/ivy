@@ -48,7 +48,7 @@ class ExprVisitor(BaseVisitor):
         else:
             obj = self.visit(node.value)
             typ = node.value._metadata["type"]
-            # an exceptional case where we have a type struct, but instead we received a tuple
+            # an exceptional case where we expect obj of type struct, but instead we received a tuple
             # this happens when a struct is decoded - the abi typ of the struct is tuple
             # NOTE: it might be better to treat structs as tuples in the first place
             if isinstance(typ, StructT) and isinstance(obj, tuple):
