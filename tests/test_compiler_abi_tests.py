@@ -603,7 +603,6 @@ def run():
     c.run()
 
 
-@pytest.mark.skip(reason="structs not yet supported")
 def test_abi_decode_extcall_complex_empty_dynarray():
     # 5th word of the payload points to the last word of the payload
     # which is considered the length of the Point.y array
@@ -756,7 +755,6 @@ def run(x: Bytes[32 * 8]):
         c.run(data)
 
 
-@pytest.mark.skip(reason="structs not yet supported")
 def test_abi_decode_complex_empty_dynarray():
     # point head to the last word of the payload
     # this will be the length, but because it's set to 0, the decoding should succeed

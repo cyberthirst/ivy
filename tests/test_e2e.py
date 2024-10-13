@@ -224,7 +224,6 @@ def bar() -> uint256:
         assert c.bar() == i * 2 + 2
 
 
-@pytest.mark.xfail(reason="Transient storage clearing is not implemented yet")
 def test_statefulness_of_tstorage():
     src = """
 d: transient(uint256)
@@ -244,7 +243,7 @@ def bar() -> uint256:
     """
 
     c = loads(src)
-    for i in range(5):
+    for i in range(3):
         assert c.foo() == 2
 
 

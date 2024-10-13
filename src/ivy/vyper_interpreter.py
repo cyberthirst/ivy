@@ -13,7 +13,6 @@ from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 
 from ivy.expr import ExprVisitor
-from ivy.journal import Journal
 from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator

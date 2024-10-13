@@ -2,7 +2,7 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TYPE_T, InterfaceT
+from vyper.semantics.types import TYPE_T, InterfaceT, StructT
 
 from ivy.visitor import BaseVisitor
 from ivy.types import Address
@@ -10,18 +10,22 @@ from ivy.types import Address
 
 class ExprVisitor(BaseVisitor):
     def visit_Int(self, node: ast.Int):
+        # literals are validated in Vyper
         return node.value
 
     def visit_Decimal(self, node: ast.Decimal):
         raise NotImplementedError("Decimal not implemented")
 
     def visit_Hex(self, node: ast.Hex):
+        # literals are validated in Vyper
         return int(node.value, 16)
 
     def visit_Str(self, node: ast.Str):
+        # literals are validated in Vyper
         return node.value
 
     def visit_Bytes(self, node: ast.Bytes):
+        # literals are validated in Vyper
         return node.value
 
     def visit_NameConstant(self, node: ast.NameConstant):
@@ -43,6 +47,13 @@ class ExprVisitor(BaseVisitor):
             )
         else:
             obj = self.visit(node.value)
+            typ = node.value._metadata["type"]
+            # an exceptional case where we have a type struct, but instead we received a tuple
+            # this happens when a struct is decoded - the abi typ of the struct is tuple
+            # NOTE: it might be better to treat structs as tuples in the first place
+            if isinstance(typ, StructT) and isinstance(obj, tuple):
+                # get keys and retrieve the index of the attribute, then return the value at the index
+                return obj[typ.tuple_keys().index(node.attr)]
             return getattr(obj, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
@@ -62,13 +73,11 @@ class ExprVisitor(BaseVisitor):
 
     def visit_BoolOp(self, node: ast.BoolOp):
         values = [self.visit(value) for value in node.values]
-        op = node.op.__class__.__name__
-        return self.evaluator.eval_boolop(op, values)
+        return self.evaluator.eval_boolop(node, values)
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
         operand = self.visit(node.operand)
-        op = node.op.__class__.__name__
-        return self.evaluator.eval_unaryop(op, operand)
+        return self.evaluator.eval_unaryop(node, operand)
 
     def visit_List(self, node: ast.List):
         return [self.visit(elem) for elem in node.elements]

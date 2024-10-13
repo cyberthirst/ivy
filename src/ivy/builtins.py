@@ -60,7 +60,7 @@ def builtin_abi_encode(
     typs: tuple[VyperType], values: tuple[Any], ensure_tuple=True, method_id=None
 ):
     assert len(typs) == len(values)
-    assert isinstance(values, tuple) == isinstance(typs, tuple) == True
+    assert isinstance(values, tuple) and isinstance(typs, tuple)
 
     if len(values) == 1 and not ensure_tuple:
         # unwrap tuple
