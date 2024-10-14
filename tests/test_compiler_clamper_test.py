@@ -4,7 +4,7 @@
 import pytest
 from decimal import Decimal
 
-from vyper.utils import keccak256
+from vyper.utils import keccak256, method_id
 from vyper.utils import int_bounds
 
 from ivy.frontend.loader import loads
@@ -15,16 +15,9 @@ import ivy
 # we have to make raw calls to avoiding failing on abi encoding
 def _make_tx(address, signature, values):
     # helper function to create data that will fail runtime clamp
-    sig = keccak256(signature.encode()).hex()[:8]
+    sig = method_id(signature).hex()
     data = "".join(int(i).to_bytes(32, "big", signed=i < 0).hex() for i in values)
     ivy.env.raw_call(to_address=address, calldata=f"0x{sig}{data}")
-
-
-# def _make_abi_encode_tx(address, signature, input_types, values):
-#    # helper function to broadcast transactions where data is constructed from abi_encode
-#    sig = keccak256(signature.encode()).hex()[:8]
-#    data = abi.encode(input_types, values).hex()
-#    ivy.env.message_call(address, data=f"0x{sig}{data}")
 
 
 def _make_dynarray_data(offset, length, values):
@@ -417,10 +410,9 @@ def foo(a: uint256, b: int128[6][3][1][8], c: uint256) -> int128[6][3][1][8]:
     assert c.foo(2**127, d, 2**127) == d
 
 
-# TODO selector not found
-# @pytest.mark.parametrize("bad_value", [2**127, -(2**127) - 1, 2**255 - 1, -(2**255)])
-# @pytest.mark.parametrize("idx", range(12))
-def multidimension_array_clamper_failing():  # bad_value, idx):
+@pytest.mark.parametrize("bad_value", [2**127, -(2**127) - 1, 2**255 - 1, -(2**255)])
+@pytest.mark.parametrize("idx", range(12))
+def test_multidimension_array_clamper_failing(bad_value, idx):
     bad_value = 2**127
     idx = 0
     code = """
@@ -433,8 +425,9 @@ def foo(b: int128[6][1][2]) -> int128[6][1][2]:
     values[idx] = bad_value
 
     c = loads(code)
+
     with pytest.raises(DecodeError):
-        _make_tx(c.address, "foo(int128[6][1][2]])", values)
+        _make_tx(c.address, "foo(int128[6][1][2])", values)
 
 
 @pytest.mark.parametrize("value", [0, 1, -1, 2**127 - 1, -(2**127)])
@@ -453,7 +446,7 @@ def foo(a: uint256, b: DynArray[int128, 5], c: uint256) -> DynArray[int128, 5]:
 # TODO: selector not found
 @pytest.mark.parametrize("bad_value", [2**127, -(2**127) - 1, 2**255 - 1, -(2**255)])
 @pytest.mark.parametrize("idx", range(5))
-def int128_dynarray_clamper_failing(bad_value, idx):
+def test_int128_sarray_clamper_failing(bad_value, idx):
     code = """
 @external
 def foo(b: int128[5]) -> int128[5]:
@@ -462,7 +455,7 @@ def foo(b: int128[5]) -> int128[5]:
 
     values = [0] * 5
     values[idx] = bad_value
-    signature = "foo(int128[])"
+    signature = "foo(int128[5])"
 
     c = loads(code)
 
