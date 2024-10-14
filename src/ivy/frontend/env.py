@@ -1,5 +1,5 @@
 import random
-from typing import Any, Optional, TypeAlias
+from typing import Any, Optional, TypeAlias, Union
 
 from vyper import ast as vy_ast
 
@@ -46,6 +46,22 @@ class Env:
 
     def alias(self, address, name):
         self._aliases[Address(address).canonical_address] = name
+
+    def raw_call(
+        self,
+        to_address: _AddressType = Address(0),
+        sender: Optional[_AddressType] = None,
+        value: int = 0,
+        calldata: Union[bytes, str] = b"",
+        is_modifying: bool = True,
+    ) -> Any:
+        if isinstance(calldata, str):
+            assert calldata.startswith("0x")
+            calldata = bytes.fromhex(calldata[2:])
+
+        ret = self.execute_code(to_address, sender, value, calldata, is_modifying)
+
+        return ret
 
     def deploy(
         self,
