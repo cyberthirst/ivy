@@ -45,28 +45,37 @@ class VyperEvaluator(BaseEvaluator):
         return True
 
     @staticmethod
+    def validate_sequence_len(value, typ):
+        if len(value) > typ.length:
+            raise ValueError(
+                f"Invalid length for {typ}: expected at most {typ.count}, got {len(value)}"
+            )
+
+    @staticmethod
     def validate_bytes(value, typ):
-        return True
+        VyperEvaluator.validate_sequence_len(value, typ)
 
     @staticmethod
     def validate_string(value, typ):
-        return True
+        VyperEvaluator.validate_sequence_len(value, typ)
 
     @staticmethod
     def validate_sequence(value, typ):
-        return True
+        VyperEvaluator.validate_sequence_len(value, typ)
+        for item in value:
+            VyperEvaluator.validate_value(item, typ.value_type)
 
     @staticmethod
     def validate_struct(value, typ):
-        return True
+        pass
 
     @staticmethod
     def validate_hashmap(value, typ):
-        return True
+        pass
 
     @staticmethod
     def validate_interface(value, typ):
-        return True
+        pass
 
     type_validators = {
         "IntegerT": validate_integer,
@@ -77,6 +86,8 @@ class VyperEvaluator(BaseEvaluator):
         "StructT": validate_struct,
         "HashMapT": validate_hashmap,
         "InterfaceT": validate_interface,
+        "SArrayT": validate_sequence,
+        "DynArrayT": validate_sequence,
     }
 
     @classmethod

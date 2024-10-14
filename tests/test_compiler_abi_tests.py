@@ -47,7 +47,7 @@ def f(x: Bytes[32 * 3]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # env.message_call(c.address, data=data)
+        # TODO env.message_call(c.address, data=data)
         pass
 
 
@@ -83,7 +83,7 @@ def f(x: Bytes[32 * 5]):
 
     data += _abi_payload_from_tuple(payload)
 
-    # env.message_call(c.address, data=data)
+    # TODO env.message_call(c.address, data=data)
 
 
 def test_abi_decode_child_head_points_to_parent():
@@ -288,7 +288,7 @@ def f(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # env.message_call(c.address, data=data)
+        # TODO env.message_call(c.address, data=data)
         pass
 
 
@@ -328,7 +328,7 @@ def f(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # env.message_call(c.address, data=data)
+        # TODO env.message_call(c.address, data=data)
         pass
 
 

@@ -354,14 +354,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             pass
 
     def get_variable(self, name: str):
-        print(self.memory)
         if name in self.globals:
             return self.globals[name].value
         else:
             return self.memory[name]
 
     def set_variable(self, name: str, value):
-        print(f"assigning {name} = {value}")
         if name in self.globals:
             with self.modifiable_context(name):
                 var = self.globals[name]

@@ -111,12 +111,13 @@ def _decode_r(abi_t: ABIType, current_offset: int, payload: bytes):
             raise DecodeError(f"invalid {u}int{abi_t.m_bits}")
 
         if isinstance(abi_t, ABI_Address):
+            # TODO should we reeturn here an Address() object?
             return to_checksum_address(ret.to_bytes(20, "big"))
 
         if isinstance(abi_t, ABI_Bool):
             if ret not in (0, 1):
                 raise DecodeError("invalid bool")
-            return ret
+            return True if ret == 1 else False
 
         return ret
 
