@@ -64,11 +64,13 @@ class Code:
 
 
 class ExecutionContext:
-    def __init__(self, acc: Account, msg: Message, module: Optional[ModuleT]):
+    def __init__(
+        self, acc: Account, msg: Message, contract_data: Optional[ContractData]
+    ):
         self.acc = acc
         if acc.contract_data is None:
-            assert module is not None
-            acc.contract_data = ContractData(module)
+            assert contract_data is not None
+            self.contract = contract_data
         else:
             self.contract = acc.contract_data
         self.function = None

@@ -214,10 +214,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         new_account = self.state[message.create_address]
         self.accessed_accounts.add(new_account)
 
-        module_t = message.code.module_t
-        assert isinstance(module_t, ModuleT)
-        new_account.contract_data = ContractData(module_t)
-        exec_ctx = ExecutionContext(new_account, message, module_t)
+        exec_ctx = ExecutionContext(new_account, message, message.code)
         self.execution_ctxs.append(exec_ctx)
 
         output = EVMOutput()
@@ -228,6 +225,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                     raise EVMException("Insufficient balance for contract creation")
                 self.state[message.caller].balance -= message.value
 
+            module_t = message.code.module_t
+
             for decl in module_t.variable_decls:
                 name = decl.target.id
                 typ = decl._metadata["type"]
@@ -236,6 +235,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
             if module_t.init_function is not None:
                 self._execute_function(module_t.init_function, message.data)
+
+            new_account.contract_data = message.code
 
         except Exception as e:
             # TODO rollback the journal
