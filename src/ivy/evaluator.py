@@ -1,6 +1,20 @@
 from abc import ABC, abstractmethod
 from typing import Any
 from collections import defaultdict
+from operator import (
+    add,
+    sub,
+    mul,
+    truediv,
+    floordiv,
+    mod,
+    pow,
+    lshift,
+    rshift,
+    and_,
+    or_,
+    xor,
+)
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import BoolT, InterfaceT
@@ -10,34 +24,15 @@ from vyper.semantics.types.bytestrings import BytesT, StringT
 from vyper.semantics.types.user import StructT
 
 from ivy.types import Address
-
-
-class BaseEvaluator(ABC):
-    @abstractmethod
-    def eval_boolop(self, op, values):
-        pass
-
-    @abstractmethod
-    def eval_unaryop(self, op, operand):
-        pass
-
-    @abstractmethod
-    def eval_binop(self, op, left, right, aug_assign=False):
-        pass
-
-    @abstractmethod
-    def eval_compare(self, op, left, right):
-        pass
-
-    @abstractmethod
-    def default_value(self, typ):
-        pass
+from ivy.visitor import BaseClassVisitor
 
 
 class VyperValidator:
     @classmethod
     def validate_IntegerT(cls, value, typ):
-        # For now, just return True
+        lo, hi = typ.ast_bounds
+        if not lo <= value <= hi:
+            raise ValueError(f"Value {value} out of bounds for {typ}")
         return True
 
     @classmethod
@@ -77,6 +72,9 @@ class VyperValidator:
     def validate_InterfaceT(cls, value, typ):
         pass
 
+    # TODO: create a proper generic visitor (duplicated code with BaseVisitor)
+    # currently we don't inherit from BaseVisitor as it's instance based, also
+    # we retrieve the type from metadata
     @classmethod
     def validate_value(cls, node, value):
         typ = node._metadata["type"]
@@ -85,18 +83,108 @@ class VyperValidator:
         validator(value, typ)
 
 
-class VyperEvaluator(BaseEvaluator, VyperValidator):
+class VyperEvaluator(BaseClassVisitor, VyperValidator):
+    @classmethod
+    def visit_And(cls, _, values):
+        return all(values)
+
+    @classmethod
+    def visit_Or(cls, _, values):
+        return any(values)
+
+    @classmethod
+    def visit_Not(cls, _, operand):
+        return not operand
+
+    @classmethod
+    def visit_USub(cls, _, operand):
+        return -operand
+
+    @classmethod
+    def visit_Invert(cls, _, operand):
+        return ~operand
+
+    @classmethod
+    def visit_Add(cls, _, left, right):
+        return add(left, right)
+
+    @classmethod
+    def visit_Sub(cls, _, left, right):
+        return sub(left, right)
+
+    @classmethod
+    def visit_Mult(cls, _, left, right):
+        return mul(left, right)
+
+    @classmethod
+    def visit_Div(cls, _, left, right):
+        return truediv(left, right)
+
+    @classmethod
+    def visit_FloorDiv(cls, _, left, right):
+        return floordiv(left, right)
+
+    @classmethod
+    def visit_Mod(cls, _, left, right):
+        return mod(left, right)
+
+    @classmethod
+    def visit_Pow(cls, _, left, right):
+        return pow(left, right)
+
+    @classmethod
+    def visit_LShift(cls, _, left, right):
+        return lshift(left, right)
+
+    @classmethod
+    def visit_RShift(cls, _, left, right):
+        return rshift(left, right)
+
+    @classmethod
+    def visit_BitOr(cls, _, left, right):
+        return or_(left, right)
+
+    @classmethod
+    def visit_BitXor(cls, _, left, right):
+        return xor(left, right)
+
+    @classmethod
+    def visit_BitAnd(cls, _, left, right):
+        return and_(left, right)
+
+    @classmethod
+    def visit_Eq(cls, _, left, right):
+        return left == right
+
+    @classmethod
+    def visit_NotEq(cls, _, left, right):
+        return left != right
+
+    @classmethod
+    def visit_Lt(cls, _, left, right):
+        return left < right
+
+    @classmethod
+    def visit_LtE(cls, _, left, right):
+        return left <= right
+
+    @classmethod
+    def visit_Gt(cls, _, left, right):
+        return left > right
+
+    @classmethod
+    def visit_GtE(cls, _, left, right):
+        return left >= right
+
     @classmethod
     def eval_boolop(cls, op, values):
-        eval = op.op._op
-        res = eval(values)
+        res = cls.visit(op.op, values)
         cls.validate_value(op, res)
         return res
 
     @classmethod
     def eval_unaryop(cls, op, operand):
-        eval = op.op._op
-        res = eval(operand)
+        res = cls.visit(op.op, operand)
         cls.validate_value(op, res)
         return res
 
@@ -104,8 +192,7 @@ class VyperEvaluator(BaseEvaluator, VyperValidator):
     # alternatively we could fetch the type at the call site and have it passed in
     @classmethod
     def eval_binop(cls, op: ast.BinOp, left: Any, right: Any, aug_assign=False):
-        eval = op.op._op
-        res = eval(left, right)
+        res = cls.visit(op.op, left, right)
         if aug_assign:
             cls.validate_value(op.target, res)
         else:
@@ -114,8 +201,7 @@ class VyperEvaluator(BaseEvaluator, VyperValidator):
 
     @classmethod
     def eval_compare(cls, op: ast.Compare, left, right):
-        eval = op.op._op
-        res = eval(left, right)
+        res = cls.visit(op.op, left, right)
         cls.validate_value(op, res)
         return res
 
