@@ -83,6 +83,8 @@ class VyperValidator:
         validator(value, typ)
 
 
+# TODO maybe rethink the direct usage of operators and add explicit validation
+# so we better mimic safe math operations
 class VyperEvaluator(BaseClassVisitor, VyperValidator):
     @classmethod
     def visit_And(cls, _, values):
@@ -122,14 +124,38 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
 
     @classmethod
     def visit_FloorDiv(cls, _, left, right):
-        return floordiv(left, right)
+        if right == 0:
+            raise ZeroDivisionError("Cannot divide by zero")
+        # python has different rounding semantics than vyper
+        # vyper rounds towards zero, python towards negative infinity
+        # thus we need to use a custom function
+        sign = -1 if (left * right) < 0 else 1
+        return sign * (abs(left) // abs(right))
 
     @classmethod
     def visit_Mod(cls, _, left, right):
-        return mod(left, right)
+        if right == 0:
+            raise ZeroDivisionError("Cannot modulo by zero")
+        sgn = -1 if left < 0 else 1
+        return sgn * (abs(left) % abs(right))
 
     @classmethod
     def visit_Pow(cls, _, left, right):
+        # exponentiation by negative number is not allowed as negative numbers
+        # are represented via two's complement in EVM and thus the exponentiation
+        # would lead to overflow for any base but 0, 1, -1
+        # for consistency, Vyper disallows it for all bases and we follow this
+        # so this is basically just a quick path out
+        if right < 0:
+            raise ValueError("Exponentiation by negative number")
+
+        # optimization - calling `pow` with large numbers is computationally expensive
+        # when we're sure the result won't fit in 256 bits, we raise an error early
+        if left not in (0, 1, -1) and abs(right) > 256:
+            raise ValueError(
+                f"Exponentiation {left} ** {right} too large for the given type"
+            )
+
         return pow(left, right)
 
     @classmethod
