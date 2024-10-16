@@ -25,6 +25,11 @@ class Env:
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
 
+    def clear_state(self):
+        self.interpreter = VyperInterpreter()
+        self._aliases = {}
+        self.eoa = self.generate_address("eoa")
+
     @classmethod
     def get_singleton(cls):
         if cls._singleton is None:
