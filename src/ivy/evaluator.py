@@ -34,68 +34,58 @@ class BaseEvaluator(ABC):
         pass
 
 
-class VyperEvaluator(BaseEvaluator):
-    @staticmethod
-    def validate_integer(value, typ):
+class VyperValidator:
+    @classmethod
+    def validate_IntegerT(cls, value, typ):
         # For now, just return True
         return True
 
-    @staticmethod
-    def validate_bool(value, typ):
+    @classmethod
+    def validate_BoolT(cls, value, typ):
         return True
 
-    @staticmethod
-    def validate_sequence_len(value, typ):
+    @classmethod
+    def validate_sequence_len(cls, value, typ):
         if len(value) > typ.length:
             raise ValueError(
                 f"Invalid length for {typ}: expected at most {typ.count}, got {len(value)}"
             )
 
-    @staticmethod
-    def validate_bytes(value, typ):
-        VyperEvaluator.validate_sequence_len(value, typ)
+    @classmethod
+    def validate_BytesT(cls, value, typ):
+        cls.validate_sequence_len(value, typ)
 
-    @staticmethod
-    def validate_string(value, typ):
-        VyperEvaluator.validate_sequence_len(value, typ)
+    @classmethod
+    def validate_StringT(cls, value, typ):
+        cls.validate_sequence_len(value, typ)
 
-    @staticmethod
-    def validate_sequence(value, typ):
-        VyperEvaluator.validate_sequence_len(value, typ)
+    @classmethod
+    def validate_SequenceT(cls, value, typ):
+        cls.validate_sequence_len(value, typ)
         for item in value:
-            VyperEvaluator.validate_value(item, typ.value_type)
+            cls.validate_value(item, typ.value_type)
 
-    @staticmethod
-    def validate_struct(value, typ):
+    @classmethod
+    def validate_StructT(cls, value, typ):
         pass
 
-    @staticmethod
-    def validate_hashmap(value, typ):
+    @classmethod
+    def validate_HashmapT(cls, value, typ):
         pass
 
-    @staticmethod
-    def validate_interface(value, typ):
+    @classmethod
+    def validate_InterfaceT(cls, value, typ):
         pass
-
-    type_validators = {
-        "IntegerT": validate_integer,
-        "BoolT": validate_bool,
-        "BytesT": validate_bytes,
-        "StringT": validate_string,
-        "_SequenceT": validate_sequence,
-        "StructT": validate_struct,
-        "HashMapT": validate_hashmap,
-        "InterfaceT": validate_interface,
-        "SArrayT": validate_sequence,
-        "DynArrayT": validate_sequence,
-    }
 
     @classmethod
     def validate_value(cls, node, value):
         typ = node._metadata["type"]
-        typ_name = typ.__class__.__name__
-        cls.type_validators[typ_name](value, typ)
+        method_name = f"validate_{typ.__class__.__name__}"
+        validator = getattr(cls, method_name)
+        validator(value, typ)
 
+
+class VyperEvaluator(BaseEvaluator, VyperValidator):
     @classmethod
     def eval_boolop(cls, op, values):
         eval = op.op._op
@@ -150,8 +140,6 @@ class VyperEvaluator(BaseEvaluator):
         if isinstance(typ, Address) or isinstance(typ, InterfaceT):
             return Address(0)
         return None
-
-        raise NotImplementedError(f"Default value for {typ} not implemented")
 
     @classmethod
     def construct_struct(cls, name, kws):
