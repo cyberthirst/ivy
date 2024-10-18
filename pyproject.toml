@@ -12,6 +12,9 @@ dependencies = [
     "eth-utils>=5.0.0",
     "hypothesis>=6.114.1",
     "rlp>=4.0.1",
+    "pytest-cov>=5.0.0",
+    "pytest-xdist>=3.6.1",
+    "pytest-instafail>=0.5.0",
 ]
 
 
