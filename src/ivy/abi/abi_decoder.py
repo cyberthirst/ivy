@@ -1,5 +1,8 @@
-# NOTICE: this is 1:1 copy of the following code
-# https://github.com/vyperlang/vyper/blob/master/tests/functional/builtins/codegen/abi_decode.py
+# NOTICE: decoder taken from vyper: https://github.com/vyperlang/vyper/blob/master/tests/functional/builtins/codegen/abi_decode.py
+# we follow the decoder almost 1:1, however for certain abi types we return the decoded value via a different type
+# it's done for better compatbility with ivy's data model
+#   - structs get decoded as tuples, ivy returns them as struct objects
+#   - boolean get decoded as ints, ivy returns them as bools
 
 from typing import TYPE_CHECKING, Iterable
 
@@ -18,7 +21,9 @@ from vyper.abi_types import (
     ABIType,
 )
 from vyper.utils import int_bounds, unsigned_to_signed
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT
+
+from ivy.evaluator import VyperEvaluator
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -50,19 +55,30 @@ def abi_decode(typ: VyperType, payload: bytes):
     if not (lo <= len(payload) <= hi):
         raise DecodeError(f"bad payload size {lo}, {len(payload)}, {hi}")
 
-    return _decode_r(abi_t, 0, payload)
+    return _decode_r(abi_t, typ, 0, payload)
 
 
-def _decode_r(abi_t: ABIType, current_offset: int, payload: bytes):
+def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: bytes):
     if isinstance(abi_t, ABI_Tuple):
-        return tuple(_decode_multi_r(abi_t.subtyps, current_offset, payload))
+        assert isinstance(typ, StructT) or isinstance(typ, TupleT)
+        member_typs = typ.tuple_members()
+        res = tuple(
+            _decode_multi_r(abi_t.subtyps, member_typs, current_offset, payload)
+        )
+        if isinstance(typ, StructT):
+            kws = dict(zip(typ.tuple_keys(), res))
+            return VyperEvaluator.construct_struct(typ.name, kws)
+        return res
 
     if isinstance(abi_t, ABI_StaticArray):
+        assert isinstance(typ, SArrayT)
         n = abi_t.m_elems
-        subtypes = [abi_t.subtyp] * n
-        return _decode_multi_r(subtypes, current_offset, payload)
+        abi_subtyps = [abi_t.subtyp] * n
+        subtyps = [typ.subtype] * n
+        return _decode_multi_r(abi_subtyps, subtyps, current_offset, payload)
 
     if isinstance(abi_t, ABI_DynamicArray):
+        assert isinstance(typ, DArrayT)
         bound = abi_t.elems_bound
 
         n = _read_int(payload, current_offset)
@@ -71,8 +87,9 @@ def _decode_r(abi_t: ABIType, current_offset: int, payload: bytes):
 
         # offsets in dynarray start from after the length word
         current_offset += 32
-        subtypes = [abi_t.subtyp] * n
-        return _decode_multi_r(subtypes, current_offset, payload)
+        abi_subtyps = [abi_t.subtyp] * n
+        subtyps = [typ.subtype] * n
+        return _decode_multi_r(abi_subtyps, subtyps, current_offset, payload)
 
     # sanity check
     assert not abi_t.is_complex_type()
@@ -111,7 +128,7 @@ def _decode_r(abi_t: ABIType, current_offset: int, payload: bytes):
             raise DecodeError(f"invalid {u}int{abi_t.m_bits}")
 
         if isinstance(abi_t, ABI_Address):
-            # TODO should we reeturn here an Address() object?
+            # TODO should we return here an Address() object?
             return to_checksum_address(ret.to_bytes(20, "big"))
 
         if isinstance(abi_t, ABI_Bool):
@@ -134,22 +151,27 @@ def _decode_r(abi_t: ABIType, current_offset: int, payload: bytes):
 
 
 def _decode_multi_r(
-    types: Iterable[ABIType], outer_offset: int, payload: bytes
+    abi_typs: Iterable[ABIType],
+    typs: Iterable[VyperType],
+    outer_offset: int,
+    payload: bytes,
 ) -> list:
     ret = []
     static_ofst = outer_offset
 
-    for sub_t in types:
-        if sub_t.is_dynamic():
+    assert len(abi_typs) == len(typs)
+
+    for abi_sub_t, sub_t in zip(abi_typs, typs):
+        if abi_sub_t.is_dynamic():
             # "head" terminology from abi spec
             head = _read_int(payload, static_ofst)
             ofst = outer_offset + head
         else:
             ofst = static_ofst
 
-        item = _decode_r(sub_t, ofst, payload)
+        item = _decode_r(abi_sub_t, sub_t, ofst, payload)
 
         ret.append(item)
-        static_ofst += sub_t.embedded_static_size()
+        static_ofst += abi_sub_t.embedded_static_size()
 
     return ret

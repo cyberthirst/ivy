@@ -4,11 +4,14 @@ from typing import Optional
 from vyper.ast import nodes as ast
 from vyper.semantics.types import TYPE_T, InterfaceT, StructT
 
+from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
 from ivy.types import Address
 
 
 class ExprVisitor(BaseVisitor):
+    evaluator: VyperEvaluator
+
     def visit_Int(self, node: ast.Int):
         # literals are validated in Vyper
         return node.value
@@ -47,13 +50,6 @@ class ExprVisitor(BaseVisitor):
             )
         else:
             obj = self.visit(node.value)
-            typ = node.value._metadata["type"]
-            # an exceptional case where we expect obj of type struct, but instead we received a tuple
-            # this happens when a struct is decoded - the abi typ of the struct is tuple
-            # NOTE: it might be better to treat structs as tuples in the first place
-            if isinstance(typ, StructT) and isinstance(obj, tuple):
-                # get keys and retrieve the index of the attribute, then return the value at the index
-                return obj[typ.tuple_keys().index(node.attr)]
             return getattr(obj, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
