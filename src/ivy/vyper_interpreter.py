@@ -111,6 +111,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.increment_nonce(sender.canonical_address)
         return Address(compute_contract_address(sender.canonical_address, nonce))
 
+    def get_balance(self, address):
+        return self.state[address].balance
+
+    def set_balance(self, address, value):
+        self.state[address].balance = value
+
     def execute_tx(
         self,
         sender: Address,

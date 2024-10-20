@@ -68,6 +68,16 @@ class Env:
 
         return ret
 
+    def get_balance(self, address: _AddressType) -> int:
+        return self.interpreter.get_balance(Address(address))
+
+    def set_balance(self, address: _AddressType, value: int):
+        self.interpreter.set_balance(Address(address), value)
+
+    @property
+    def deployer(self):
+        return self.eoa
+
     def deploy(
         self,
         module: vy_ast.Module,
