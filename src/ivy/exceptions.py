@@ -4,3 +4,12 @@ class EVMException(Exception):
 
 class StaticCallViolation(EVMException):
     pass
+
+
+class GasReference(EVMException):
+    def __init__(self, message="Gas is not a supported concept in Ivy"):
+        super().__init__(message)
+
+
+class AccessViolation(Exception):
+    pass

@@ -4,7 +4,16 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
-from vyper.semantics.types import VyperType, TYPE_T, InterfaceT, StructT
+from vyper.semantics.analysis.base import StateMutability
+from vyper.semantics.types import (
+    VyperType,
+    TYPE_T,
+    InterfaceT,
+    StructT,
+    MemberFunctionT,
+    DArrayT,
+    BoolT,
+)
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
     ContractFunctionT,
@@ -22,8 +31,16 @@ import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data, compute_contract_address
 from ivy.abi import abi_decode, abi_encode
 from ivy.journal import Journal
-from ivy.exceptions import EVMException, StaticCallViolation
+from ivy.exceptions import (
+    EVMException,
+    StaticCallViolation,
+    AccessViolation,
+    GasReference,
+)
 from ivy.types import Address
+
+
+REENTRANT_KEY = "$.nonreentrant_key"
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor):
@@ -265,7 +282,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         if selector not in entry_points:
             # TODO check fallback
-            # TODO rollback the journal
             raise Exception(f"function {selector} not found")
         else:
             entry_point = entry_points[selector]
@@ -305,7 +321,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self._push_fun_ctx(func_t)
         self._push_scope()
 
-        # TODO handle reentrancy lock
+        if func_t.nonreentrant:
+            self.lock(func_t.mutability)
+
         func_args = func_t.arguments
         for arg, param in zip(args, func_args):
             self._new_variable(param.name, param.typ)
@@ -318,9 +336,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 default_value = self.visit(param.default_value)
                 self.set_variable(param.name, default_value)
 
-    def _epilogue(self, *args):
-        # TODO handle reentrancy lock
-        # TODO handle return value
+    def _epilogue(self, func_t):
+        if func_t.nonreentrant:
+            self.unlock(func_t.mutability)
         self._pop_scope()
         self._pop_fun_ctx()
         pass
@@ -337,7 +355,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def _execute_function(self, func_t, args):
         self._prologue(func_t, args)
         self._exec_body()
-        self._epilogue()
+        self._epilogue(func_t)
 
         return self.exec_ctx.output
 
@@ -514,7 +532,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
-            if id == "raw_call":
+            if id == "raw_call" or "send":
                 # dependency injection
                 args = (self.message_call,) + args
             elif id == "abi_encode" or id == "_abi_encode":
@@ -532,6 +550,17 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 assert isinstance(typedef, StructT)
                 assert len(args) == 0
                 return VyperEvaluator.construct_struct(typedef.name, kws)
+
+        if isinstance(func_t, MemberFunctionT):
+            # the function is an attribute of the array
+            darray = self.visit(call.func.value)
+            assert isinstance(darray, list)
+            if func_t.name == "append":
+                pass
+            else:
+                assert func_t.name == "pop"
+
+        assert isinstance(func_t, ContractFunctionT)
 
         if func_t.is_external:
             assert target is not None
@@ -561,6 +590,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             return kwargs["default_return_value"]
 
         typ = func_t.return_type
+
+        if typ is None:
+            return None
+
         typ = calculate_type_for_external_return(typ)
         abi_typ = typ.abi_type
 

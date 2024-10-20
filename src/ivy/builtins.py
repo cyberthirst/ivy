@@ -8,6 +8,7 @@ from vyper.utils import method_id
 from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
 from ivy.evm_structures import EVMOutput
+from ivy.exceptions import GasReference
 from ivy.types import Address
 
 
@@ -94,6 +95,12 @@ def builtin_method_id(method: str, output_type: VyperType = None):
     return method_id(method)
 
 
+def builtin_send(mesage_call, to, value, gas: int = 0) -> None:
+    if gas != 0:
+        raise GasReference()
+    builtin_raw_call(mesage_call, to, b"", value=value)
+
+
 def builtin_raw_call(
     message_call: Callable,
     to: Address,
@@ -106,7 +113,7 @@ def builtin_raw_call(
     revert_on_failure: bool = True,
 ):
     if gas is not None:
-        raise NotImplementedError("Gas is not supported in AST interpreter!")
+        raise GasReference()
 
     assert not (is_static_call and is_delegate_call)
     assert not (value != 0 and (is_static_call or is_delegate_call))

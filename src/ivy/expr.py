@@ -9,10 +9,43 @@ from ivy.visitor import BaseVisitor
 from ivy.types import Address
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
+ADDRESS_VARIABLES = {
+    "address",
+    "balance",
+    "codesize",
+    "is_contract",
+    "codehash",
+    "code",
+}
 
 
 class ExprVisitor(BaseVisitor):
     evaluator: VyperEvaluator
+
+    @abstractmethod
+    def generic_call_handler(
+        self,
+        func,
+        args,
+        kws,
+        typs,
+        target: Optional[Address] = None,
+        is_static: Optional[bool] = None,
+    ):
+        pass
+
+    @property
+    @abstractmethod
+    def current_address(self):
+        pass
+
+    @abstractmethod
+    def _handle_env_variable(self, node: ast.Attribute):
+        pass
+
+    @abstractmethod
+    def _handle_address_variable(self, node: ast.Attribute):
+        pass
 
     def visit_Int(self, node: ast.Int):
         # literals are validated in Vyper
@@ -133,24 +166,3 @@ class ExprVisitor(BaseVisitor):
                 typs += (typ,)
         kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
         return self.generic_call_handler(node, args, kws, typs, target, is_static)
-
-    @abstractmethod
-    def generic_call_handler(
-        self,
-        func,
-        args,
-        kws,
-        typs,
-        target: Optional[Address] = None,
-        is_static: Optional[bool] = None,
-    ):
-        pass
-
-    @property
-    @abstractmethod
-    def current_address(self):
-        pass
-
-    @abstractmethod
-    def _handle_env_variable(self, node: ast.Attribute):
-        pass
