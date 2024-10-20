@@ -435,6 +435,28 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory.new_variable(name, typ)
 
+    def _handle_address_variable(self, node: ast.Attribute):
+        # x.address
+        if node.attr == "address":
+            return self.visit(node.value)
+        # x.balance: balance of address x
+        if node.attr == "balance":
+            addr = self.visit(node.value)
+            return self.get_balance(addr)
+        # x.codesize: codesize of address x
+        elif node.attr == "codesize" or node.attr == "is_contract":
+            addr = self.visit(node.value)
+            if node.attr == "codesize":
+                raise NotImplementedError("codesize")
+            else:
+                return self.get_code(addr) is not None
+        # x.codehash: keccak of address x
+        elif node.attr == "codehash":
+            raise NotImplementedError("codehash")
+        # x.code: codecopy/extcodecopy of address x
+        elif node.attr == "code":
+            raise NotImplementedError("code")
+
     def _handle_env_variable(self, node: ast.Attribute):
         key = f"{node.value.id}.{node.attr}"
         if key == "msg.sender":

@@ -54,6 +54,8 @@ class ExprVisitor(BaseVisitor):
             isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
         ):
             return self._handle_env_variable(node)
+        elif node.attr in ADDRESS_VARIABLES:
+            return self._handle_address_variable(node)
         else:
             obj = self.visit(node.value)
             return getattr(obj, node.attr)
