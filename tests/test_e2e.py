@@ -1255,3 +1255,71 @@ def test_encode_address():
 
     c = loads(src)
     assert c.foo() == c.address
+
+
+def test_init(get_contract):
+    src = """
+d: public(uint256)
+
+@deploy
+def __init__(a: uint256):
+    self.d = a 
+    """
+
+    c = get_contract(src, 42)
+    assert c.d() == 42
+
+
+def test_init2(get_contract):
+    src = """
+d: public(uint256)
+
+@deploy
+def __init__(a: uint256):
+    self.bar()
+   
+   
+def bar():
+    self.d = self.foo() 
+    
+def foo() -> uint256:
+    return 42
+    """
+
+    c = get_contract(src, 42)
+    assert c.d() == 42
+
+
+def test_init3(get_contract):
+    src = """
+d: public(uint256)
+
+@deploy
+def __init__():
+    assert self.is_contract == False
+    """
+
+    _ = get_contract(src)
+
+
+def test_init4(get_contract):
+    src = """
+interface C:
+    def foo(a: uint256): nonpayable
+
+@deploy
+def __init__(callback: address, a: uint256):
+    extcall C(callback).foo(a) 
+    """
+
+    callback = """
+d: public(uint256)
+
+@external
+def foo(a: uint256):
+    self.d = a
+"""
+
+    callback = get_contract(callback)
+    _ = get_contract(src, callback, 42)
+    assert callback.d() == 42

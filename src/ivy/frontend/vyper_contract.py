@@ -110,7 +110,6 @@ class VyperContract:
 
         address = self.env.deploy(
             module=module,
-            *args,
             raw_args=encoded_args,
             value=value,
         )

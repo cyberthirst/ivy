@@ -81,7 +81,6 @@ class Env:
     def deploy(
         self,
         module: vy_ast.Module,
-        *args: Any,
         raw_args: bytes = None,
         sender: Optional[_AddressType] = None,
         value: int = 0,

@@ -218,7 +218,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 self.state[message.to].balance += message.value
 
             if message.code:
-                self._handle_incomming_extcall()
+                self._dispatch()
 
             output.data = self.exec_ctx.output
 
@@ -246,7 +246,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         try:
             if message.value > 0:
                 if self.state[message.caller].balance < message.value:
-                    raise EVMException("Insufficient balance for contract creation")
+                    raise EVMException(
+                        f"Insufficient balance: {self.state[message.caller].balance} < {message.value}"
+                    )
                 self.state[message.caller].balance -= message.value
 
             module_t = message.code.module_t
@@ -260,10 +262,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             # allocate a nonreentrant key for all contracts, they might not use it
             self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
 
-            if module_t.init_function is not None:
-                self._execute_function(module_t.init_function, message.data)
+            new_contract_code = message.code
 
-            new_account.contract_data = message.code
+            if module_t.init_function is not None:
+                new_contract_code = self._execute_init_function(module_t.init_function)
+
+            new_account.contract_data = new_contract_code
 
         except Exception as e:
             # TODO rollback the journal
@@ -277,30 +281,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     def get_code(self, address):
         return self.state[address].contract_data
-
-    def _dispatch(self):
-        if len(self.msg.data) < 4:
-            raise FunctionNotFound()
-
-        selector = self.msg.data[:4]
-
-        entry_points = self.exec_ctx.entry_points
-
-        if selector not in entry_points:
-            raise FunctionNotFound()
-        else:
-            entry_point = entry_points[selector]
-
-        if entry_point.function.is_payable:
-            if self.msg.value != 0:
-                # TODO raise and rollback
-                pass
-
-        # check args
-
-        # check decorators
-
-        return entry_point
 
     def lock(self, mutability):
         lock = self.get_variable(REENTRANT_KEY)
@@ -346,35 +326,40 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             self.unlock(func_t.mutability)
         self._pop_scope()
         self._pop_fun_ctx()
-        pass
 
-    def _exec_body(self):
-        for stmt in self.fun_ctx.function.decl_node.body:
-            try:
-                self.visit(stmt)
-            except ReturnException as e:
-                # TODO handle the return value
-                self.exec_ctx.output = e.value
-                break
+    def _execute_init_function(self, func_t):
+        _, calldata_args_t = compute_call_abi_data(func_t, 0)
+        min_size = calldata_args_t.abi_type.static_size()
+        self._min_calldata_size_check(min_size)
+        # msg.data doesn't contain bytecode in ivy's case
+        args = abi_decode(calldata_args_t, self.msg.data)
 
-    def _execute_function(self, func_t, args):
-        self._prologue(func_t, args)
-        self._exec_body()
-        self._epilogue(func_t)
+        return self._execute_function(func_t, args)
 
-        return self.exec_ctx.output
+    def _min_calldata_size_check(self, min_size):
+        if len(self.msg.data) < min_size:
+            raise BufferError(f"Provided calldata is too small, min_size is {min_size}")
 
-    def _handle_incomming_extcall(self):
-        func_t = None
-        args = ()
-
+    def _dispatch(self):
         try:
-            entry_point = self._dispatch()
+            if len(self.msg.data) < 4:
+                raise FunctionNotFound()
 
-            if entry_point.calldata_min_size > len(self.msg.data):
-                raise BufferError(
-                    f"Provided calldata is too small, min_size is {entry_point.calldata_min_size}"
-                )
+            selector = self.msg.data[:4]
+
+            entry_points = self.exec_ctx.entry_points
+
+            if selector not in entry_points:
+                raise FunctionNotFound()
+            else:
+                entry_point = entry_points[selector]
+
+            if entry_point.function.is_payable:
+                if self.msg.value != 0:
+                    # TODO raise and rollback
+                    pass
+
+            self._min_calldata_size_check(entry_point.calldata_min_size)
 
             func_t = entry_point.function
             args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
@@ -382,15 +367,17 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         except FunctionNotFound as e:
             if self.exec_ctx.contract.fallback:
                 func_t = self.exec_ctx.contract.fallback
+                args = ()
             else:
                 raise e
 
-        self.exec_ctx.function = func_t
+        self._execute_external_function(func_t, args)
 
+    def _execute_external_function(self, func_t, args):
         self._execute_function(func_t, args)
 
         # abi-encode output
-        typ = self.exec_ctx.function.return_type
+        typ = func_t.return_type
         if typ is None:
             assert self.exec_ctx.output is None
             return None
@@ -401,6 +388,23 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             (output,) if (not isinstance(output, tuple) or len(output) <= 1) else output
         )
         self.exec_ctx.output = abi_encode(typ, output)
+
+    def _execute_function(self, func_t, args):
+        # TODO: rewrite this using a ctx manager?
+        self._prologue(func_t, args)
+
+        for stmt in func_t.decl_node.body:
+            try:
+                self.visit(stmt)
+            except ReturnException as e:
+                self.exec_ctx.output = e.value
+                break
+
+        self._epilogue(func_t)
+
+        if func_t.is_deploy:
+            return self.exec_ctx.contract
+        return self.exec_ctx.output
 
     @contextmanager
     def modifiable_context(self, target):

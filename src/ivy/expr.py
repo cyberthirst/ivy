@@ -75,7 +75,9 @@ class ExprVisitor(BaseVisitor):
         return self.get_variable(node.id)
 
     def visit_Attribute(self, node: ast.Attribute):
-        if isinstance(node.value, ast.Name) and node.value.id == "self":
+        if node.attr in ADDRESS_VARIABLES:
+            return self._handle_address_variable(node)
+        elif isinstance(node.value, ast.Name) and node.value.id == "self":
             try:
                 return self.get_variable(node.attr)
             except KeyError:
@@ -87,8 +89,6 @@ class ExprVisitor(BaseVisitor):
             isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
         ):
             return self._handle_env_variable(node)
-        elif node.attr in ADDRESS_VARIABLES:
-            return self._handle_address_variable(node)
         else:
             obj = self.visit(node.value)
             return getattr(obj, node.attr)
