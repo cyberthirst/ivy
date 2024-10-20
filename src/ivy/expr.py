@@ -8,6 +8,8 @@ from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
 from ivy.types import Address
 
+ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
+
 
 class ExprVisitor(BaseVisitor):
     evaluator: VyperEvaluator
@@ -48,6 +50,10 @@ class ExprVisitor(BaseVisitor):
             raise NotImplementedError(
                 f"Getting value from {type(node)} not implemented"
             )
+        elif (
+            isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
+        ):
+            return self._handle_env_variable(node)
         else:
             obj = self.visit(node.value)
             return getattr(obj, node.attr)
@@ -141,4 +147,8 @@ class ExprVisitor(BaseVisitor):
     @property
     @abstractmethod
     def current_address(self):
+        pass
+
+    @abstractmethod
+    def _handle_env_variable(self, node: ast.Attribute):
         pass

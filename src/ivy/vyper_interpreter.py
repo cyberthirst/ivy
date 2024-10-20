@@ -412,6 +412,43 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory.new_variable(name, typ)
 
+    def _handle_env_variable(self, node: ast.Attribute):
+        key = f"{node.value.id}.{node.attr}"
+        if key == "msg.sender":
+            return self.msg.caller
+        elif key == "msg.data":
+            return self.msg.data
+        elif (
+            key == "msg.value"
+        ):  # TODO check payble (context and self.context.is_payable:)
+            return self.msg.value
+        elif key in ("msg.gas", "msg.mana"):
+            raise GasReference()
+        elif key == "block.prevrandao":
+            raise NotImplementedError("block.prevrandao")
+        elif key == "block.difficulty":
+            raise NotImplementedError("block.prevrandao")
+        elif key == "block.timestamp":
+            return self.env.time
+        elif key == "block.coinbase":
+            return self.env.coinbase
+        elif key == "block.number":
+            return self.env.number
+        elif key == "block.gaslimit":
+            raise GasReference()
+        elif key == "block.basefee":
+            raise GasReference()
+        elif key == "block.blobbasefee":
+            raise NotImplementedError("block.blobbasefee")
+        elif key == "block.prevhash":
+            raise NotImplementedError("block.prevhash")
+        elif key == "tx.origin":
+            return self.env.origin
+        elif key == "tx.gasprice":
+            raise GasReference()
+        elif key == "chain.id":
+            return self.env.chain_id
+
     def generic_call_handler(
         self,
         call: ast.Call,
