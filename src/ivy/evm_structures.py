@@ -24,6 +24,7 @@ class ContractData:
     constants: dict[str, Any]
     entry_points: dict[bytes, EntryPointInfo]
     global_vars: dict[str, GlobalVariable]
+    fallback: Optional[ContractFunctionT]
 
     def __init__(self, module: ModuleT):
         self.module_t = module
@@ -39,6 +40,9 @@ class ContractData:
         self.entry_points = {}
         self._generate_entry_points()
         self.global_vars = {}
+        self.fallback = next(
+            (f for f in module.exposed_functions if f.is_fallback), None
+        )
 
     def _generate_entry_points(self):
         def process(func_t, calldata_kwargs):
@@ -52,6 +56,9 @@ class ContractData:
             return selector, calldata_min_size, calldata_args_t
 
         for f in self.module_t.exposed_functions:
+            if f.name == "__default__":
+                continue
+
             keyword_args = f.keyword_args
 
             for i, _ in enumerate(keyword_args):

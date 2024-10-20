@@ -36,6 +36,7 @@ from ivy.exceptions import (
     StaticCallViolation,
     AccessViolation,
     GasReference,
+    FunctionNotFound,
 )
 from ivy.types import Address
 
@@ -277,12 +278,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def get_code(self, address):
         return self.state[address].contract_data
 
-    def _dispatch(self, selector):
+    def _dispatch(self):
+        if len(self.msg.data) < 4:
+            raise FunctionNotFound()
+
+        selector = self.msg.data[:4]
+
         entry_points = self.exec_ctx.entry_points
 
         if selector not in entry_points:
-            # TODO check fallback
-            raise Exception(f"function {selector} not found")
+            raise FunctionNotFound()
         else:
             entry_point = entry_points[selector]
 
@@ -360,20 +365,25 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return self.exec_ctx.output
 
     def _handle_incomming_extcall(self):
-        if len(self.msg.data) < 4:
-            # TODO goto fallback or revert
-            pass
+        func_t = None
+        args = ()
 
-        selector = self.msg.data[:4]
-        entry_point = self._dispatch(selector)
+        try:
+            entry_point = self._dispatch()
 
-        if entry_point.calldata_min_size > len(self.msg.data):
-            raise BufferError(
-                f"Provided calldata is too small, min_size is {entry_point.calldata_min_size}"
-            )
+            if entry_point.calldata_min_size > len(self.msg.data):
+                raise BufferError(
+                    f"Provided calldata is too small, min_size is {entry_point.calldata_min_size}"
+                )
 
-        func_t = entry_point.function
-        args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
+            func_t = entry_point.function
+            args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
+
+        except FunctionNotFound as e:
+            if self.exec_ctx.contract.fallback:
+                func_t = self.exec_ctx.contract.fallback
+            else:
+                raise e
 
         self.exec_ctx.function = func_t
 
@@ -532,7 +542,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
-            if id == "raw_call" or "send":
+            if id in ("raw_call", "send"):
                 # dependency injection
                 args = (self.message_call,) + args
             elif id == "abi_encode" or id == "_abi_encode":

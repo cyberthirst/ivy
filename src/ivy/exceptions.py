@@ -13,3 +13,7 @@ class GasReference(EVMException):
 
 class AccessViolation(Exception):
     pass
+
+
+class FunctionNotFound(Exception):
+    pass
