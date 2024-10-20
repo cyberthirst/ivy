@@ -233,6 +233,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 loc = self.get_location_from_decl(decl)
                 self._new_variable(name, typ, loc)
 
+            # allocate a nonreentrant key for all contracts, they might not use it
+            self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
+
             if module_t.init_function is not None:
                 self._execute_function(module_t.init_function, message.data)
 
@@ -271,6 +274,26 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         # check decorators
 
         return entry_point
+
+    def lock(self, mutability):
+        lock = self.get_variable(REENTRANT_KEY)
+        if lock:
+            raise AccessViolation("Reentrancy violation")
+
+        # for view functions we can't write the lock, so we only check it's not locked
+        if mutability == StateMutability.VIEW:
+            return
+
+        self.set_variable(REENTRANT_KEY, True)
+
+    def unlock(self, mutability):
+        lock = self.get_variable(REENTRANT_KEY)
+        if mutability == StateMutability.VIEW:
+            assert lock == False
+            return
+
+        assert lock == True
+        self.set_variable(REENTRANT_KEY, False)
 
     def _prologue(self, func_t, args):
         self._push_fun_ctx(func_t)
