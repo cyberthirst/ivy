@@ -30,7 +30,11 @@ def set_search_path(path: list[str]):
 
 
 def compiler_data(
-    source_code: str, contract_name: str, filename: str | Path, deployer=None, **kwargs
+    source_code: str,
+    contract_name: str,
+    filename: str | Path,
+    input_bundle=None,
+    **kwargs,
 ) -> CompilerData:
     global _disk_cache, _search_path
 
@@ -41,10 +45,10 @@ def compiler_data(
         resolved_path=Path(filename),
     )
     search_paths = get_search_paths(_search_path)
-    input_bundle = FilesystemInputBundle(search_paths)
+    bundle = input_bundle or FilesystemInputBundle(search_paths)
 
     settings = Settings(**kwargs)
-    return CompilerData(file_input, input_bundle, settings)
+    return CompilerData(file_input, bundle, settings)
 
 
 def load(filename: str | Path, *args, **kwargs) -> _Contract:  # type: ignore
@@ -63,9 +67,16 @@ def loads(
     name=None,
     filename=None,
     compiler_args=None,
+    input_bundle=None,
     **kwargs,
 ):
-    d = loads_partial(source_code, name, filename=filename, compiler_args=compiler_args)
+    d = loads_partial(
+        source_code,
+        name,
+        filename=filename,
+        compiler_args=compiler_args,
+        input_bundle=input_bundle,
+    )
     if as_blueprint:
         return d.deploy_as_blueprint(**kwargs)
     else:
@@ -78,6 +89,7 @@ def loads_partial(
     filename: str | Path | None = None,
     dedent: bool = True,
     compiler_args: dict = None,
+    input_bundle=None,
 ) -> VyperDeployer:
     name = name or "VyperContract"  # TODO handle this upstream in CompilerData
     filename = filename or "<unknown>"
@@ -93,7 +105,9 @@ def loads_partial(
     compiler_args = compiler_args or {}
 
     deployer_class = _get_deployer_class()
-    data = compiler_data(source_code, name, filename, deployer_class, **compiler_args)
+    data = compiler_data(
+        source_code, name, filename, input_bundle=input_bundle, **compiler_args
+    )
     return deployer_class(data, filename=filename)
 
 
