@@ -231,6 +231,20 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         return output
 
+    def _allocate_storage(self, module_t: ModuleT):
+        def allocate_r(mod: ModuleT):
+            for decl in mod.variable_decls:
+                name = decl.target.id
+                typ = decl._metadata["type"]
+                loc = self.get_location_from_decl(decl)
+                self._new_variable(name, typ, loc)
+            for module in mod.initialized_modules:
+                allocate_r(module.module_info.module_t)
+
+        allocate_r(module_t)
+        # allocate a nonreentrant key for all contracts, they might not use it
+        self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
+
     def process_create_message(self, message: Message) -> EVMOutput:
         if message.create_address in self.state:
             raise EVMException("Address already taken")
@@ -253,14 +267,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
             module_t = message.code.module_t
 
-            for decl in module_t.variable_decls:
-                name = decl.target.id
-                typ = decl._metadata["type"]
-                loc = self.get_location_from_decl(decl)
-                self._new_variable(name, typ, loc)
-
-            # allocate a nonreentrant key for all contracts, they might not use it
-            self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
+            self._allocate_storage(module_t)
 
             new_contract_code = message.code
 
