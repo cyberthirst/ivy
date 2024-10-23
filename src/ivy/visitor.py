@@ -18,10 +18,6 @@ class BaseVisitor(ABC):
     def get_variable(self, name: str):
         pass
 
-    @abstractmethod
-    def _assign_target(self, target, value):
-        pass
-
 
 class BaseClassVisitor(ABC):
     @classmethod

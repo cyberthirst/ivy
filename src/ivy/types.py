@@ -42,3 +42,9 @@ class Address(str):
     def __repr__(self):
         checksum_addr = super().__repr__()
         return f"Address({checksum_addr})"
+
+
+class Struct(dict):
+    def __init__(self, name, kws):
+        self.name = name
+        super().__init__(kws)

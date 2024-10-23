@@ -1,4 +1,3 @@
-from abc import ABC, abstractmethod
 from typing import Any
 from collections import defaultdict
 from operator import (
@@ -23,7 +22,7 @@ from vyper.semantics.types.subscriptable import _SequenceT, HashMapT
 from vyper.semantics.types.bytestrings import BytesT, StringT
 from vyper.semantics.types.user import StructT
 
-from ivy.types import Address
+from ivy.types import Address, Struct
 from ivy.visitor import BaseClassVisitor
 
 
@@ -255,5 +254,4 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
 
     @classmethod
     def construct_struct(cls, name, kws):
-        StructType = type(name, (object,), kws)
-        return StructType()
+        return Struct(name, kws)
