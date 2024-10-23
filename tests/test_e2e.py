@@ -48,6 +48,21 @@ def foo() -> uint256:
     assert c.foo() == 47
 
 
+def test_storage_array_assign():
+    src = """
+a: DynArray[uint256, 10]
+
+@external
+def foo() -> uint256:
+    self.a = [1, 2]
+    self.a[0] = 3
+    return self.a[0] + self.a[1]
+    """
+
+    c = loads(src)
+    assert c.foo() == 5
+
+
 def test_internal_call():
     src = """
 @internal
@@ -1048,6 +1063,26 @@ def foo() -> uint256:
     assert c.foo() == expected
 
 
+def test_struct4():
+    src = f"""
+struct S:
+    a: uint256
+    b: uint256
+
+s: S
+
+@external
+def foo() -> uint256:
+    self.s = S(a=1, b=2)
+    self.s.a = 3
+    return self.s.a + self.s.b
+    """
+
+    c = loads(src)
+
+    assert c.foo() == 3 + 2
+
+
 def test_tstorage_clearing():
     src = """
     
@@ -1106,14 +1141,16 @@ def bar():
     c.foo()
 
 
-def test_storage_rollback():
-    src = """
+@pytest.mark.parametrize("reverts", [True, False])
+def test_storage_rollback(reverts):
+    reverts = True
+    src = f"""
 c: public(uint256)
     
 @external
 def bar(u: uint256) -> uint256:
     self.c = 10
-    assert False
+    assert {reverts} == False
     return 66
 
 @external
@@ -1126,12 +1163,14 @@ def foo() -> bool:
     """
 
     c = loads(src)
-    assert c.foo() == False
-    assert c.c() == 0
+    success = c.foo()
+    assert success == (not reverts)
+    assert c.c() == (10 if success else 0)
 
 
-def test_storage_rollback2():
-    src = """
+@pytest.mark.parametrize("reverts", [True, False])
+def test_storage_rollback2(reverts):
+    src = f"""
 c: public(uint256)
 
 @external
@@ -1144,7 +1183,7 @@ def bar(u: uint256) -> uint256:
     b: Bytes[32] = b""
     s: bool = False
     s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert False
+    assert {reverts} == False
     return 66
 
 @external
@@ -1157,12 +1196,14 @@ def foo() -> bool:
     """
 
     c = loads(src)
-    assert c.foo() == False
-    assert c.c() == 0
+    success = c.foo()
+    assert success == (not reverts)
+    assert c.c() == (10 if success else 0)
 
 
-def test_storage_rollback3():
-    src = """
+@pytest.mark.parametrize("reverts", [True, False])
+def test_storage_rollback3(reverts):
+    src = f"""
 c: public(uint256)
 
 @external
@@ -1176,7 +1217,7 @@ def bar(u: uint256) -> uint256:
     b: Bytes[32] = b""
     s: bool = False
     s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert False
+    assert {reverts} == False
     return 66
 
 @external
@@ -1189,8 +1230,84 @@ def foo() -> bool:
     """
 
     c = loads(src)
-    assert c.foo() == False
-    assert c.c() == 20
+    success = c.foo()
+    assert success == (not reverts)
+    assert c.c() == (10 if success else 20)
+
+
+@pytest.mark.parametrize("reverts", [True, False])
+def test_storage_rollback4(get_contract, reverts):
+    src = f"""
+c: public(DynArray[uint256, 10])
+
+@external
+def bar(u: uint256) -> uint256:
+    self.c[0] = 2
+    assert {reverts} == False
+    return 66
+
+@external
+def foo() -> bool:
+    self.c = [1]
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s
+    """
+
+    c = get_contract(src)
+    success = c.foo()
+    assert success == (not reverts)
+    assert c.c(0) == (2 if success else 1)
+
+
+@pytest.mark.parametrize("reverts", [True, False])
+def test_storage_rollback5(get_contract, reverts):
+    src = f"""
+struct C:
+    a: uint256 
+    
+c: public(C)
+
+@external
+def bar(u: uint256) -> uint256:
+    self.c.a = 2
+    assert {reverts} == False
+    return 66
+
+@external
+def foo() -> (bool, uint256):
+    self.c.a = 1
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    return s, self.c.a
+    """
+
+    c = get_contract(src)
+    success, c_a = c.foo()
+    assert success == (not reverts)
+    assert c_a == 2 if success else 1
+
+
+# TODO fix me - we currently only expect `tuple` in abi encoder
+# however, we represent structs using dicts
+def test_abi_encode_struct(get_contract):
+    src = f"""
+struct C:
+    a: uint256 
+
+c: public(C)
+
+@external
+def foo() -> C:
+    return self.c 
+    """
+
+    c = get_contract(src)
+    assert c.foo() == (0)
 
 
 def test_hash_map():
@@ -1323,3 +1440,90 @@ def foo(a: uint256):
     callback = get_contract(callback)
     _ = get_contract(src, callback, 42)
     assert callback.d() == 42
+
+
+def test_library_storage(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+exports: lib1.d
+
+@external
+def foo():
+    lib1.bar()
+    """
+
+    lib1 = """
+d: public(uint256)
+
+def bar():
+    self.d = 1
+"""
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == 1
+
+
+def test_library_storage2(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+exports: lib1.d
+
+e: public(uint256)
+
+@external
+def foo():
+    self.e = 1
+    lib1.bar()
+    """
+
+    lib1 = """
+d: public(uint256)
+e: uint256
+
+def bar():
+    self.d = 1
+    self.e = 2
+"""
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == 1
+
+
+def test_library_storage3(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+exports: lib1.d
+
+@external
+def foo():
+    lib1.bar()
+    lib1.d = 2
+    """
+
+    lib1 = """
+d: public(uint256)
+
+def bar():
+    self.d = 1
+"""
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    # assert c.d() == 2

@@ -432,35 +432,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if name in self.globals:
             with self.modifiable_context(name):
                 var = self.globals[name]
+                var.record()
                 var.value = value
         else:
             self.memory[name] = value
-
-    def _assign_target(self, target, value):
-        if isinstance(target, ast.Name):
-            self.set_variable(target.id, value)
-        elif isinstance(target, ast.Tuple):
-            if not isinstance(value, tuple):
-                raise TypeError("Cannot unpack non-iterable to tuple")
-            if len(target.elements) != len(value):
-                raise ValueError("Mismatch in number of items to unpack")
-            for t, v in zip(target.elements, value):
-                self._assign_target(t, v)
-        elif isinstance(target, ast.Subscript):
-            container = self.visit(target.value)
-            index = self.visit(target.slice)
-            container[index] = value
-        elif isinstance(target, ast.Attribute):
-            if isinstance(target.value, ast.Name) and target.value.id == "self":
-                try:
-                    self.set_variable(target.attr, value)
-                except KeyError:
-                    pass
-            else:
-                obj = self.visit(target.value)
-                setattr(obj, target.attr, value)
-        else:
-            raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
     def get_location_from_decl(self, decl: ast.VariableDecl):
         if decl.is_immutable:
@@ -479,6 +454,36 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             self.globals[name] = var
         else:
             self.memory.new_variable(name, typ)
+
+    def _assign_target(self, target, value):
+        if writes := target._expr_info._writes:
+            for w in writes:
+                variable = w.variable
+                name = variable.decl_node.target.id
+                if Journal.journalable_loc(variable.location):
+                    self.globals[name].record()
+        if isinstance(target, ast.Name):
+            self.set_variable(target.id, value)
+        elif isinstance(target, ast.Tuple):
+            if not isinstance(value, tuple):
+                raise TypeError("Cannot unpack non-iterable to tuple")
+            if len(target.elements) != len(value):
+                raise ValueError("Mismatch in number of items to unpack")
+            for t, v in zip(target.elements, value):
+                self._assign_target(t, v)
+        elif isinstance(target, ast.Subscript):
+            container = self.visit(target.value)
+            index = self.visit(target.slice)
+            container[index] = value
+        elif isinstance(target, ast.Attribute):
+            if isinstance(target.value, ast.Name) and target.value.id == "self":
+                self.set_variable(target.attr, value)
+            else:
+                # structs
+                obj = self.visit(target.value)
+                obj[target.attr] = value
+        else:
+            raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
     def _handle_address_variable(self, node: ast.Attribute):
         # x.address

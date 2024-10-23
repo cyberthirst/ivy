@@ -23,6 +23,8 @@ class GlobalVariable:
 
     @value.setter
     def value(self, new_value):
+        self.location[self.name] = new_value
+
+    def record(self):
         old_value = self.location.get(self.name, None)
         Journal().record(JournalEntryType.STORAGE, self.location, self.name, old_value)
-        self.location[self.name] = new_value

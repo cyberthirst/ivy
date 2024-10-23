@@ -1,5 +1,8 @@
 from typing import Any
 from enum import Enum
+import copy
+
+from vyper.semantics.data_locations import DataLocation
 
 
 class JournalEntryType(Enum):
@@ -29,13 +32,17 @@ class Journal:
             cls._instance.initialize()
         return cls._instance
 
+    @classmethod
+    def journalable_loc(cls, location: DataLocation):
+        return location in (DataLocation.STORAGE, DataLocation.TRANSIENT)
+
     def initialize(self):
         self.recorded_entries: list[dict[tuple[int, Any, Any], JournalEntry]] = [{}]
 
     def record(self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any):
         entry_key = (id(obj), key, entry_type.value)
         if entry_key not in self.recorded_entries[-1]:
-            entry = JournalEntry(entry_type, obj, key, old_value)
+            entry = JournalEntry(entry_type, obj, key, copy.deepcopy(old_value))
             self.recorded_entries[-1][entry_key] = entry
 
     def begin_call(self):

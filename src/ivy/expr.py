@@ -91,7 +91,8 @@ class ExprVisitor(BaseVisitor):
             return self._handle_env_variable(node)
         else:
             obj = self.visit(node.value)
-            return getattr(obj, node.attr)
+            return obj[node.attr]
+            # return getattr(obj, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
         value = self.visit(node.value)

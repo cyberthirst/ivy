@@ -4,7 +4,7 @@ from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType
 
-from ivy.journal import Journal
+from ivy.journal import Journal, JournalEntryType, JournalEntry
 from ivy.visitor import BaseVisitor
 
 
@@ -121,48 +121,6 @@ class StmtVisitor(BaseVisitor):
             ):
                 return result
         return None
-
-    def _assign_target2(self, target, value):
-        if isinstance(target, ast.Tuple):
-            if not isinstance(value, tuple):
-                raise TypeError("Cannot unpack non-iterable to tuple")
-            if len(target.elements) != len(value):
-                raise ValueError("Mismatch in number of items to unpack")
-            for t, v in zip(target.elements, value):
-                self._assign_target2(t, v)
-        else:
-            target = self.visit(target)
-            if (varinfo := target._expr_info.var_info) is not None:
-                if Journal.journalable_loc(varinfo.location):
-                    # TODO record the value
-                    pass
-
-            target = value
-            return
-
-    def _assign_target(self, target, value):
-        if isinstance(target, ast.Name):
-            self.set_variable(target.id, value)
-        elif isinstance(target, ast.Tuple):
-            if not isinstance(value, tuple):
-                raise TypeError("Cannot unpack non-iterable to tuple")
-            if len(target.elements) != len(value):
-                raise ValueError("Mismatch in number of items to unpack")
-            for t, v in zip(target.elements, value):
-                self._assign_target(t, v)
-        elif isinstance(target, ast.Subscript):
-            container = self.visit(target.value)
-            index = self.visit(target.slice)
-            container[index] = value
-        elif isinstance(target, ast.Attribute):
-            if isinstance(target.value, ast.Name) and target.value.id == "self":
-                self.set_variable(target.attr, value)
-            else:
-                # structs
-                obj = self.visit(target.value)
-                obj[target.attr] = value
-        else:
-            raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
     @abstractmethod
     def _push_scope(self):
