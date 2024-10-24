@@ -1307,7 +1307,7 @@ def foo() -> C:
     """
 
     c = get_contract(src)
-    assert c.foo() == (0)
+    assert c.foo() == {"a": 0}
 
 
 def test_hash_map():
@@ -1526,4 +1526,65 @@ def bar():
 
     c = get_contract(src, input_bundle=input_bundle)
     c.foo()
-    # assert c.d() == 2
+    assert c.d() == 2
+
+
+def test_library_storage4(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+exports: lib1.d
+exports: lib1.lib2.d2
+
+@external
+def foo():
+    lib1.bar()
+    lib1.d = 4
+    lib1.lib2.d2 = 5
+    """
+
+    lib1 = """
+import lib2
+
+initializes: lib2
+
+d: public(uint256)
+
+def bar():
+    self.d = 1
+"""
+    lib2 = """
+d2: public(uint256)
+
+def bar():
+    self.d2 = 1
+    """
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1, "lib2.vy": lib2})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == 4
+    assert c.d() == 5
+
+
+def test_module_attribute(get_contract):
+    src = """
+struct S:
+    a: uint256
+    
+a: public(DynArray[S, 10])
+
+@external
+def foo():
+    self.a = [S(a=1), S(a=2)]
+    self.a[0] = S(a=3)
+    self.a[1].a = 4
+    """
+
+    c = get_contract(src)
+    c.foo()
+    assert c.a(0) == {"a": 3}
+    assert c.a(1) == {"a": 4}

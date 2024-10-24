@@ -10,7 +10,7 @@ from vyper.semantics.types import TupleT
 from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
-from ivy.types import Address
+from ivy.types import Address, Struct
 
 
 class BaseDeployer(ABC):
@@ -204,7 +204,7 @@ def vyper_object(val, vyper_type):
     # and tag it with _vyper_type metadata
 
     vt = type(val)
-    if vt is bool or vt is Address:
+    if vt is bool or vt is Address or vt is Struct:
         # https://stackoverflow.com/q/2172189
         # bool is not ambiguous wrt vyper type anyways.
         return val

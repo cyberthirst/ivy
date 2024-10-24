@@ -1,4 +1,4 @@
-from typing import Any, Callable
+from typing import Any, Callable, Union
 from eth_utils import to_canonical_address
 from vyper.abi_types import (
     ABI_Address,
@@ -15,6 +15,8 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
+from ivy.types import Struct
+
 
 class EncodeError(Exception):
     pass
@@ -26,7 +28,10 @@ def abi_encode(typ: VyperType, value: Any) -> bytes:
     return _encode_r(abi_t, value)
 
 
-def _encode_tuple(abi_t: ABI_Tuple, value: tuple) -> bytes:
+def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, Struct]) -> bytes:
+    # TODO rethink whether not to represent structs as tuples
+    if isinstance(value, Struct):
+        value = tuple(value.values())
     if not isinstance(value, tuple):
         raise EncodeError(f"Expected tuple, got {type(value)}")
     if len(value) != len(abi_t.subtyps):
