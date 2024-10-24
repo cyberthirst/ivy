@@ -1570,7 +1570,114 @@ def bar():
     assert c.d2() == 5
 
 
-def test_module_attribute(get_contract):
+def test_library_storage5(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+d: public(uint256)
+
+@external
+def foo():
+    self.d = 4
+    lib1.bar()
+    """
+
+    lib1 = """
+d: public(uint256)
+
+def bar():
+    self.d = 1
+"""
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == 4
+
+
+def test_library_storage6(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+exports: lib1.d
+
+@external
+def foo():
+    lib1.bar()
+    lib1.d.s.a[0] = 0
+    lib1.d.b[2] = 7
+    """
+
+    lib1 = """
+struct S:
+    a: DynArray[uint256, 10]
+    
+struct S2:
+    s: S
+    b: DynArray[uint256, 10]
+    
+d: public(S2)
+
+def bar():
+    self.d = S2(s=S(a=[1, 2, 3]), b=[4, 5, 6])
+"""
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == {"s": {"a": [0, 2, 3]}, "b": [4, 5, 7]}
+
+
+def test_library_storage7(get_contract, make_input_bundle):
+    src = """
+import lib1
+
+initializes: lib1
+
+exports: lib1.lib2.d
+
+@external
+def foo():
+    lib1.bar()
+    lib1.lib2.d.s.a[2] = 66
+    lib1.lib2.d.b[1] = 77
+    """
+
+    lib1 = """
+import lib2
+
+initializes: lib2
+
+d: public(uint256)
+
+def bar():
+    lib2.d = lib2.S2(s=lib2.S(a=[1, 2, 3]), b=[4, 5, 6])
+
+"""
+    lib2 = """
+struct S:
+    a: DynArray[uint256, 10]
+    
+struct S2:
+    s: S
+    b: DynArray[uint256, 10]
+    
+d: public(S2)
+    """
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1, "lib2.vy": lib2})
+
+    c = get_contract(src, input_bundle=input_bundle)
+    c.foo()
+    assert c.d() == {"s": {"a": [1, 2, 66]}, "b": [4, 77, 6]}
+
+
+def test_module_struct_attribute(get_contract):
     src = """
 struct S:
     a: uint256

@@ -2,7 +2,8 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TYPE_T, InterfaceT, StructT
+from vyper.semantics.types import TYPE_T, InterfaceT, StructT, SelfT
+from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
@@ -81,18 +82,13 @@ class ExprVisitor(BaseVisitor):
             isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
         ):
             return self._handle_env_variable(node)
-        elif isinstance(node.value, ast.Name) and node.value.id == "self":
-            try:
-                return self.get_variable(node.attr, node)
-            except KeyError:
-                pass
-            raise NotImplementedError(
-                f"Getting value from {type(node)} not implemented"
-            )
+        typ = node.value._metadata["type"]
+        if isinstance(typ, (SelfT, ModuleT)):
+            return self.get_variable(node.attr, node)
         else:
+            assert isinstance(typ, StructT)
             obj = self.visit(node.value)
             return obj[node.attr]
-            # return getattr(obj, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
         value = self.visit(node.value)

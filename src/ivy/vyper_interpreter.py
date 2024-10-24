@@ -465,6 +465,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory.new_variable(name, typ)
 
+    # for state variables we have to resolve their full name because different modules
+    # can share the same variable name
+    # for cases where we know that state variable isn't touched we don't provide the
+    # optional arguments and resolve the name directly
     def _var_qualified_name(
         self,
         name: str,
