@@ -72,23 +72,23 @@ class ExprVisitor(BaseVisitor):
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
             return self.current_address
-        return self.get_variable(node.id)
+        return self.get_variable(node.id, node)
 
     def visit_Attribute(self, node: ast.Attribute):
         if node.attr in ADDRESS_VARIABLES:
             return self._handle_address_variable(node)
+        elif (
+            isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
+        ):
+            return self._handle_env_variable(node)
         elif isinstance(node.value, ast.Name) and node.value.id == "self":
             try:
-                return self.get_variable(node.attr)
+                return self.get_variable(node.attr, node)
             except KeyError:
                 pass
             raise NotImplementedError(
                 f"Getting value from {type(node)} not implemented"
             )
-        elif (
-            isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
-        ):
-            return self._handle_env_variable(node)
         else:
             obj = self.visit(node.value)
             return obj[node.attr]

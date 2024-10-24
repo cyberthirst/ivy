@@ -1,4 +1,7 @@
 from abc import ABC, abstractmethod
+from typing import Optional
+
+from vyper.ast import nodes as ast
 
 
 class BaseVisitor(ABC):
@@ -11,11 +14,11 @@ class BaseVisitor(ABC):
         raise Exception(f"No visit method for {type(node).__name__}")
 
     @abstractmethod
-    def set_variable(self, name: str, value):
+    def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
         pass
 
     @abstractmethod
-    def get_variable(self, name: str):
+    def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
         pass
 
 

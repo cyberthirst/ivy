@@ -1567,7 +1567,7 @@ def bar():
     c = get_contract(src, input_bundle=input_bundle)
     c.foo()
     assert c.d() == 4
-    assert c.d() == 5
+    assert c.d2() == 5
 
 
 def test_module_attribute(get_contract):

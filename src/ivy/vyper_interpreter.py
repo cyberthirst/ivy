@@ -4,6 +4,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
+from vyper.ast.nodes import Attribute, VariableDecl
 from vyper.semantics.analysis.base import StateMutability
 from vyper.semantics.types import (
     VyperType,
@@ -13,6 +14,7 @@ from vyper.semantics.types import (
     MemberFunctionT,
     DArrayT,
     BoolT,
+    SelfT,
 )
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
@@ -20,6 +22,7 @@ from vyper.semantics.types.function import (
 )
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
+from vyper.semantics.analysis.base import VarInfo
 
 from ivy.expr import ExprVisitor
 from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
@@ -232,16 +235,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return output
 
     def _allocate_storage(self, module_t: ModuleT):
-        def allocate_r(mod: ModuleT):
+        def allocate_r(mod: ModuleT, address):
             for decl in mod.variable_decls:
-                name = decl.target.id
+                decl._metadata["_ivy_address"] = address
+                address += 1
+                name = self._var_qualified_name(decl.target.id, decl.target)
                 typ = decl._metadata["type"]
                 loc = self.get_location_from_decl(decl)
                 self._new_variable(name, typ, loc)
             for module in mod.initialized_modules:
-                allocate_r(module.module_info.module_t)
+                allocate_r(module.module_info.module_t, address)
 
-        allocate_r(module_t)
+        allocate_r(module_t, 0)
         # allocate a nonreentrant key for all contracts, they might not use it
         self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
 
@@ -422,19 +427,24 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         finally:
             pass
 
-    def get_variable(self, name: str):
-        if name in self.globals:
-            return self.globals[name].value
+    def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
+        qualified_name = self._var_qualified_name(name, node)
+        if qualified_name in self.globals:
+            return self.globals[qualified_name].value
         else:
+            # memory doesn't have name ambiguity due to modules
+            # we can use unqualified names
             return self.memory[name]
 
-    def set_variable(self, name: str, value):
-        if name in self.globals:
-            with self.modifiable_context(name):
-                var = self.globals[name]
-                var.record()
+    def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
+        qualified_name = self._var_qualified_name(name, node)
+        if qualified_name in self.globals:
+            with self.modifiable_context(qualified_name):
+                var = self.globals[qualified_name]
                 var.value = value
         else:
+            # memory doesn't have name ambiguity due to modules
+            # we can use unqualified names
             self.memory[name] = value
 
     def get_location_from_decl(self, decl: ast.VariableDecl):
@@ -455,15 +465,41 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory.new_variable(name, typ)
 
+    def _var_qualified_name(
+        self,
+        name: str,
+        node: Optional[ast.VyperNode] = None,
+        var_info: Optional[VarInfo] = None,
+    ):
+        if node is None:
+            return name
+
+        if var_info is None:
+            if "varinfo" in node._metadata:
+                var_info = node._metadata["varinfo"]
+            else:
+                var_info = node._expr_info.var_info
+
+        if not var_info.is_state_variable():
+            return name
+
+        address = var_info.decl_node._metadata["_ivy_address"]
+        qualified_path = str(address) + "$." + name
+        return qualified_path
+
     def _assign_target(self, target, value):
+        # check variables written into and journal them if they are state variables
+        # this approach is adapted because the journal has to be aware of writes to attributes or subscripts
+        # if we'd journal only direct variable writes through `set_variable` we'd miss those cases
         if writes := target._expr_info._writes:
             for w in writes:
                 variable = w.variable
                 name = variable.decl_node.target.id
                 if Journal.journalable_loc(variable.location):
-                    self.globals[name].record()
+                    qualified_name = self._var_qualified_name(name, target, w.variable)
+                    self.globals[qualified_name].record()
         if isinstance(target, ast.Name):
-            self.set_variable(target.id, value)
+            self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Tuple):
             if not isinstance(value, tuple):
                 raise TypeError("Cannot unpack non-iterable to tuple")
@@ -476,10 +512,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             index = self.visit(target.slice)
             container[index] = value
         elif isinstance(target, ast.Attribute):
-            if isinstance(target.value, ast.Name) and target.value.id == "self":
-                self.set_variable(target.attr, value)
+            typ = target.value._metadata["type"]
+            if isinstance(typ, (SelfT, ModuleT)):
+                self.set_variable(target.attr, value, target)
             else:
-                # structs
+                assert isinstance(typ, StructT)
                 obj = self.visit(target.value)
                 obj[target.attr] = value
         else:
