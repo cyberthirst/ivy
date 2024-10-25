@@ -2,12 +2,12 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TYPE_T, InterfaceT, StructT, SelfT
+from vyper.semantics.types import TYPE_T, InterfaceT, StructT, SelfT, FlagT
 from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.types import Address
+from ivy.types import Address, Flag
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -78,17 +78,20 @@ class ExprVisitor(BaseVisitor):
     def visit_Attribute(self, node: ast.Attribute):
         if node.attr in ADDRESS_VARIABLES:
             return self._handle_address_variable(node)
-        elif (
-            isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES
-        ):
+
+        if isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES:
             return self._handle_env_variable(node)
+
         typ = node.value._metadata["type"]
         if isinstance(typ, (SelfT, ModuleT)):
             return self.get_variable(node.attr, node)
-        else:
-            assert isinstance(typ, StructT)
+
+        if isinstance(typ, StructT):
             obj = self.visit(node.value)
             return obj[node.attr]
+        if isinstance(typ, FlagT):
+            flag = Flag.get_or_create(typ)
+            return flag.create_value(node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
         value = self.visit(node.value)

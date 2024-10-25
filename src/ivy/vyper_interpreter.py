@@ -247,7 +247,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 allocate_r(module.module_info.module_t, address)
 
         allocate_r(module_t, 0)
-        # allocate a nonreentrant key for all contracts, they might not use it
+        # allocate a nonreentrant key for all contracts, although they might not use it
         self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
 
     def process_create_message(self, message: Message) -> EVMOutput:
@@ -488,20 +488,23 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             return name
 
         address = var_info.decl_node._metadata["_ivy_address"]
-        qualified_path = str(address) + "$." + name
+        qualified_path = str(address)  # + "$." + name
         return qualified_path
+
+    def _journal_writes(self, node):
+        if writes := node._expr_info._writes:
+            for w in writes:
+                variable = w.variable
+                name = variable.decl_node.target.id
+                if Journal.journalable_loc(variable.location):
+                    qualified_name = self._var_qualified_name(name, node, w.variable)
+                    self.globals[qualified_name].record()
 
     def _assign_target(self, target, value):
         # check variables written into and journal them if they are state variables
         # this approach is adapted because the journal has to be aware of writes to attributes or subscripts
         # if we'd journal only direct variable writes through `set_variable` we'd miss those cases
-        if writes := target._expr_info._writes:
-            for w in writes:
-                variable = w.variable
-                name = variable.decl_node.target.id
-                if Journal.journalable_loc(variable.location):
-                    qualified_name = self._var_qualified_name(name, target, w.variable)
-                    self.globals[qualified_name].record()
+        self._journal_writes(target)
         if isinstance(target, ast.Name):
             self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Tuple):
