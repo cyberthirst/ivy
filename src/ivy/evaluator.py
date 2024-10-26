@@ -231,27 +231,28 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
         return res
 
     # rewrite to smth like dict for const-time dispatch
+    # TODO maybe should just lazily fetch the default value for state vars?
     @classmethod
     def default_value(cls, typ):
         if isinstance(typ, IntegerT):
             return 0
         if isinstance(typ, _SequenceT):
             return []
-        if isinstance(typ, BytesT):
+        if isinstance(typ, BytesT) or isinstance(typ, BytesM_T):
             return b""
         if isinstance(typ, StringT):
             return ""
         if isinstance(typ, StructT):
             kws = {k: cls.default_value(v) for k, v in typ.members.items()}
-            return cls.construct_struct(typ.name, kws)
+            return Struct(typ, kws)
         if isinstance(typ, HashMapT):
             return defaultdict(lambda: cls.default_value(typ.value_type))
         if isinstance(typ, BoolT):
             return False
-        if isinstance(typ, Address) or isinstance(typ, InterfaceT):
+        if isinstance(typ, AddressT) or isinstance(typ, InterfaceT):
             return Address(0)
-        return None
-
-    @classmethod
-    def construct_struct(cls, name, kws):
-        return Struct(name, kws)
+        if isinstance(typ, FlagT):
+            return Flag(typ, 0)
+        if isinstance(typ, TupleT):
+            return tuple(cls.default_value(t) for t in typ.member_types)
+        raise NotImplementedError(f"Default value for {typ} not implemented")
