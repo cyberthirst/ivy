@@ -17,8 +17,7 @@ def _replicate(value: int, count: int) -> tuple[int, ...]:
     return (value,) * count
 
 
-@pytest.mark.skip(reason="low-level calls are not yet supported")
-def test_abi_decode_arithmetic_overflow():
+def test_abi_decode_arithmetic_overflow(env, get_contract):
     # test based on GHSA-9p8r-4xp4-gw5w:
     # https://github.com/vyperlang/vyper/security/advisories/GHSA-9p8r-4xp4-gw5w#advisory-comment-91841
     # buf + head causes arithmetic overflow
@@ -34,7 +33,7 @@ def f(x: Bytes[32 * 3]):
     # original POC:
     # assert decoded_y1 != decoded_y2
     """
-    c = loads(code)
+    c = get_contract(code)
 
     data = method_id("f(bytes)")
     payload = (
@@ -47,12 +46,10 @@ def f(x: Bytes[32 * 3]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # TODO env.message_call(c.address, data=data)
-        pass
+        env.message_call(c.address, data=data)
 
 
-@pytest.mark.skip(reason="low-level calls are not yet supported")
-def test_abi_decode_nonstrict_head():
+def test_abi_decode_nonstrict_head(env, get_contract):
     # data isn't strictly encoded - head is 0x21 instead of 0x20
     # but the head + length is still within runtime bounds of the parent buffer
     code = """
@@ -64,7 +61,7 @@ def f(x: Bytes[32 * 5]):
     a = b"aaaa"
     decoded_y1 = _abi_decode(y, DynArray[uint256, 3])
     """
-    c = loads(code)
+    c = get_contract(code)
 
     data = method_id("f(bytes)")
 
@@ -83,7 +80,7 @@ def f(x: Bytes[32 * 5]):
 
     data += _abi_payload_from_tuple(payload)
 
-    # TODO env.message_call(c.address, data=data)
+    env.message_call(c.address, data=data)
 
 
 def test_abi_decode_child_head_points_to_parent():
@@ -251,8 +248,7 @@ def run(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
         c.run(data)
 
 
-@pytest.mark.skip(reason="low-level calls are not yet supported")
-def test_abi_decode_runtimesz_oob():
+def test_abi_decode_runtimesz_oob(env, get_contract):
     # provide enough data, but set the runtime size to be smaller than the actual size
     # so after y: [..] = x, y will have the incorrect size set and only part of the
     # original data will be copied. This will cause oob read outside the
@@ -263,7 +259,7 @@ def f(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
     y: Bytes[2 * 32 + 3 * 32 + 3 * 32 * 4] = x
     decoded_y1: DynArray[Bytes[32 * 3], 3] = _abi_decode(y,  DynArray[Bytes[32 * 3], 3])
     """
-    c = loads(code)
+    c = get_contract(code)
 
     data = method_id("f(bytes)")
 
@@ -288,12 +284,10 @@ def f(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # TODO env.message_call(c.address, data=data)
-        pass
+        env.message_call(c.address, data=data)
 
 
-@pytest.mark.skip(reason="low-level calls are not yet supported")
-def test_abi_decode_runtimesz_oob2():
+def test_abi_decode_runtimesz_oob2(env, get_contract):
     # same principle as in test_abi_decode_runtimesz_oob
     # but adapted for dynarrays
     code = """
@@ -328,8 +322,7 @@ def f(x: Bytes[2 * 32 + 3 * 32  + 3 * 32 * 4]):
     data += _abi_payload_from_tuple(payload)
 
     with pytest.raises(DecodeError):
-        # TODO env.message_call(c.address, data=data)
-        pass
+        env.message_call(c.address, data=data)
 
 
 def test_abi_decode_head_roundtrip():
