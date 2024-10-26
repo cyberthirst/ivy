@@ -202,6 +202,14 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
         return left >= right
 
     @classmethod
+    def visit_In(cls, _, left: Any, right: Any):
+        return left in right
+
+    @classmethod
+    def visit_NotIn(cls, _, left: Any, right: Any):
+        return left not in right
+
+    @classmethod
     def eval_boolop(cls, op, values):
         res = cls.visit(op.op, values)
         cls.validate_value(op, res)
