@@ -24,6 +24,7 @@ class Env:
         self.interpreter = VyperInterpreter()
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
+        self._accounts = []
 
     def clear_state(self):
         self.interpreter = VyperInterpreter()
@@ -73,6 +74,14 @@ class Env:
 
     def set_balance(self, address: _AddressType, value: int):
         self.interpreter.set_balance(Address(address), value)
+
+    @property
+    def accounts(self):
+        if not self._accounts:
+            for i in range(10):
+                self._accounts.append(self.generate_address(f"account{i}"))
+
+        return self._accounts
 
     @property
     def deployer(self):

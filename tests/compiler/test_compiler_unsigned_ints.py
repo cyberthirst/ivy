@@ -8,15 +8,12 @@ import pytest
 
 from vyper import compile_code
 from vyper.exceptions import (
-    InvalidOperation,
     OverflowException,
     TypeMismatch,
-    ZeroDivisionException,
 )
 from vyper.semantics.types import IntegerT
 from vyper.utils import SizeLimits, evm_div, evm_mod
 
-from ivy.frontend.loader import loads
 
 types = sorted(IntegerT.unsigneds())
 

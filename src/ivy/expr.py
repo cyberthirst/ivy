@@ -83,6 +83,8 @@ class ExprVisitor(BaseVisitor):
             return self._handle_env_variable(node)
 
         typ = node.value._metadata["type"]
+        if hasattr(typ, "typedef"):
+            typ = typ.typedef
         if isinstance(typ, (SelfT, ModuleT)):
             return self.get_variable(node.attr, node)
 
@@ -90,8 +92,7 @@ class ExprVisitor(BaseVisitor):
             obj = self.visit(node.value)
             return obj[node.attr]
         if isinstance(typ, FlagT):
-            flag = Flag.get_or_create(typ)
-            return flag.create_value(node.attr)
+            return Flag(typ, node.attr)
 
     def visit_Subscript(self, node: ast.Subscript):
         value = self.visit(node.value)

@@ -4,7 +4,6 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
-from vyper.ast.nodes import Attribute, VariableDecl
 from vyper.semantics.analysis.base import StateMutability
 from vyper.semantics.types import (
     VyperType,
@@ -12,7 +11,6 @@ from vyper.semantics.types import (
     InterfaceT,
     StructT,
     MemberFunctionT,
-    DArrayT,
     BoolT,
     SelfT,
 )
@@ -41,7 +39,7 @@ from ivy.exceptions import (
     GasReference,
     FunctionNotFound,
 )
-from ivy.types import Address
+from ivy.types import Address, Struct
 
 
 REENTRANT_KEY = "$.nonreentrant_key"
@@ -239,7 +237,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             for decl in mod.variable_decls:
                 decl._metadata["_ivy_address"] = address
                 address += 1
-                name = self._var_qualified_name(decl.target.id, decl.target)
+                name = self._resolve_name(decl.target.id, decl.target)
                 typ = decl._metadata["type"]
                 loc = self.get_location_from_decl(decl)
                 self._new_variable(name, typ, loc)
@@ -308,10 +306,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def unlock(self, mutability):
         lock = self.get_variable(REENTRANT_KEY)
         if mutability == StateMutability.VIEW:
-            assert lock == False
+            assert not lock
             return
 
-        assert lock == True
+        assert lock
         self.set_variable(REENTRANT_KEY, False)
 
     def _prologue(self, func_t, args):
@@ -428,16 +426,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             pass
 
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
-        qualified_name = self._var_qualified_name(name, node)
+        qualified_name = self._resolve_name(name, node)
         if qualified_name in self.globals:
-            return self.globals[qualified_name].value
+            res = self.globals[qualified_name].value
         else:
             # memory doesn't have name ambiguity due to modules
             # we can use unqualified names
-            return self.memory[name]
+            res = self.memory[name]
+        assert res is not None
+        return res
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
-        qualified_name = self._var_qualified_name(name, node)
+        qualified_name = self._resolve_name(name, node)
         if qualified_name in self.globals:
             with self.modifiable_context(qualified_name):
                 var = self.globals[qualified_name]
@@ -469,7 +469,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     # can share the same variable name
     # for cases where we know that state variable isn't touched we don't provide the
     # optional arguments and resolve the name directly
-    def _var_qualified_name(
+    def _resolve_name(
         self,
         name: str,
         node: Optional[ast.VyperNode] = None,
@@ -497,7 +497,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 variable = w.variable
                 name = variable.decl_node.target.id
                 if Journal.journalable_loc(variable.location):
-                    qualified_name = self._var_qualified_name(name, node, w.variable)
+                    qualified_name = self._resolve_name(name, node, w.variable)
                     self.globals[qualified_name].record()
 
     def _assign_target(self, target, value):
@@ -517,6 +517,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
             index = self.visit(target.slice)
+            # container is a reference from the given location thus the assignment
+            # will be reflected in the original location
             container[index] = value
         elif isinstance(target, ast.Attribute):
             typ = target.value._metadata["type"]
@@ -619,7 +621,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             else:
                 assert isinstance(typedef, StructT)
                 assert len(args) == 0
-                return VyperEvaluator.construct_struct(typedef.name, kws)
+                return Struct(typedef, kws)
 
         if isinstance(func_t, MemberFunctionT):
             # the function is an attribute of the array

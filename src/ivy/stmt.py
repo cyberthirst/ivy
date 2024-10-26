@@ -4,7 +4,6 @@ from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType
 
-from ivy.journal import Journal, JournalEntryType, JournalEntry
 from ivy.visitor import BaseVisitor
 
 

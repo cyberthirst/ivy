@@ -1,5 +1,9 @@
+from typing import Union
+
 from eth_utils import to_canonical_address, to_checksum_address
 from eth_typing.evm import Address as EthAddress
+
+from vyper.semantics.types import FlagT, StructT
 
 from ivy.utils import lrudict
 
@@ -45,6 +49,41 @@ class Address(str):
 
 
 class Struct(dict):
-    def __init__(self, name, kws):
-        self.name = name
+    def __init__(self, typ: StructT, kws):
+        self.typ = typ
         super().__init__(kws)
+
+
+class Flag:
+    def __init__(self, typ: FlagT, source: Union[str, int]):
+        self.typ = typ
+        self.mask = (1 << len(typ._flag_members)) - 1
+        if isinstance(source, str):
+            if source not in typ._flag_members:
+                raise AttributeError(f"'{typ.name}' flag has no member '{source}'")
+            value = 2 ** typ._flag_members[source]
+        else:
+            assert source >> len(typ._flag_members) == 0
+            value = source
+        self.value = value & self.mask
+
+    def __eq__(self, other):
+        return self.value == other.value
+
+    def __or__(self, other):
+        return Flag(self.typ, self.value | other.value)
+
+    def __and__(self, other):
+        return Flag(self.typ, self.value & other.value)
+
+    def __xor__(self, other):
+        return Flag(self.typ, self.value ^ other.value)
+
+    def __invert__(self):
+        return Flag(self.typ, (~self.value) & self.mask)
+
+    def __contains__(self, other):
+        return (self.value & other.value) != 0
+
+    def __hash__(self):
+        return hash(self.value)

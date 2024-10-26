@@ -10,7 +10,7 @@ from vyper.semantics.types import TupleT
 from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
-from ivy.types import Address, Struct
+from ivy.types import Address, Struct, Flag
 
 
 class BaseDeployer(ABC):
@@ -88,6 +88,16 @@ class VyperContract:
             raise RuntimeError("Contract address is not set")
         return self._address
 
+    # convert the types to be compatible with those of titanoboa
+    def boa_compat(self, value):
+        if isinstance(value, Struct):
+            typ = value.typ
+            # return a tuple with the values in the order based on the typ
+            return tuple(self.boa_compat(value.get(key)) for key in typ.members)
+        if isinstance(value, Flag):
+            return value.value
+        return value
+
     def marshal_to_python(self, computation, vyper_typ):
         if vyper_typ is None:
             return None
@@ -99,7 +109,7 @@ class VyperContract:
         if not isinstance(vyper_typ, TupleT):
             (ret,) = ret
 
-        return vyper_object(ret, vyper_typ)
+        return self.boa_compat(ret)
 
     def _run_init(self, *args, value=0):
         encoded_args = b""
@@ -197,24 +207,3 @@ class VyperFunction:
 
 
 _typ_cache = {}
-
-
-def vyper_object(val, vyper_type):
-    # make a thin wrapper around whatever type val is,
-    # and tag it with _vyper_type metadata
-
-    vt = type(val)
-    if vt is bool or vt is Address or vt is Struct:
-        # https://stackoverflow.com/q/2172189
-        # bool is not ambiguous wrt vyper type anyways.
-        return val
-
-    if vt not in _typ_cache:
-        # ex. class int_wrapper(int): pass
-        _typ_cache[vt] = type(f"{vt.__name__}_wrapper", (vt,), {})
-
-    t = _typ_cache[type(val)]
-
-    ret = t(val)
-    ret._vyper_type = vyper_type
-    return ret

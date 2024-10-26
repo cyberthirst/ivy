@@ -1,7 +1,5 @@
 import pytest
 
-from vyper.exceptions import FunctionDeclarationException
-
 from ivy.exceptions import AccessViolation
 
 # TODO test functions in this module across all evm versions

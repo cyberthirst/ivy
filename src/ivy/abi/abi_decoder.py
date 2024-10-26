@@ -21,9 +21,9 @@ from vyper.abi_types import (
     ABIType,
 )
 from vyper.utils import int_bounds, unsigned_to_signed
-from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT
+from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT, FlagT
 
-from ivy.evaluator import VyperEvaluator
+from ivy.types import Flag, Struct
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -67,7 +67,7 @@ def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: byte
         )
         if isinstance(typ, StructT):
             kws = dict(zip(typ.tuple_keys(), res))
-            return VyperEvaluator.construct_struct(typ.name, kws)
+            return Struct(typ, kws)
         return res
 
     if isinstance(abi_t, ABI_StaticArray):
@@ -135,6 +135,12 @@ def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: byte
             if ret not in (0, 1):
                 raise DecodeError("invalid bool")
             return True if ret == 1 else False
+
+        if isinstance(typ, FlagT):
+            bits = len(typ._flag_members)
+            if ret >> bits > 0:
+                raise DecodeError(f"flag value out of bounds {ret}")
+            return Flag(typ, ret)
 
         return ret
 

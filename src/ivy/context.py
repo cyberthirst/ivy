@@ -3,7 +3,6 @@ from typing import Any, Optional
 from attr import dataclass
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
-from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.evm_structures import Account, Message, ContractData

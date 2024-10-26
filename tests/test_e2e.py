@@ -759,7 +759,7 @@ def foo() -> bool:
     """
 
     c = loads(src)
-    assert c.foo() == False
+    assert not c.foo()
 
 
 def test_raw_call_delegate():
@@ -1064,7 +1064,7 @@ def foo() -> uint256:
 
 
 def test_struct4():
-    src = f"""
+    src = """
 struct S:
     a: uint256
     b: uint256
@@ -1295,7 +1295,7 @@ def foo() -> (bool, uint256):
 # TODO fix me - we currently only expect `tuple` in abi encoder
 # however, we represent structs using dicts
 def test_abi_encode_struct(get_contract):
-    src = f"""
+    src = """
 struct C:
     a: uint256 
 
@@ -1307,11 +1307,11 @@ def foo() -> C:
     """
 
     c = get_contract(src)
-    assert c.foo() == {"a": 0}
+    assert c.foo() == (0,)
 
 
 def test_hash_map():
-    src = f"""
+    src = """
 
 var: public(HashMap[uint256, uint256])
 
@@ -1630,7 +1630,8 @@ def bar():
 
     c = get_contract(src, input_bundle=input_bundle)
     c.foo()
-    assert c.d() == {"s": {"a": [0, 2, 3]}, "b": [4, 5, 7]}
+
+    assert c.d() == (([0, 2, 3],), [4, 5, 7])
 
 
 def test_library_storage7(get_contract, make_input_bundle):
@@ -1674,7 +1675,7 @@ d: public(S2)
 
     c = get_contract(src, input_bundle=input_bundle)
     c.foo()
-    assert c.d() == {"s": {"a": [1, 2, 66]}, "b": [4, 77, 6]}
+    assert c.d() == (([1, 2, 66],), [4, 77, 6])
 
 
 def test_module_struct_attribute(get_contract):
@@ -1693,5 +1694,5 @@ def foo():
 
     c = get_contract(src)
     c.foo()
-    assert c.a(0) == {"a": 3}
-    assert c.a(1) == {"a": 4}
+    assert c.a(0) == (3,)
+    assert c.a(1) == (4,)

@@ -5,8 +5,6 @@ from operator import (
     sub,
     mul,
     truediv,
-    floordiv,
-    mod,
     pow,
     lshift,
     rshift,
@@ -16,13 +14,22 @@ from operator import (
 )
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import BoolT, InterfaceT
-from vyper.semantics.types.primitives import IntegerT
-from vyper.semantics.types.subscriptable import _SequenceT, HashMapT
-from vyper.semantics.types.bytestrings import BytesT, StringT
-from vyper.semantics.types.user import StructT
+from vyper.semantics.types import (
+    BoolT,
+    InterfaceT,
+    FlagT,
+    IntegerT,
+    BytesT,
+    StringT,
+    StructT,
+    AddressT,
+    BytesM_T,
+    TupleT,
+    HashMapT,
+)
+from vyper.semantics.types.subscriptable import _SequenceT
 
-from ivy.types import Address, Struct
+from ivy.types import Address, Struct, Flag
 from ivy.visitor import BaseClassVisitor
 
 
@@ -58,6 +65,10 @@ class VyperValidator:
         cls.validate_sequence_len(value, typ)
         for item in value:
             cls.validate_value(item, typ.value_type)
+
+    @classmethod
+    def validate_FlagT(cls, value, typ):
+        return value.value >> len(typ._flag_members) == 0
 
     @classmethod
     def validate_StructT(cls, value, typ):
