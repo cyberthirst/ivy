@@ -30,7 +30,7 @@ class StmtVisitor(BaseVisitor):
     def visit_AnnAssign(self, node: ast.AnnAssign):
         value = self.visit(node.value)
         typ = node.target._expr_info.typ
-        self._new_variable(node.target.id, typ)
+        self._new_local(node.target.id, typ)
         self.set_variable(node.target.id, value)
         return None
 
@@ -73,7 +73,7 @@ class StmtVisitor(BaseVisitor):
         try:
             target_name = node.target.target
             target_typ = target_name._expr_info.typ
-            self._new_variable(target_name.id, target_typ)
+            self._new_local(target_name.id, target_typ)
             for item in iterable:
                 self._assign_target(target_name, item)
 
@@ -130,7 +130,7 @@ class StmtVisitor(BaseVisitor):
         pass
 
     @abstractmethod
-    def _new_variable(self, name: str, typ: VyperType, location: dict):
+    def _new_local(self, name: str, typ: VyperType):
         pass
 
     @property

@@ -6,7 +6,7 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.subscriptable import TupleT
 
 from ivy.utils import compute_call_abi_data
-from ivy.variable import GlobalVariable
+from ivy.variable import GlobalVariable, GlobalVariables
 
 
 @dataclass
@@ -23,7 +23,7 @@ class ContractData:
     immutables: dict[str, Any]
     constants: dict[str, Any]
     entry_points: dict[bytes, EntryPointInfo]
-    global_vars: dict[str, GlobalVariable]
+    global_vars: GlobalVariables
     fallback: Optional[ContractFunctionT]
 
     def __init__(self, module: ModuleT):
@@ -39,7 +39,7 @@ class ContractData:
         self.constants = {}
         self.entry_points = {}
         self._generate_entry_points()
-        self.global_vars = {}
+        self.global_vars = GlobalVariables()
         self.fallback = next(
             (f for f in module.exposed_functions if f.is_fallback), None
         )

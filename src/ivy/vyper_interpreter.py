@@ -40,9 +40,8 @@ from ivy.exceptions import (
     FunctionNotFound,
 )
 from ivy.types import Address, Struct
-
-
-REENTRANT_KEY = "$.nonreentrant_key"
+from ivy.allocator import Allocator
+from ivy.constants import REENTRANT_KEY
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor):
@@ -233,20 +232,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return output
 
     def _allocate_storage(self, module_t: ModuleT):
-        def allocate_r(mod: ModuleT, address):
-            for decl in mod.variable_decls:
-                decl._metadata["_ivy_address"] = address
-                address += 1
-                name = self._resolve_name(decl.target.id, decl.target)
-                typ = decl._metadata["type"]
-                loc = self.get_location_from_decl(decl)
-                self._new_variable(name, typ, loc)
-            for module in mod.initialized_modules:
-                allocate_r(module.module_info.module_t, address)
+        allocator = Allocator()
+        # separeate address allocation from variable allocation
+        nonreentrant, globals = allocator.allocate_addresses(module_t)
 
-        allocate_r(module_t, 0)
-        # allocate a nonreentrant key for all contracts, although they might not use it
-        self._new_variable(REENTRANT_KEY, BoolT(), self.exec_ctx.transient)
+        for var, addr in globals.items():
+            loc = self.get_location_from_decl(var.decl_node)
+            self.globals.new_variable(var, addr, var.typ, loc)
+
+        self.globals.allocate_reentrant_key(nonreentrant, self.exec_ctx.transient)
 
     def process_create_message(self, message: Message) -> EVMOutput:
         if message.create_address in self.state:
@@ -293,7 +287,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return self.state[address].contract_data
 
     def lock(self, mutability):
-        lock = self.get_variable(REENTRANT_KEY)
+        lock = self.globals.get_reentrant_key()
         if lock:
             raise AccessViolation("Reentrancy violation")
 
@@ -301,16 +295,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if mutability == StateMutability.VIEW:
             return
 
-        self.set_variable(REENTRANT_KEY, True)
+        self.globals.set_reentrant_key(True)
 
     def unlock(self, mutability):
-        lock = self.get_variable(REENTRANT_KEY)
+        lock = self.globals.get_reentrant_key()
         if mutability == StateMutability.VIEW:
             assert not lock
             return
 
         assert lock
-        self.set_variable(REENTRANT_KEY, False)
+        self.globals.set_reentrant_key(False)
 
     def _prologue(self, func_t, args):
         self._push_fun_ctx(func_t)
@@ -321,13 +315,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         func_args = func_t.arguments
         for arg, param in zip(args, func_args):
-            self._new_variable(param.name, param.typ)
+            self._new_local(param.name, param.typ)
             self.set_variable(param.name, arg)
 
         # check if we need to assign default values
         if len(args) < len(func_args):
             for param in func_args[len(args) :]:
-                self._new_variable(param.name, param.typ)
+                self._new_local(param.name, param.typ)
                 default_value = self.visit(param.default_value)
                 self.set_variable(param.name, default_value)
 
@@ -426,9 +420,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             pass
 
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
-        qualified_name = self._resolve_name(name, node)
-        if qualified_name in self.globals:
-            res = self.globals[qualified_name].value
+        varinfo = node._expr_info.var_info if node else None
+        if varinfo is not None and varinfo.is_state_variable():
+            res = self.globals[varinfo].value
         else:
             # memory doesn't have name ambiguity due to modules
             # we can use unqualified names
@@ -437,14 +431,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return res
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
-        qualified_name = self._resolve_name(name, node)
-        if qualified_name in self.globals:
-            with self.modifiable_context(qualified_name):
-                var = self.globals[qualified_name]
+        # for some scenarios, eg auxiliary helper variables, we don't have a node
+        varinfo = node._expr_info.var_info if node else None
+        if varinfo is not None and varinfo.is_state_variable():
+            with self.modifiable_context(varinfo):
+                var = self.globals[varinfo]
                 var.value = value
         else:
-            # memory doesn't have name ambiguity due to modules
-            # we can use unqualified names
             self.memory[name] = value
 
     def get_location_from_decl(self, decl: ast.VariableDecl):
@@ -457,48 +450,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             return self.exec_ctx.storage
 
-    def _new_variable(self, name: str, typ: VyperType, global_loc: dict = None):
-        if global_loc is not None:
-            var = GlobalVariable(name, typ, global_loc)
-            assert name not in self.globals
-            self.globals[name] = var
-        else:
-            self.memory.new_variable(name, typ)
-
-    # for state variables we have to resolve their full name because different modules
-    # can share the same variable name
-    # for cases where we know that state variable isn't touched we don't provide the
-    # optional arguments and resolve the name directly
-    def _resolve_name(
-        self,
-        name: str,
-        node: Optional[ast.VyperNode] = None,
-        var_info: Optional[VarInfo] = None,
-    ):
-        if node is None:
-            return name
-
-        if var_info is None:
-            if "varinfo" in node._metadata:
-                var_info = node._metadata["varinfo"]
-            else:
-                var_info = node._expr_info.var_info
-
-        if not var_info.is_state_variable():
-            return name
-
-        address = var_info.decl_node._metadata["_ivy_address"]
-        qualified_path = str(address)  # + "$." + name
-        return qualified_path
+    def _new_local(self, identifier: str, typ: VyperType):
+        self.memory.new_variable(identifier, typ)
 
     def _journal_writes(self, node):
         if writes := node._expr_info._writes:
             for w in writes:
                 variable = w.variable
-                name = variable.decl_node.target.id
                 if Journal.journalable_loc(variable.location):
-                    qualified_name = self._resolve_name(name, node, w.variable)
-                    self.globals[qualified_name].record()
+                    self.globals[w.variable].record()
 
     def _assign_target(self, target, value):
         # check variables written into and journal them if they are state variables
