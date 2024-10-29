@@ -1,31 +1,39 @@
 from enum import Enum
-
 import vyper.ast.nodes as ast
-from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.types.module import ModuleT
-from vyper.semantics.types import BoolT
-
-from ivy.constants import REENTRANT_KEY
 
 OFFSET = 2**16
 
 
+class StorageType(Enum):
+    IMMUTABLE = 0
+    CONSTANT = 1
+    STORAGE = 2
+    TRANSIENT = 3
+
+
 class Allocator:
     def __init__(self):
-        self.immutables = 0 * OFFSET
-        self.constants = 1 * OFFSET
-        self.storage = 2 * OFFSET
-        self.transient = 3 * OFFSET
+        # Initialize counters dictionary with base offsets
+        self.counters = {
+            StorageType.IMMUTABLE: StorageType.IMMUTABLE.value * OFFSET,
+            StorageType.CONSTANT: StorageType.CONSTANT.value * OFFSET,
+            StorageType.STORAGE: StorageType.STORAGE.value * OFFSET,
+            StorageType.TRANSIENT: StorageType.TRANSIENT.value * OFFSET,
+        }
         self.visited = set()
 
     def _get_allocatable(self, vyper_module: ast.Module) -> list[ast.VyperNode]:
         allocable = (ast.InitializesDecl, ast.VariableDecl)
         return [node for node in vyper_module.body if isinstance(node, allocable)]
 
+    def _increment_counter(self, storage_type: StorageType) -> int:
+        current = self.counters[storage_type]
+        self.counters[storage_type] += 1
+        return current
+
     def allocate_nonreentrant_key(self):
-        nonreentrant = self.transient
-        self.transient += 1
-        return nonreentrant
+        return self._increment_counter(StorageType.TRANSIENT)
 
     def allocate_r(self, mod: ast.Module):
         nodes = self._get_allocatable(mod)
@@ -42,18 +50,14 @@ class Allocator:
             assert varinfo not in self.visited
 
             if varinfo.is_constant:
-                varinfo.position = self.constants
-                self.constants += 1
+                varinfo.position = self._increment_counter(StorageType.CONSTANT)
             elif varinfo.is_immutable:
-                varinfo.position = self.immutables
-                self.immutables += 1
+                varinfo.position = self._increment_counter(StorageType.IMMUTABLE)
             elif varinfo.is_transient:
-                varinfo.position = self.transient
-                self.transient += 1
+                varinfo.position = self._increment_counter(StorageType.TRANSIENT)
             else:
                 assert varinfo.is_storage
-                varinfo.position = self.storage
-                self.storage += 1
+                varinfo.position = self._increment_counter(StorageType.STORAGE)
 
             self.visited.add(varinfo)
 
@@ -64,9 +68,6 @@ class Allocator:
         self.verify_gaps()
         return nonreentrant, self.visited
 
-    # assert that all of the locations have at most 2**16 allocations
     def verify_gaps(self):
-        assert self.immutables < 1 * OFFSET
-        assert self.constants < 2 * OFFSET
-        assert self.storage < 3 * OFFSET
-        assert self.transient < 4 * OFFSET
+        for storage_type in StorageType:
+            assert self.counters[storage_type] < (storage_type.value + 1) * OFFSET
