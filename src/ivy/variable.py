@@ -1,6 +1,7 @@
 from urllib.response import addbase
 
 from vyper.semantics.analysis.base import VarInfo
+from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType, BoolT
 
 from ivy.evaluator import VyperEvaluator
@@ -40,29 +41,35 @@ class GlobalVariables:
         self.variables = {}
         self.reentrant_key_address = None
 
-    def new_variable(self, var: VarInfo, typ: VyperType, location: dict):
-        address = var.position
+    def _get_address(self, var: VarInfo):
+        return (var.position, var.location)
+
+    def new_variable(self, var: VarInfo, location: dict):
+        address = self._get_address(var)
         assert address not in self.variables
-        variable = GlobalVariable(address, typ, location)
+        # TODO pass varinfo directly to GlobalVariable
+        variable = GlobalVariable(var.position, var.typ, location)
         self.variables[address] = variable
 
     def __setitem__(self, key: VarInfo, value):
-        address = key.position
+        address = self._get_address(key)
         self.variables[address] = value
 
     def __getitem__(self, key: VarInfo):
-        address = key.position
+        address = self._get_address(key)
         return self.variables[address]
 
-    def allocate_reentrant_key(self, address: int, location):
+    def allocate_reentrant_key(self, position: int, location):
         assert self.reentrant_key_address is None
+        address = (position, DataLocation.TRANSIENT)
         self.reentrant_key_address = address
-        self.variables[address] = GlobalVariable(address, BoolT(), location)
+        assert address not in self.variables
+        self.variables[address] = GlobalVariable(position, BoolT(), location)
 
     def set_reentrant_key(self, value: bool):
         address = self.reentrant_key_address
-        self.variables[address] = value
+        self.variables[address].value = value
 
     def get_reentrant_key(self):
         address = self.reentrant_key_address
-        return self.variables[address]
+        return self.variables[address].value

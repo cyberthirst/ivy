@@ -239,7 +239,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         for var in globals:
             loc = self.storage_from_varinfo(var)
-            self.globals.new_variable(var, var.typ, loc)
+            self.globals.new_variable(var, loc)
 
         self.globals.allocate_reentrant_key(nonreentrant, self.exec_ctx.transient)
 
