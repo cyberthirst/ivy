@@ -5,6 +5,7 @@ from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability
+from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import (
     VyperType,
     TYPE_T,
@@ -236,9 +237,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         # separeate address allocation from variable allocation
         nonreentrant, globals = allocator.allocate_addresses(module_t)
 
-        for var, addr in globals.items():
-            loc = self.get_location_from_decl(var.decl_node)
-            self.globals.new_variable(var, addr, var.typ, loc)
+        for var in globals:
+            loc = self.storage_from_varinfo(var)
+            self.globals.new_variable(var, var.typ, loc)
 
         self.globals.allocate_reentrant_key(nonreentrant, self.exec_ctx.transient)
 
@@ -440,14 +441,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         else:
             self.memory[name] = value
 
-    def get_location_from_decl(self, decl: ast.VariableDecl):
-        if decl.is_immutable:
+    def storage_from_varinfo(self, varinfo: VarInfo):
+        if varinfo.is_immutable:
             return self.exec_ctx.immutables
-        elif decl.is_constant:
+        elif varinfo.is_constant:
             return self.exec_ctx.constants
-        elif decl.is_transient:
+        elif varinfo.is_transient:
             return self.exec_ctx.transient
         else:
+            assert varinfo.is_storage
             return self.exec_ctx.storage
 
     def _new_local(self, identifier: str, typ: VyperType):

@@ -38,21 +38,20 @@ class GlobalVariable:
 class GlobalVariables:
     def __init__(self):
         self.variables = {}
-        self.addresses = {}
         self.reentrant_key_address = None
 
-    def new_variable(self, var: VarInfo, address: int, typ: VyperType, location: dict):
-        assert var not in self.addresses
-        self.addresses[var] = address
+    def new_variable(self, var: VarInfo, typ: VyperType, location: dict):
+        address = var.position
+        assert address not in self.variables
         variable = GlobalVariable(address, typ, location)
         self.variables[address] = variable
 
     def __setitem__(self, key: VarInfo, value):
-        address = self.addresses[key]
+        address = key.position
         self.variables[address] = value
 
     def __getitem__(self, key: VarInfo):
-        address = self.addresses[key]
+        address = key.position
         return self.variables[address]
 
     def allocate_reentrant_key(self, address: int, location):
