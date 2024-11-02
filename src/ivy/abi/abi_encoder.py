@@ -15,7 +15,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
-from ivy.types import Struct, Flag
+from ivy.base_types import Struct, Flag
 
 
 class EncodeError(Exception):

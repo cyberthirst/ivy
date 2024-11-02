@@ -2,6 +2,8 @@ import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.data_locations import DataLocation
 
+IGNORED_LOCATIONS = (DataLocation.UNSET, DataLocation.CALLDATA)
+
 
 class Allocator:
     def __init__(self):
@@ -10,7 +12,7 @@ class Allocator:
         self.counters = {
             location: 0
             for location in DataLocation
-            if location not in (DataLocation.UNSET, DataLocation.CALLDATA)
+            if location not in IGNORED_LOCATIONS
         }
         self.visited = set()
 
@@ -39,7 +41,7 @@ class Allocator:
 
             # sanity check
             assert varinfo not in self.visited
-            assert varinfo.location != DataLocation.UNSET
+            assert varinfo.location not in IGNORED_LOCATIONS
 
             varinfo.position = self._increment_counter(varinfo.location)
             self.visited.add(varinfo)

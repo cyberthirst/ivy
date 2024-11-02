@@ -29,7 +29,7 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 
-from ivy.types import Address, Struct, Flag
+from ivy.base_types import Address, Struct, Flag
 from ivy.visitor import BaseClassVisitor
 
 
@@ -249,8 +249,8 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
         cls.validate_value(op, res)
         return res
 
-    # rewrite to smth like dict for const-time dispatch
-    # TODO maybe should just lazily fetch the default value for state vars?
+    # TODO: rewrite to smth like dict for const-time dispatch
+    # NOTE: maybe should just lazily fetch the default value for state vars?
     @classmethod
     def default_value(cls, typ):
         if isinstance(typ, IntegerT):

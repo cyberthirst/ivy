@@ -27,7 +27,6 @@ from ivy.expr import ExprVisitor
 from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-from ivy.variable import GlobalVariable
 from ivy.context import ExecutionContext
 import ivy.builtins as vyper_builtins
 from ivy.utils import compute_call_abi_data, compute_contract_address
@@ -40,9 +39,8 @@ from ivy.exceptions import (
     GasReference,
     FunctionNotFound,
 )
-from ivy.types import Address, Struct
+from ivy.base_types import Address, Struct
 from ivy.allocator import Allocator
-from ivy.constants import REENTRANT_KEY
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor):
@@ -235,6 +233,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def _allocate_storage(self, module_t: ModuleT):
         allocator = Allocator()
         # separeate address allocation from variable allocation
+        # the allocator rewrites the varinfo.position
         nonreentrant, globals = allocator.allocate_addresses(module_t)
 
         for var in globals:
@@ -421,18 +420,17 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             pass
 
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
+        # in some scenarios (eg auxiliary helper variables) we don't have a node
         varinfo = node._expr_info.var_info if node else None
         if varinfo is not None and varinfo.is_state_variable():
             res = self.globals[varinfo].value
         else:
-            # memory doesn't have name ambiguity due to modules
-            # we can use unqualified names
             res = self.memory[name]
         assert res is not None
         return res
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
-        # for some scenarios, eg auxiliary helper variables, we don't have a node
+        # in some scenarios (eg auxiliary helper variables) we don't have a node
         varinfo = node._expr_info.var_info if node else None
         if varinfo is not None and varinfo.is_state_variable():
             with self.modifiable_context(varinfo):

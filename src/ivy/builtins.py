@@ -9,7 +9,7 @@ from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
 from ivy.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
-from ivy.types import Address
+from ivy.base_types import Address
 
 
 def builtin_range(*args, bound=None):

@@ -1,10 +1,17 @@
-from typing import Union
+from typing import Any, Optional, Dict, Union, TypeVar, Generic
 
 from eth_utils import to_canonical_address, to_checksum_address
 from eth_typing.evm import Address as EthAddress
 
-from vyper.semantics.types import FlagT, StructT
-
+from vyper.semantics.types import (
+    VyperType,
+    StructT,
+    HashMapT,
+    BytesT,
+    StringT,
+    BytesM_T,
+    FlagT,
+)
 from ivy.utils import lrudict
 
 

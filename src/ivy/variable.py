@@ -1,4 +1,4 @@
-from urllib.response import addbase
+from typing import Optional
 
 from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.data_locations import DataLocation
@@ -12,12 +12,20 @@ class GlobalVariable:
     address: int
     typ: VyperType
     location: dict  # TODO can we make this more specific?
+    varinfo: Optional[VarInfo]
 
-    def __init__(self, address: int, typ: VyperType, location: dict):
+    def __init__(
+        self,
+        address: int,
+        typ: VyperType,
+        location: dict,
+        varinfo: Optional[VarInfo] = None,
+    ):
         self.typ = typ
         self.location = location
         self.address = address
         self.location[self.address] = VyperEvaluator.default_value(typ)
+        self.varinfo = varinfo
 
     @property
     def value(self):
@@ -47,8 +55,7 @@ class GlobalVariables:
     def new_variable(self, var: VarInfo, location: dict):
         address = self._get_address(var)
         assert address not in self.variables
-        # TODO pass varinfo directly to GlobalVariable
-        variable = GlobalVariable(var.position, var.typ, location)
+        variable = GlobalVariable(var.position, var.typ, location, var)
         self.variables[address] = variable
 
     def __setitem__(self, key: VarInfo, value):

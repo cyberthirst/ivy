@@ -7,7 +7,7 @@ from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.types import Address, Flag
+from ivy.base_types import Address, Flag
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {

@@ -79,3 +79,21 @@ class Journal:
 
     def reset(self):
         self.initialize()
+
+
+class JournalableCell:
+    def __init__(self, container: Any, key: Any, initial_value: Any):
+        self.container = container
+        self.key = key
+        self._value = initial_value
+
+    @property
+    def value(self):
+        return self._value
+
+    @value.setter
+    def value(self, new_value):
+        Journal().record(
+            JournalEntryType.STORAGE, self.container, self.key, self._value
+        )
+        self._value = new_value
