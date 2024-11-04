@@ -6,12 +6,13 @@ from vyper.semantics.types import VyperType, BoolT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.journal import Journal, JournalEntryType
+from ivy.cell_types import CellContainer
 
 
 class GlobalVariable:
     address: int
     typ: VyperType
-    location: dict  # TODO can we make this more specific?
+    location: dict
     varinfo: Optional[VarInfo]
 
     def __init__(
@@ -35,13 +36,16 @@ class GlobalVariable:
 
     @value.setter
     def value(self, new_value):
-        self.location[self.address] = new_value
+        if Journal.journalable_loc(self.varinfo.location):
+            old_value = self.location.get(self.address, None)
+            Journal().record(
+                JournalEntryType.STORAGE, self.location, self.address, old_value
+            )
 
-    def record(self):
-        old_value = self.location.get(self.address, None)
-        Journal().record(
-            JournalEntryType.STORAGE, self.location, self.address, old_value
-        )
+        if isinstance(new_value, CellContainer):
+            new_value.data_location = self.varinfo.location
+
+        self.location[self.address] = new_value
 
 
 class GlobalVariables:

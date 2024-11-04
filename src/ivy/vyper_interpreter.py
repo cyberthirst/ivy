@@ -453,18 +453,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def _new_local(self, identifier: str, typ: VyperType):
         self.memory.new_variable(identifier, typ)
 
-    def _journal_writes(self, node):
-        if writes := node._expr_info._writes:
-            for w in writes:
-                variable = w.variable
-                if Journal.journalable_loc(variable.location):
-                    self.globals[w.variable].record()
-
     def _assign_target(self, target, value):
-        # check variables written into and journal them if they are state variables
-        # this approach is adapted because the journal has to be aware of writes to attributes or subscripts
-        # if we'd journal only direct variable writes through `set_variable` we'd miss those cases
-        self._journal_writes(target)
         if isinstance(target, ast.Name):
             self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Tuple):
@@ -477,8 +466,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
             index = self.visit(target.slice)
-            # container is a reference from the given location thus the assignment
-            # will be reflected in the original location
             container[index] = value
         elif isinstance(target, ast.Attribute):
             typ = target.value._metadata["type"]
