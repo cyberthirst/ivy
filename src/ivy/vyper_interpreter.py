@@ -466,7 +466,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
             index = self.visit(target.slice)
-            container[index] = value
+            loc = target._expr_info.location
+            container.__setitem__(index, value, loc)
         elif isinstance(target, ast.Attribute):
             typ = target.value._metadata["type"]
             if isinstance(typ, (SelfT, ModuleT)):
@@ -474,7 +475,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             else:
                 assert isinstance(typ, StructT)
                 obj = self.visit(target.value)
-                obj[target.attr] = value
+                loc = target._expr_info.location
+                obj.__setitem__(target.attr, value, loc)
         else:
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
