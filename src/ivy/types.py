@@ -15,7 +15,6 @@ from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
 
 from ivy.utils import lrudict
-from ivy.evaluator import VyperEvaluator
 from ivy.journal import Journal, JournalEntryType
 
 
@@ -121,6 +120,8 @@ class _Sequence(_Container, Generic[T]):
         if idx >= len(self) or idx < 0:
             self._raise_index_error(idx)
         if idx not in self.values:
+            from ivy.evaluator import VyperEvaluator
+
             self.values[idx] = VyperEvaluator.default_value(self.value_type)
         return self.values[idx]
 
@@ -194,6 +195,8 @@ class Map(_Container):
 
     def __getitem__(self, key):
         if key not in self.values:
+            from ivy.evaluator import VyperEvaluator
+
             self.values[key] = VyperEvaluator.default_value(self.value_type)
         return self.values[key]
 
@@ -225,26 +228,3 @@ class Struct(_Container):
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
         self._journal(key, self.values[key], loc)
         self.values[key] = value
-
-
-def make_container(
-    typ: VyperType,
-    data_location: Optional[DataLocation] = None,
-    initial_value: Any = None,
-) -> Any:
-    """Factory function to create appropriate container type based on VyperType"""
-    if isinstance(typ, _SequenceT):
-        if typ.count is None:
-            return DynamicArray(typ)
-        else:
-            return StaticArray(typ)
-    elif isinstance(typ, HashMapT):
-        return Map(typ.key_type, typ.value_type, data_location)
-    elif isinstance(typ, StructT):
-        kws = {k: VyperEvaluator.default_value(v) for k, v in typ.members.items()}
-        if initial_value:
-            kws.update(initial_value)
-        return Struct(typ, kws, data_location)
-    else:
-        # For primitive types, just return the value
-        return initial_value or VyperEvaluator.default_value(typ)

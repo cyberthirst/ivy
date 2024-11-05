@@ -26,10 +26,12 @@ from vyper.semantics.types import (
     BytesM_T,
     TupleT,
     HashMapT,
+    DArrayT,
+    SArrayT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 
-from ivy.base_types import Address, Struct, Flag
+from ivy.types import Address, Struct, Flag, StaticArray, DynamicArray, Map
 from ivy.visitor import BaseClassVisitor
 
 
@@ -255,8 +257,10 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
     def default_value(cls, typ):
         if isinstance(typ, IntegerT):
             return 0
-        if isinstance(typ, _SequenceT):
-            return []
+        if isinstance(typ, DArrayT):
+            return DynamicArray(typ)
+        if isinstance(typ, SArrayT):
+            return StaticArray(typ)
         if isinstance(typ, BytesT) or isinstance(typ, BytesM_T):
             return b""
         if isinstance(typ, StringT):
@@ -265,7 +269,7 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
             kws = {k: cls.default_value(v) for k, v in typ.members.items()}
             return Struct(typ, kws)
         if isinstance(typ, HashMapT):
-            return defaultdict(lambda: cls.default_value(typ.value_type))
+            return Map(typ)
         if isinstance(typ, BoolT):
             return False
         if isinstance(typ, AddressT) or isinstance(typ, InterfaceT):
