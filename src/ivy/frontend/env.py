@@ -4,7 +4,7 @@ from typing import Any, Optional, TypeAlias, Union
 from vyper import ast as vy_ast
 
 from ivy.vyper_interpreter import VyperInterpreter
-from ivy.base_types import Address
+from ivy.types import Address
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes

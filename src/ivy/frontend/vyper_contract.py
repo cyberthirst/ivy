@@ -10,7 +10,7 @@ from vyper.semantics.types import TupleT
 from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
-from ivy.base_types import Address, Struct, Flag
+from ivy.types import Address, Struct, Flag
 
 
 class BaseDeployer(ABC):
@@ -93,7 +93,7 @@ class VyperContract:
         if isinstance(value, Struct):
             typ = value.typ
             # return a tuple with the values in the order based on the typ
-            return tuple(self.boa_compat(value.get(key)) for key in typ.members)
+            return tuple(self.boa_compat(value[key]) for key in typ.members)
         if isinstance(value, Flag):
             return value.value
         return value

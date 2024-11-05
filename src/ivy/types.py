@@ -98,8 +98,8 @@ T = TypeVar("T")
 
 class _Container:
     def __init__(self, vyper_type: VyperType):
-        self.typ = vyper_type
-        self.values: Dict[Any, Any] = {}
+        self._typ = vyper_type
+        self._values: Dict[Any, Any] = {}
 
     def _journal(self, key: Any, old_value: Any, loc: Optional[DataLocation] = None):
         if loc and Journal().journalable_loc(loc):
@@ -119,22 +119,22 @@ class _Sequence(_Container, Generic[T]):
     def __getitem__(self, idx: int) -> T:
         if idx >= len(self) or idx < 0:
             self._raise_index_error(idx)
-        if idx not in self.values:
+        if idx not in self._values:
             from ivy.evaluator import VyperEvaluator
 
-            self.values[idx] = VyperEvaluator.default_value(self.value_type)
-        return self.values[idx]
+            self._values[idx] = VyperEvaluator.default_value(self.value_type)
+        return self._values[idx]
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
         if idx >= len(self) or idx < 0:
             self._raise_index_error(idx)
 
-        if idx in self.values:
-            self._journal(idx, self.values[idx], loc)
+        if idx in self._values:
+            self._journal(idx, self._values[idx], loc)
         else:
             self._journal(idx, None, loc)
 
-        self.values[idx] = value
+        self._values[idx] = value
 
     def __len__(self) -> int:
         return self.length
@@ -145,9 +145,11 @@ class _Sequence(_Container, Generic[T]):
 
 
 class StaticArray(_Sequence[T]):
-    def __init__(self, typ: SArrayT):
-        length = typ.length
+    def __init__(self, typ: SArrayT, values: Optional[Dict[int, T]] = None):
         super().__init__(typ)
+        if values:
+            self._values = values
+            assert len(values) == self.length
 
     def append(self, value: T):
         raise AttributeError("'StaticArray' object has no attribute 'append'")
@@ -157,9 +159,13 @@ class StaticArray(_Sequence[T]):
 
 
 class DynamicArray(_Sequence[T]):
-    def __init__(self, typ: DArrayT):
+    def __init__(self, typ: DArrayT, values: Optional[Dict[int, T]] = None):
         super().__init__(typ)
         self._length = 0
+        if values:
+            self._values = values
+            assert len(values) <= self.length
+            self._length = len(values)
 
     def __len__(self) -> int:
         return self._length
@@ -171,7 +177,7 @@ class DynamicArray(_Sequence[T]):
         # TODO journal the length change
 
         idx = self._length
-        self.values[idx] = value
+        self._values[idx] = value
         self._length += 1
 
     def pop(self) -> T:
@@ -183,7 +189,7 @@ class DynamicArray(_Sequence[T]):
         idx = self._length - 1
         self._length -= 1
 
-        value = self.values.pop(idx)
+        value = self._values.pop(idx)
         return value
 
 
@@ -194,18 +200,18 @@ class Map(_Container):
         self.key_type = typ.key_type
 
     def __getitem__(self, key):
-        if key not in self.values:
+        if key not in self._values:
             from ivy.evaluator import VyperEvaluator
 
-            self.values[key] = VyperEvaluator.default_value(self.value_type)
-        return self.values[key]
+            self._values[key] = VyperEvaluator.default_value(self.value_type)
+        return self._values[key]
 
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):
-        if key in self.values:
-            self._journal(key, self.values[key], loc)
+        if key in self._values:
+            self._journal(key, self._values[key], loc)
         else:
             self._journal(key, None, loc)
-        self.values[key] = value
+        self._values[key] = value
 
 
 class Struct(_Container):
@@ -216,15 +222,19 @@ class Struct(_Container):
     ):
         super().__init__(typ)
         self.typ = typ
-        self.values = {key: value for key, value in kws.items()}
+        self._values = {key: value for key, value in kws.items()}
 
     def __getitem__(self, key: str) -> Any:
-        if key not in self.values:
+        if key not in self._values:
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
-        return self.values[key]
+        return self._values[key]
 
     def __setitem__(self, key: str, value: Any, loc: Optional[DataLocation] = None):
-        if key not in self.values:
+        if key not in self._values:
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
-        self._journal(key, self.values[key], loc)
-        self.values[key] = value
+        self._journal(key, self._values[key], loc)
+        self._values[key] = value
+
+    def values(self):
+        values = [self._values[k] for k, _ in self.typ.members.items()]
+        return values

@@ -1,18 +1,16 @@
-from typing import Optional, Type, Union
+from typing import Optional, Type, Union, Container
 import inspect
 from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability
-from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import (
     VyperType,
     TYPE_T,
     InterfaceT,
     StructT,
     MemberFunctionT,
-    BoolT,
     SelfT,
 )
 from vyper.semantics.types.module import ModuleT
@@ -39,7 +37,7 @@ from ivy.exceptions import (
     GasReference,
     FunctionNotFound,
 )
-from ivy.base_types import Address, Struct
+from ivy.types import Address, Struct, StaticArray, DynamicArray, Map
 from ivy.allocator import Allocator
 
 
@@ -467,7 +465,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             container = self.visit(target.value)
             index = self.visit(target.slice)
             loc = target._expr_info.location
-            container.__setitem__(index, value, loc)
+            if isinstance(container, (Map, StaticArray, DynamicArray)):
+                container.__setitem__(index, value, loc)
+            else:
+                # TODO should we create a custom tuple too?
+                # it's not necessary for journaling though
+                assert isinstance(container, tuple)
+                container[index] = value
         elif isinstance(target, ast.Attribute):
             typ = target.value._metadata["type"]
             if isinstance(typ, (SelfT, ModuleT)):
@@ -476,6 +480,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
                 assert isinstance(typ, StructT)
                 obj = self.visit(target.value)
                 loc = target._expr_info.location
+                assert isinstance(obj, Struct)
                 obj.__setitem__(target.attr, value, loc)
         else:
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")

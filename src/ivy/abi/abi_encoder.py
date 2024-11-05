@@ -15,7 +15,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
-from ivy.base_types import Struct, Flag
+from ivy.types import Struct, Flag, DynamicArray
 
 
 class EncodeError(Exception):
@@ -68,8 +68,8 @@ def _encode_static_array(abi_t: ABI_StaticArray, value: list) -> bytes:
 
 
 def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: list) -> bytes:
-    if not isinstance(value, list):
-        raise EncodeError(f"Expected list, got {type(value)}")
+    if not isinstance(value, (list, DynamicArray)):
+        raise EncodeError(f"Expected DynamicArray or list, got {type(value)}")
 
     length = len(value).to_bytes(32, "big")
 

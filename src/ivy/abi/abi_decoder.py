@@ -23,7 +23,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds, unsigned_to_signed
 from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT, FlagT
 
-from ivy.base_types import Flag, Struct
+from ivy.types import Flag, Struct
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType

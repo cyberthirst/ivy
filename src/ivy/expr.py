@@ -2,12 +2,20 @@ from abc import abstractmethod
 from typing import Optional
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TYPE_T, InterfaceT, StructT, SelfT, FlagT
+from vyper.semantics.types import (
+    TYPE_T,
+    InterfaceT,
+    StructT,
+    SelfT,
+    FlagT,
+    SArrayT,
+    DArrayT,
+)
 from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.base_types import Address, Flag
+from ivy.types import Address, Flag, StaticArray, DynamicArray
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -118,7 +126,16 @@ class ExprVisitor(BaseVisitor):
         return self.evaluator.eval_unaryop(node, operand)
 
     def visit_List(self, node: ast.List):
-        return [self.visit(elem) for elem in node.elements]
+        idx = 0
+        values = {}
+        for elem in node.elements:
+            values[idx] = self.visit(elem)
+            idx += 1
+        typ = node._metadata["type"]
+        if isinstance(typ, SArrayT):
+            return StaticArray(typ, values)
+        assert isinstance(typ, DArrayT)
+        return DynamicArray(typ, values)
 
     def visit_Tuple(self, node: ast.Tuple):
         return tuple(self.visit(elem) for elem in node.elements)

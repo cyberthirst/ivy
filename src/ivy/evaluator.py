@@ -29,7 +29,6 @@ from vyper.semantics.types import (
     DArrayT,
     SArrayT,
 )
-from vyper.semantics.types.subscriptable import _SequenceT
 
 from ivy.types import Address, Struct, Flag, StaticArray, DynamicArray, Map
 from ivy.visitor import BaseClassVisitor

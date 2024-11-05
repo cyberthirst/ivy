@@ -1,6 +1,5 @@
 from typing import Any
 from enum import Enum
-import copy
 
 from vyper.semantics.data_locations import DataLocation
 
@@ -42,7 +41,7 @@ class Journal:
     def record(self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any):
         entry_key = (id(obj), key, entry_type.value)
         if entry_key not in self.recorded_entries[-1]:
-            entry = JournalEntry(entry_type, obj, key, copy.deepcopy(old_value))
+            entry = JournalEntry(entry_type, obj, key, old_value)
             self.recorded_entries[-1][entry_key] = entry
 
     def begin_call(self):
