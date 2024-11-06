@@ -15,7 +15,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
-from ivy.types import Struct, Flag, DynamicArray
+from ivy.types import Struct, Flag, DynamicArray, StaticArray
 
 
 class EncodeError(Exception):
@@ -56,7 +56,7 @@ def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, Struct]) -> bytes:
 
 
 def _encode_static_array(abi_t: ABI_StaticArray, value: list) -> bytes:
-    if not isinstance(value, list):
+    if not isinstance(value, (list, StaticArray)):
         raise EncodeError(f"Expected list, got {type(value)}")
     if len(value) != abi_t.m_elems:
         raise EncodeError(

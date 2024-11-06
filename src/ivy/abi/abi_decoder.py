@@ -4,7 +4,7 @@
 #   - structs get decoded as tuples, ivy returns them as struct objects
 #   - boolean get decoded as ints, ivy returns them as bools
 
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Iterable, Union
 
 from eth_utils import to_checksum_address
 
@@ -23,7 +23,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds, unsigned_to_signed
 from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT, FlagT
 
-from ivy.types import Flag, Struct
+from ivy.types import Flag, Struct, StaticArray, DynamicArray
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -47,24 +47,36 @@ def _read_int(payload, ofst):
     return int.from_bytes(_strict_slice(payload, ofst, 32))
 
 
+# TODO maybe split into 2 decoders - one which will decode into ivy
+# one which will decode into vyper
 # vyper abi_decode spec implementation
-def abi_decode(typ: VyperType, payload: bytes):
+def abi_decode(typ: VyperType, payload: bytes, ivy_compat: bool = True):
     abi_t = typ.abi_type
 
     lo, hi = abi_t.static_size(), abi_t.size_bound()
     if not (lo <= len(payload) <= hi):
         raise DecodeError(f"bad payload size {lo}, {len(payload)}, {hi}")
 
-    return _decode_r(abi_t, typ, 0, payload)
+    return _decode_r(abi_t, typ, 0, payload, ivy_compat)
 
 
-def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: bytes):
+def _decode_r(
+    abi_t: ABIType,
+    typ: VyperType,
+    current_offset: int,
+    payload: bytes,
+    ivy_compat: bool,
+):
     if isinstance(abi_t, ABI_Tuple):
         assert isinstance(typ, StructT) or isinstance(typ, TupleT)
         member_typs = typ.tuple_members()
         res = tuple(
-            _decode_multi_r(abi_t.subtyps, member_typs, current_offset, payload)
+            _decode_multi_r(
+                abi_t.subtyps, member_typs, current_offset, payload, ivy_compat
+            )
         )
+        if not ivy_compat:
+            return res
         if isinstance(typ, StructT):
             kws = dict(zip(typ.tuple_keys(), res))
             return Struct(typ, kws)
@@ -75,7 +87,11 @@ def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: byte
         n = abi_t.m_elems
         abi_subtyps = [abi_t.subtyp] * n
         subtyps = [typ.subtype] * n
-        return _decode_multi_r(abi_subtyps, subtyps, current_offset, payload)
+        res = _decode_multi_r(abi_subtyps, subtyps, current_offset, payload, ivy_compat)
+        if not ivy_compat:
+            return res
+        # TODO construct the dict in callee
+        return StaticArray(typ, {i: res[i] for i in range(n)})
 
     if isinstance(abi_t, ABI_DynamicArray):
         assert isinstance(typ, DArrayT)
@@ -89,7 +105,11 @@ def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: byte
         current_offset += 32
         abi_subtyps = [abi_t.subtyp] * n
         subtyps = [typ.subtype] * n
-        return _decode_multi_r(abi_subtyps, subtyps, current_offset, payload)
+        res = _decode_multi_r(abi_subtyps, subtyps, current_offset, payload, ivy_compat)
+        if not ivy_compat:
+            return res
+        # TODO construct the dict in callee
+        return DynamicArray(typ, {i: res[i] for i in range(n)})
 
     # sanity check
     assert not abi_t.is_complex_type()
@@ -140,6 +160,8 @@ def _decode_r(abi_t: ABIType, typ: VyperType, current_offset: int, payload: byte
             bits = len(typ._flag_members)
             if ret >> bits > 0:
                 raise DecodeError(f"flag value out of bounds {ret}")
+            if not ivy_compat:
+                return ret
             return Flag(typ, ret)
 
         return ret
@@ -161,6 +183,7 @@ def _decode_multi_r(
     typs: Iterable[VyperType],
     outer_offset: int,
     payload: bytes,
+    ivy_compat: bool,
 ) -> list:
     ret = []
     static_ofst = outer_offset
@@ -175,7 +198,7 @@ def _decode_multi_r(
         else:
             ofst = static_ofst
 
-        item = _decode_r(abi_sub_t, sub_t, ofst, payload)
+        item = _decode_r(abi_sub_t, sub_t, ofst, payload, ivy_compat)
 
         ret.append(item)
         static_ofst += abi_sub_t.embedded_static_size()

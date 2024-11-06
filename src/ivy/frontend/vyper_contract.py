@@ -88,28 +88,18 @@ class VyperContract:
             raise RuntimeError("Contract address is not set")
         return self._address
 
-    # convert the types to be compatible with those of titanoboa
-    def boa_compat(self, value):
-        if isinstance(value, Struct):
-            typ = value.typ
-            # return a tuple with the values in the order based on the typ
-            return tuple(self.boa_compat(value[key]) for key in typ.members)
-        if isinstance(value, Flag):
-            return value.value
-        return value
-
     def marshal_to_python(self, computation, vyper_typ):
         if vyper_typ is None:
             return None
 
         return_typ = calculate_type_for_external_return(vyper_typ)
-        ret = abi_decode(return_typ, computation)
+        ret = abi_decode(return_typ, computation, ivy_compat=False)
 
         # unwrap the tuple if needed
         if not isinstance(vyper_typ, TupleT):
             (ret,) = ret
 
-        return self.boa_compat(ret)
+        return ret
 
     def _run_init(self, *args, value=0):
         encoded_args = b""
