@@ -55,7 +55,9 @@ def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, Struct]) -> bytes:
     return head + tail
 
 
-def _encode_static_array(abi_t: ABI_StaticArray, value: list) -> bytes:
+def _encode_static_array(
+    abi_t: ABI_StaticArray, value: Union[list, StaticArray]
+) -> bytes:
     if not isinstance(value, (list, StaticArray)):
         raise EncodeError(f"Expected list, got {type(value)}")
     if len(value) != abi_t.m_elems:

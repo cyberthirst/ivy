@@ -101,9 +101,16 @@ class _Container:
         self._typ = vyper_type
         self._values: Dict[Any, Any] = {}
 
-    def _journal(self, key: Any, old_value: Any, loc: Optional[DataLocation] = None):
-        if loc and Journal().journalable_loc(loc):
-            Journal().record(JournalEntryType.STORAGE, self, key, old_value)
+    def _journal(self, key: Any, loc: Optional[DataLocation] = None):
+        if not (loc and Journal().journalable_loc(loc)):
+            return
+
+        if key in self._values:
+            old_value = self._values[key]
+        else:
+            old_value = None
+
+        Journal().record(JournalEntryType.STORAGE, self, key, old_value)
 
 
 class _Sequence(_Container, Generic[T]):
@@ -119,7 +126,9 @@ class _Sequence(_Container, Generic[T]):
     def __getitem__(self, idx: int) -> T:
         if idx >= len(self) or idx < 0:
             self._raise_index_error(idx)
-        if idx not in self._values:
+        # TODO: should we journal None or default value?
+        # now we journal None, hence we need to check for None
+        if idx not in self._values or self._values[idx] is None:
             from ivy.evaluator import VyperEvaluator
 
             self._values[idx] = VyperEvaluator.default_value(self.value_type)
@@ -129,10 +138,7 @@ class _Sequence(_Container, Generic[T]):
         if idx >= len(self) or idx < 0:
             self._raise_index_error(idx)
 
-        if idx in self._values:
-            self._journal(idx, self._values[idx], loc)
-        else:
-            self._journal(idx, None, loc)
+        self._journal(idx, loc)
 
         self._values[idx] = value
 
@@ -200,17 +206,14 @@ class Map(_Container):
         self.key_type = typ.key_type
 
     def __getitem__(self, key):
-        if key not in self._values:
+        if key not in self._values or self._values[key] is None:
             from ivy.evaluator import VyperEvaluator
 
             self._values[key] = VyperEvaluator.default_value(self.value_type)
         return self._values[key]
 
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):
-        if key in self._values:
-            self._journal(key, self._values[key], loc)
-        else:
-            self._journal(key, None, loc)
+        self._journal(key, loc)
         self._values[key] = value
 
 
@@ -232,7 +235,7 @@ class Struct(_Container):
     def __setitem__(self, key: str, value: Any, loc: Optional[DataLocation] = None):
         if key not in self._values:
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
-        self._journal(key, self._values[key], loc)
+        self._journal(key, loc)
         self._values[key] = value
 
     def values(self):
