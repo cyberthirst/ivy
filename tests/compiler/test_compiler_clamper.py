@@ -61,8 +61,7 @@ def foo(s: Bytes[40]) -> Bytes[40]:
         c.foo(data + b"!")
 
 
-@pytest.mark.skip("Init functino not implemented yet")
-def test_bytes_clamper_on_init(tx_failed, get_contract):
+def test_bytes_clamper_on_init(get_contract):
     clamper_test_code = """
 foo: Bytes[3]
 
@@ -78,8 +77,10 @@ def get_foo() -> Bytes[3]:
     c = get_contract(clamper_test_code, b"cat")
     assert c.get_foo() == b"cat"
 
-    with tx_failed():
+    with pytest.raises(DecodeError) as e:
         get_contract(clamper_test_code, b"cats")
+
+    assert "bytes too large" in str(e.value)
 
 
 @pytest.mark.parametrize("n", list(range(1, 33)))
@@ -177,11 +178,15 @@ def foo(s: bool) -> bool:
     """
 
     c = loads(code)
-    with pytest.raises(DecodeError):
+    with pytest.raises(DecodeError) as e:
         _make_tx(c.address, "foo(bool)", [value])
 
+    if value < 2**8:
+        assert "invalid bool" in str(e.value)
+    else:
+        assert "invalid uint8" in str(e.value)
 
-@pytest.mark.skip(reason="flag type not implemented yet")
+
 @pytest.mark.parametrize("value", [0] + [2**i for i in range(5)])
 def test_flag_clamper_passing(value):
     code = """
@@ -201,7 +206,6 @@ def foo(s: Roles) -> Roles:
     assert c.foo(value) == value
 
 
-@pytest.mark.skip(reason="flag type not implemented yet")
 @pytest.mark.parametrize("value", [2**i for i in range(5, 256)])
 def test_flag_clamper_failing(value):
     code = """
@@ -218,8 +222,10 @@ def foo(s: Roles) -> Roles:
     """
 
     c = loads(code)
-    with pytest.raises(DecodeError):
+    with pytest.raises(DecodeError) as e:
         c.foo(value)
+
+    assert f"flag value out of bounds {value}" in str(e.value)
 
 
 @pytest.mark.parametrize("n", list(range(32)))
