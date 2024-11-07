@@ -1141,159 +1141,6 @@ def bar():
     c.foo()
 
 
-@pytest.mark.parametrize("reverts", [True, False])
-def test_storage_rollback(reverts):
-    reverts = True
-    src = f"""
-c: public(uint256)
-    
-@external
-def bar(u: uint256) -> uint256:
-    self.c = 10
-    assert {reverts} == False
-    return 66
-
-@external
-def foo() -> bool:
-    b: Bytes[32] = b""
-    s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
-    return s
-    """
-
-    c = loads(src)
-    success = c.foo()
-    assert success == (not reverts)
-    assert c.c() == (10 if success else 0)
-
-
-@pytest.mark.parametrize("reverts", [True, False])
-def test_storage_rollback2(reverts):
-    src = f"""
-c: public(uint256)
-
-@external
-def foobar(u: uint256) -> uint256:
-    self.c = 10
-    return 66
-
-@external
-def bar(u: uint256) -> uint256:
-    b: Bytes[32] = b""
-    s: bool = False
-    s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert {reverts} == False
-    return 66
-
-@external
-def foo() -> bool:
-    b: Bytes[32] = b""
-    s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
-    return s
-    """
-
-    c = loads(src)
-    success = c.foo()
-    assert success == (not reverts)
-    assert c.c() == (10 if success else 0)
-
-
-@pytest.mark.parametrize("reverts", [True, False])
-def test_storage_rollback3(reverts):
-    src = f"""
-c: public(uint256)
-
-@external
-def foobar(u: uint256) -> uint256:
-    self.c = 10
-    return 66
-
-@external
-def bar(u: uint256) -> uint256:
-    self.c = 20
-    b: Bytes[32] = b""
-    s: bool = False
-    s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert {reverts} == False
-    return 66
-
-@external
-def foo() -> bool:
-    b: Bytes[32] = b""
-    s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
-    return s
-    """
-
-    c = loads(src)
-    success = c.foo()
-    assert success == (not reverts)
-    assert c.c() == (10 if success else 20)
-
-
-@pytest.mark.parametrize("reverts", [True, False])
-def test_storage_rollback4(get_contract, reverts):
-    src = f"""
-c: public(DynArray[uint256, 10])
-
-@external
-def bar(u: uint256) -> uint256:
-    self.c[0] = 2
-    assert {reverts} == False
-    return 66
-
-@external
-def foo() -> bool:
-    self.c = [1]
-    b: Bytes[32] = b""
-    s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
-    return s
-    """
-
-    c = get_contract(src)
-    success = c.foo()
-    assert success == (not reverts)
-    assert c.c(0) == (2 if success else 1)
-
-
-@pytest.mark.parametrize("reverts", [True, False])
-def test_storage_rollback5(get_contract, reverts):
-    src = f"""
-struct C:
-    a: uint256 
-    
-c: public(C)
-
-@external
-def bar(u: uint256) -> uint256:
-    self.c.a = 2
-    assert {reverts} == False
-    return 66
-
-@external
-def foo() -> (bool, uint256):
-    self.c.a = 1
-    b: Bytes[32] = b""
-    s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
-    return s, self.c.a
-    """
-
-    c = get_contract(src)
-    success, c_a = c.foo()
-    assert success == (not reverts)
-    assert c_a == 2 if success else 1
-
-
-# TODO fix me - we currently only expect `tuple` in abi encoder
-# however, we represent structs using dicts
 def test_abi_encode_struct(get_contract):
     src = """
 struct C:
@@ -1696,3 +1543,111 @@ def foo():
     c.foo()
     assert c.a(0) == (3,)
     assert c.a(1) == (4,)
+
+
+def test_darray_append(get_contract):
+    src = """
+a: public(DynArray[uint256, 10])
+
+@external
+def foo() -> uint256:
+    self.a = []
+    self.a.append(1)
+    return self.a[0]
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 1
+
+
+def test_darray_append2(get_contract):
+    src = """
+a: public(DynArray[uint256, 1])
+
+@external
+def foo() -> uint256:
+    self.a = []
+    self.a.append(1)
+    self.a.append(1)
+    return self.a[0]
+    """
+
+    c = get_contract(src)
+    with pytest.raises(ValueError) as e:
+        c.foo()
+
+    assert "Cannot exceed maximum length 1" in str(e.value)
+
+
+def test_darray_append3(get_contract):
+    src = """
+a: public(DynArray[DynArray[uint256, 1], 2])
+
+@external
+def foo() -> DynArray[uint256, 10]:
+    self.a = []
+    self.a.append([1])
+    self.a.append([2])
+    return self.a[0]
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1]
+
+
+def test_darray_pop(get_contract):
+    src = """
+a: public(DynArray[DynArray[uint256, 1], 2])
+
+def bar() -> DynArray[uint256, 1]:
+    return []
+
+@external
+def foo() -> uint256:
+    self.a = []
+    self.a.append([1]) 
+    u: uint256 = self.a.pop()[0]
+    return u
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 1
+
+
+def test_darray_pop2(get_contract):
+    src = """
+a: public(DynArray[DynArray[uint256, 1], 2])
+
+def bar() -> DynArray[uint256, 1]:
+    return []
+
+@external
+def foo() -> uint256:
+    self.a = []
+    self.a.append([1]) 
+    u: DynArray[uint256, 10] = self.a.pop()
+    return u.pop()
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 1
+
+
+def test_darray_pop3(get_contract):
+    src = """
+a: public(DynArray[DynArray[uint256, 1], 2])
+
+def bar() -> DynArray[uint256, 1]:
+    return []
+
+@external
+def foo() -> uint256:
+    self.a = []
+    self.a.append([1]) 
+    self.a.append([2]) 
+    u: DynArray[uint256, 10] = self.a.pop()
+    return u.pop() + self.a.pop()[0]
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 3

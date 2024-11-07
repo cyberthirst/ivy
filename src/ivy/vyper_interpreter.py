@@ -580,11 +580,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if isinstance(func_t, MemberFunctionT):
             # the function is an attribute of the array
             darray = self.visit(call.func.value)
-            assert isinstance(darray, list)
+            assert isinstance(darray, DynamicArray)
             if func_t.name == "append":
-                pass
+                assert len(args) == 1
+                darray.append(args[0])
+                return None
             else:
                 assert func_t.name == "pop"
+                assert len(args) == 0
+                return darray.pop()
 
         assert isinstance(func_t, ContractFunctionT)
 
