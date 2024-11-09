@@ -1651,3 +1651,142 @@ def foo() -> uint256:
 
     c = get_contract(src)
     assert c.foo() == 3
+
+
+def test_pass_by_value(get_contract):
+    src = """
+a: public(DynArray[uint256, 2])
+
+def bar(d: DynArray[uint256, 2]):
+    d[0] = 0
+
+@external
+def foo() -> DynArray[uint256, 2]:
+    self.a = [1, 1]
+    self.bar(self.a)
+    return self.a
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value2(get_contract):
+    src = """
+def bar(d: DynArray[uint256, 2]):
+    d[0] = 0
+
+@external
+def foo() -> DynArray[uint256, 2]:
+    d: DynArray[uint256, 2] = [1, 1]
+    self.bar(d)
+    return d
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value3(get_contract):
+    src = """
+@external
+def foo() -> DynArray[uint256, 2]:
+    d: DynArray[uint256, 2] = [1, 1]
+    d2: DynArray[uint256, 2] = d
+    d2[0] = 0
+    return d
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value4(get_contract):
+    src = """
+@external
+def foo() -> DynArray[uint256, 2]:
+    d: DynArray[uint256, 2] = [1, 1]
+    d2: DynArray[uint256, 2] = d
+    d2[0] += 1
+    return d
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value5(get_contract):
+    src = """
+a: public(DynArray[uint256, 2])
+
+def bar() -> DynArray[uint256, 2]:
+    return self.a
+
+@external
+def foo() -> DynArray[uint256, 2]:
+    self.a = [1, 1]
+    d: DynArray[uint256, 2] = self.bar()
+    d[0] = 0
+    return self.a
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value6(get_contract):
+    src = """
+struct Foo:
+    a: uint256
+    b: DynArray[uint256, 2] 
+    
+f: Foo
+
+def bar() -> Foo:
+    return self.f
+
+@external
+def foo() -> Foo:
+    self.f = Foo(a=1, b=[1, 1])
+    d: Foo = self.bar()
+    d.a = 0
+    d.b[0] = 0
+    return self.f
+    """
+
+    c = get_contract(src)
+    assert c.foo() == (1, [1, 1])
+
+
+def test_pass_by_value7(get_contract):
+    src = """
+h: HashMap[uint256, DynArray[uint256, 2]]
+
+@external
+def foo() -> DynArray[uint256, 2]:
+    self.h[0] = [1, 1]
+    d: DynArray[uint256, 2] = self.h[0]
+    d[0] = 0
+    return self.h[0]
+    """
+
+    c = get_contract(src)
+    assert c.foo() == [1, 1]
+
+
+def test_pass_by_value8(get_contract):
+    src = """
+struct Foo:
+    a: uint256
+    b: DynArray[uint256, 2] 
+
+@external
+def foo() -> Foo:
+    f: Foo = Foo(a=1, b=[1, 1])
+    d: DynArray[uint256, 2] = f.b
+    d[0] = 0
+    return f
+    """
+
+    c = get_contract(src)
+    assert c.foo() == (1, [1, 1])

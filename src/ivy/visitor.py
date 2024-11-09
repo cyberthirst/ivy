@@ -1,7 +1,10 @@
 from abc import ABC, abstractmethod
 from typing import Optional
+import copy
 
 from vyper.ast import nodes as ast
+
+from ivy.types import _Container
 
 
 class BaseVisitor(ABC):
@@ -20,6 +23,16 @@ class BaseVisitor(ABC):
     @abstractmethod
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
         pass
+
+    # pass by value
+    def deep_copy_visit(self, node):
+        ret = self.visit(node)
+        if not isinstance(ret, (_Container, tuple)):
+            return ret
+        # TODO can be further optimized
+        # - can avoid deepcopy in ext func return values, exprs which don't
+        # retrieve variables, when consumer doesn't modify the value (copy on write), etc
+        return copy.deepcopy(ret)
 
 
 class BaseClassVisitor(ABC):

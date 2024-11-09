@@ -28,14 +28,14 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
-        value = self.visit(node.value)
+        value = self.deep_copy_visit(node.value)
         typ = node.target._expr_info.typ
         self._new_local(node.target.id, typ)
         self.set_variable(node.target.id, value)
         return None
 
     def visit_Assign(self, node: ast.Assign):
-        value = self.visit(node.value)
+        value = self.deep_copy_visit(node.value)
         self._assign_target(node.target, value)
 
         return None
@@ -106,7 +106,7 @@ class StmtVisitor(BaseVisitor):
 
     def visit_Return(self, node: ast.Return):
         if node.value:
-            value = self.visit(node.value)
+            value = self.deep_copy_visit(node.value)
             raise ReturnException(value)
         raise ReturnException(None)
 

@@ -149,6 +149,10 @@ class _Sequence(_Container, Generic[T]):
         for i in range(len(self)):
             yield self[i]
 
+    def __str__(self):
+        values = [str(self[i]) for i in range(len(self))]
+        return f"[{', '.join(values)}]"
+
 
 class StaticArray(_Sequence[T]):
     def __init__(self, typ: SArrayT, values: Optional[Dict[int, T]] = None):
@@ -241,3 +245,7 @@ class Struct(_Container):
     def values(self):
         values = [self._values[k] for k, _ in self.typ.members.items()]
         return values
+
+    def __str__(self):
+        items = [f"{k}={str(self[k])}" for k in self.typ.members.keys()]
+        return f"{self.typ.name}({', '.join(items)})"
