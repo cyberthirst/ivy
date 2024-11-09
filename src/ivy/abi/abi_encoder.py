@@ -113,13 +113,24 @@ def _encode_int(abi_t: ABI_GIntM, value: Union[int, Flag]) -> bytes:
     return value.to_bytes(32, "big", signed=abi_t.signed)
 
 
-def _encode_bytesM(abi_t: ABI_BytesM, value: bytes) -> bytes:
+def _encode_bytesM(abi_t: ABI_BytesM, value: Union[bytes, str]) -> bytes:
+    if isinstance(value, str):
+        if not value.startswith("0x"):
+            raise EncodeError("Hex string must start with 0x")
+        try:
+            value = bytes.fromhex(value[2:])
+        except ValueError:
+            raise EncodeError("Invalid hex string")
+
     if not isinstance(value, bytes):
-        raise EncodeError(f"Expected bytes, got {type(value)}")
-    if len(value) != abi_t.m_bytes:
-        raise EncodeError(
-            f"BytesM length mismatch: expected {abi_t.m_bytes}, got {len(value)}"
-        )
+        raise EncodeError(f"Expected bytes or hex string, got {type(value)}")
+
+    if len(value) > 32:
+        raise EncodeError("Input exceeds 32 bytes")
+
+    m = abi_t.m_bytes
+    if any(value[i] != 0 for i in range(m, len(value))):
+        raise EncodeError(f"Value exceeds bytes{m} bounds")
 
     return value.ljust(32, b"\x00")
 

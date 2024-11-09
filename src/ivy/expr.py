@@ -10,6 +10,8 @@ from vyper.semantics.types import (
     FlagT,
     SArrayT,
     DArrayT,
+    AddressT,
+    BytesM_T,
 )
 from vyper.semantics.types.module import ModuleT
 
@@ -65,7 +67,16 @@ class ExprVisitor(BaseVisitor):
 
     def visit_Hex(self, node: ast.Hex):
         # literals are validated in Vyper
-        return int(node.value, 16)
+        typ = node._metadata["type"]
+
+        val = node.value
+
+        if isinstance(typ, AddressT):
+            return Address(val)
+        assert isinstance(typ, BytesM_T)
+
+        bytes_val = bytes.fromhex(val[2:])
+        return bytes_val[: typ.m]
 
     def visit_Str(self, node: ast.Str):
         # literals are validated in Vyper
