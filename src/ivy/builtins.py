@@ -129,3 +129,27 @@ def builtin_raw_call(
         raise output.error
 
     return output.bytes_output()[:max_outsize]
+
+
+def builtin_concat(*args):
+    if len(args) < 2:
+        raise ValueError("concat() requires at least 2 arguments")
+
+    is_string = isinstance(args[0], str)
+    is_bytes = isinstance(args[0], bytes)
+
+    if not (is_string or is_bytes):
+        raise TypeError("concat() arguments must be either all strings or all bytes")
+
+    for arg in args[1:]:
+        if is_string and not isinstance(arg, str):
+            raise TypeError(
+                "If first argument is string, all arguments must be strings"
+            )
+        if is_bytes and not isinstance(arg, bytes):
+            raise TypeError("If first argument is bytes, all arguments must be bytes")
+
+    if is_string:
+        return "".join(args)
+    else:
+        return b"".join(args)
