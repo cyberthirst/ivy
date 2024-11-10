@@ -1,4 +1,5 @@
 from typing import Union, Dict, Any, Optional, TypeVar, Generic
+import copy
 
 from eth_utils import to_canonical_address, to_checksum_address
 from eth_typing.evm import Address as EthAddress
@@ -112,6 +113,12 @@ class _Container:
 
         Journal().record(JournalEntryType.STORAGE, self, key, old_value)
 
+    def __deepcopy__(self, _):
+        result = self.__class__.__new__(self.__class__)
+        result._typ = self._typ  # Types are immutable
+        result._values = {k: copy.deepcopy(v) for k, v in self._values.items()}
+        return result
+
 
 class _Sequence(_Container, Generic[T]):
     def __init__(self, typ: _SequenceT):
@@ -152,6 +159,12 @@ class _Sequence(_Container, Generic[T]):
     def __str__(self):
         values = [str(self[i]) for i in range(len(self))]
         return f"[{', '.join(values)}]"
+
+    def __deepcopy__(self, _):
+        result = super().__deepcopy__(_)
+        result.value_type = self.value_type
+        result.length = self.length
+        return result
 
 
 class StaticArray(_Sequence[T]):
@@ -202,6 +215,11 @@ class DynamicArray(_Sequence[T]):
         value = self._values.pop(idx)
         return value
 
+    def __deepcopy__(self, _):
+        result = super().__deepcopy__(_)
+        result._length = self._length
+        return result
+
 
 class Map(_Container):
     def __init__(self, typ: HashMapT):
@@ -228,24 +246,28 @@ class Struct(_Container):
         kws: Dict[str, Any],
     ):
         super().__init__(typ)
-        self.typ = typ
         self._values = {key: value for key, value in kws.items()}
 
     def __getitem__(self, key: str) -> Any:
         if key not in self._values:
-            raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
+            raise KeyError(f"'{self._typ.name}' struct has no member '{key}'")
         return self._values[key]
 
     def __setitem__(self, key: str, value: Any, loc: Optional[DataLocation] = None):
         if key not in self._values:
-            raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
+            raise KeyError(f"'{self._typ.name}' struct has no member '{key}'")
         self._journal(key, loc)
         self._values[key] = value
 
     def values(self):
-        values = [self._values[k] for k, _ in self.typ.members.items()]
+        values = [self._values[k] for k, _ in self._typ.members.items()]
         return values
 
     def __str__(self):
-        items = [f"{k}={str(self[k])}" for k in self.typ.members.keys()]
-        return f"{self.typ.name}({', '.join(items)})"
+        items = [f"{k}={str(self[k])}" for k in self._typ.members.keys()]
+        return f"{self._typ.name}({', '.join(items)})"
+
+    def __deepcopy__(self, _):
+        result = super().__deepcopy__(_)
+        result.typ = self._typ
+        return result

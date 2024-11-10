@@ -192,8 +192,7 @@ class ExprVisitor(BaseVisitor):
                 args += (typ.typedef,)
                 typs += (typ,)
             else:
-                # args += (self.visit(arg),)
                 args += (self.deep_copy_visit(arg),)
                 typs += (typ,)
-        kws = {kw.arg: self.visit(kw.value) for kw in node.keywords}
+        kws = {kw.arg: self.deep_copy_visit(kw.value) for kw in node.keywords}
         return self.generic_call_handler(node, args, kws, typs, target, is_static)
