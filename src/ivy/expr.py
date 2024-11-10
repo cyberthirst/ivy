@@ -18,7 +18,7 @@ from vyper.semantics.types.module import ModuleT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.types import Address, Flag, StaticArray, DynamicArray
+from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -64,7 +64,7 @@ class ExprVisitor(BaseVisitor):
         return node.value
 
     def visit_Decimal(self, node: ast.Decimal):
-        raise NotImplementedError("Decimal not implemented")
+        return VyperDecimal(node.value)
 
     def visit_Hex(self, node: ast.Hex):
         # literals are validated in Vyper

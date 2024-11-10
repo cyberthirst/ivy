@@ -94,6 +94,93 @@ class Flag:
         return hash(self.value)
 
 
+class VyperDecimal:
+    PRECISION = 10
+    SCALING_FACTOR = 10**PRECISION
+
+    MAX_VALUE = 2**167 - 1
+    MIN_VALUE = -(2**167)
+
+    @classmethod
+    def max(cls) -> "VyperDecimal":
+        result = cls(0)
+        result.value = cls.MAX_VALUE
+        return result
+
+    @classmethod
+    def min(cls) -> "VyperDecimal":
+        result = cls(0)
+        result.value = cls.MIN_VALUE
+        return result
+
+    def __init__(self, value: Union[str, int, float]):
+        self.value = int(value * self.SCALING_FACTOR)
+
+        if self.value > self.MAX_VALUE or self.value < self.MIN_VALUE:
+            raise ValueError("Decimal value out of bounds")
+
+    def __add__(self, other: "VyperDecimal") -> "VyperDecimal":
+        result = VyperDecimal(0)
+        result.value = self.value + other.value
+        return result
+
+    def __sub__(self, other: "VyperDecimal") -> "VyperDecimal":
+        result = VyperDecimal(0)
+        result.value = self.value - other.value
+        return result
+
+    def __mul__(self, other: "VyperDecimal") -> "VyperDecimal":
+        result = VyperDecimal(0)
+        result.value = self.value * other.value // self.SCALING_FACTOR
+        return result
+
+    def __truediv__(self, other: "VyperDecimal") -> "VyperDecimal":
+        if other.value == 0:
+            raise ZeroDivisionError("Division by zero")
+        result = VyperDecimal("0")
+        result.value = (self.value * self.SCALING_FACTOR) // other.value
+        return result
+
+    def __floordiv__(self, other: "VyperDecimal") -> "VyperDecimal":
+        if other.value == 0:
+            raise ZeroDivisionError("Division by zero")
+        result = VyperDecimal(0)
+        result.value = (self.value * self.SCALING_FACTOR) // other.value
+        result.value = (result.value // self.SCALING_FACTOR) * self.SCALING_FACTOR
+        return result
+
+    def __lt__(self, other: "VyperDecimal") -> bool:
+        return self.value < other.value
+
+    def __le__(self, other: "VyperDecimal") -> bool:
+        return self.value <= other.value
+
+    def __eq__(self, other: "VyperDecimal") -> bool:
+        return self.value == other.value
+
+    def __ne__(self, other: "VyperDecimal") -> bool:
+        return self.value != other.value
+
+    def __ge__(self, other: "VyperDecimal") -> bool:
+        return self.value >= other.value
+
+    def __gt__(self, other: "VyperDecimal") -> bool:
+        return self.value > other.value
+
+    def __str__(self) -> str:
+        is_negative = self.value < 0
+        abs_value = abs(self.value)
+
+        str_value = str(abs_value).zfill(self.PRECISION + 1)
+        int_part = str_value[: -self.PRECISION] or "0"
+        dec_part = str_value[-self.PRECISION :]
+
+        return f"{'-' if is_negative else ''}{int_part}.{dec_part}"
+
+    def __repr__(self) -> str:
+        return f"Decimal('{self.__str__()}')"
+
+
 T = TypeVar("T")
 
 

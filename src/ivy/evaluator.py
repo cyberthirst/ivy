@@ -28,9 +28,18 @@ from vyper.semantics.types import (
     HashMapT,
     DArrayT,
     SArrayT,
+    DecimalT,
 )
 
-from ivy.types import Address, Struct, Flag, StaticArray, DynamicArray, Map
+from ivy.types import (
+    Address,
+    Struct,
+    Flag,
+    StaticArray,
+    DynamicArray,
+    Map,
+    VyperDecimal,
+)
 from ivy.visitor import BaseClassVisitor
 
 
@@ -70,6 +79,11 @@ class VyperValidator:
     @classmethod
     def validate_FlagT(cls, value, typ):
         return value.value >> len(typ._flag_members) == 0
+
+    @classmethod
+    def validate_DecimalT(cls, value, typ):
+        if not VyperDecimal.min() <= value <= VyperDecimal.max():
+            raise ValueError(f"Value {value} out of bounds for {typ}")
 
     @classmethod
     def validate_StructT(cls, value, typ):
@@ -277,4 +291,6 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
             return Flag(typ, 0)
         if isinstance(typ, TupleT):
             return tuple(cls.default_value(t) for t in typ.member_types)
+        if isinstance(typ, DecimalT):
+            return VyperDecimal(0)
         raise NotImplementedError(f"Default value for {typ} not implemented")

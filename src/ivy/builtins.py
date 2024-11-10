@@ -1,6 +1,7 @@
 from typing import Callable, Any, Union
 
-from vyper.semantics.types import VyperType, TupleT
+from vyper.ast.nodes import Decimal
+from vyper.semantics.types import VyperType, TupleT, DecimalT
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.utils import method_id
 
@@ -9,7 +10,7 @@ from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
 from ivy.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
-from ivy.types import Address
+from ivy.types import Address, VyperDecimal
 
 
 def builtin_range(*args, bound=None):
@@ -91,7 +92,9 @@ def builtin_empty(typ):
 
 
 def get_bound(typ, get_high: bool):
-    low, high = typ.ast_bounds
+    if isinstance(typ, DecimalT):
+        return VyperDecimal.max() if get_high else VyperDecimal.min()
+    low, high = typ.int_bounds
     return high if get_high else low
 
 

@@ -15,7 +15,7 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
-from ivy.types import Struct, Flag, DynamicArray, StaticArray
+from ivy.types import Struct, Flag, DynamicArray, StaticArray, VyperDecimal
 
 
 class EncodeError(Exception):
@@ -102,6 +102,8 @@ def _encode_string(_: ABI_String, value: str) -> bytes:
 
 def _encode_int(abi_t: ABI_GIntM, value: Union[int, Flag]) -> bytes:
     if isinstance(value, Flag):
+        value = value.value
+    if isinstance(value, VyperDecimal):
         value = value.value
     if not isinstance(value, int):
         raise EncodeError(f"Expected int, got {type(value)}")
