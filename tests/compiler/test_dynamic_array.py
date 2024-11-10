@@ -110,7 +110,6 @@ def foo6() -> DynArray[DynArray[String[32], 2], 2]:
     assert c.foo6() == [["hello", "world"]]
 
 
-@pytest.mark.skip(reason="Decimals not yet supported")
 def test_list_output_tester_code(get_contract):
     list_output_tester_code = """
 flag Foobar:
@@ -642,7 +641,6 @@ def bar() -> uint256:
     assert c.bar() == 1
 
 
-@pytest.mark.skip(reason="Decimal not implemented")
 def test_returns_lists(get_contract):
     code = """
 @external
@@ -1555,7 +1553,7 @@ def bar() -> uint256:
     assert c.bar() == 58
 
 
-@pytest.mark.skip("decimals not implemented")
+@pytest.mark.skip("constants not implemented")
 def test_constant_list(get_contract, tx_failed):
     some_good_primes = [5.0, 11.0, 17.0, 29.0, 37.0, 41.0]
     code = f"""

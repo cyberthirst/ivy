@@ -4,7 +4,6 @@ from tests.utils import decimal_to_int
 from vyper.semantics.types import IntegerT
 
 
-@pytest.mark.skip(reason="Decimals not implemented")
 def test_minmax(get_contract):
     minmax_test = """
 @external

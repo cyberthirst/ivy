@@ -2,6 +2,7 @@ import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.data_locations import DataLocation
 
+# TODO enable constants
 IGNORED_LOCATIONS = (DataLocation.UNSET, DataLocation.CALLDATA)
 
 
@@ -15,6 +16,8 @@ class Allocator:
             if location not in IGNORED_LOCATIONS
         }
         self.visited = set()
+
+    # @pytest.mark.skip(reason="Decimals not yet supported")
 
     def _get_allocatable(self, vyper_module: ast.Module) -> list[ast.VyperNode]:
         allocable = (ast.InitializesDecl, ast.VariableDecl)

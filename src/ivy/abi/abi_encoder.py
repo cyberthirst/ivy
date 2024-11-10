@@ -1,3 +1,4 @@
+import decimal
 from typing import Any, Callable, Union
 from eth_utils import to_canonical_address
 from vyper.abi_types import (
@@ -105,6 +106,8 @@ def _encode_int(abi_t: ABI_GIntM, value: Union[int, Flag]) -> bytes:
         value = value.value
     if isinstance(value, VyperDecimal):
         value = value.value
+    if isinstance(value, decimal.Decimal):
+        value = int(value * decimal.Decimal("10") ** 10)
     if not isinstance(value, int):
         raise EncodeError(f"Expected int, got {type(value)}")
 

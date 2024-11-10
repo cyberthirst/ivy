@@ -5,6 +5,7 @@
 #   - boolean get decoded as ints, ivy returns them as bools
 
 from typing import TYPE_CHECKING, Iterable, Union
+import decimal
 
 from eth_utils import to_checksum_address
 
@@ -21,9 +22,17 @@ from vyper.abi_types import (
     ABIType,
 )
 from vyper.utils import int_bounds, unsigned_to_signed
-from vyper.semantics.types import VyperType, StructT, TupleT, SArrayT, DArrayT, FlagT
+from vyper.semantics.types import (
+    VyperType,
+    StructT,
+    TupleT,
+    SArrayT,
+    DArrayT,
+    FlagT,
+    DecimalT,
+)
 
-from ivy.types import Flag, Struct, StaticArray, DynamicArray
+from ivy.types import Flag, Struct, StaticArray, DynamicArray, VyperDecimal
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -163,6 +172,12 @@ def _decode_r(
             if not ivy_compat:
                 return ret
             return Flag(typ, ret)
+
+        if isinstance(typ, DecimalT):
+            if not ivy_compat:
+                raise NotImplementedError
+
+            return VyperDecimal(ret / VyperDecimal.SCALING_FACTOR)
 
         return ret
 

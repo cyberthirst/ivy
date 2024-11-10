@@ -321,7 +321,6 @@ def foo(s: decimal) -> decimal:
     assert c.foo(value) == value
 
 
-@pytest.mark.skip("Decimals not supported yet.")
 @pytest.mark.parametrize(
     "value",
     [
@@ -340,7 +339,7 @@ def foo(s: decimal) -> decimal:
 
     c = loads(code)
     with pytest.raises(DecodeError):
-        c.foo(value)
+        _make_tx(c.address, "foo(int168)", [value])
 
 
 @pytest.mark.parametrize("value", [0, 1, -1, 2**127 - 1, -(2**127)])
