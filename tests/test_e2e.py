@@ -1790,3 +1790,14 @@ def foo() -> Foo:
 
     c = get_contract(src)
     assert c.foo() == (1, [1, 1])
+
+
+def test_max_builtin(get_contract):
+    src = """
+@external
+def foo() -> uint256:
+    return max_value(uint256)
+    """
+
+    c = get_contract(src)
+    _ = c.foo()

@@ -1,4 +1,4 @@
-from typing import Callable, Any
+from typing import Callable, Any, Union
 
 from vyper.semantics.types import VyperType, TupleT
 from vyper.codegen.core import calculate_type_for_external_return
@@ -90,6 +90,32 @@ def builtin_empty(typ):
     return VyperEvaluator.default_value(typ)
 
 
+def get_bound(typ, get_high: bool):
+    low, high = typ.ast_bounds
+    return high if get_high else low
+
+
+def builtin_max_value(typ):
+    return get_bound(typ, get_high=True)
+
+
+def builtin_min_value(typ):
+    return get_bound(typ, get_high=False)
+
+
+def builtin_max(x, y):
+    return max(x, y)
+
+
+def builtin_min(x, y):
+    return min(x, y)
+
+
+def builtin_uint2str(x: int) -> str:
+    assert x >= 0
+    return str(x)
+
+
 # TODO handle typ
 def builtin_method_id(method: str, output_type: VyperType = None):
     return method_id(method)
@@ -129,6 +155,15 @@ def builtin_raw_call(
         raise output.error
 
     return output.bytes_output()[:max_outsize]
+
+
+def builtin_slice(b: Union[bytes, str], start: int, length: int) -> Union[bytes, str]:
+    assert start >= 0 and length >= 0
+
+    if start + length > len(b):
+        raise IndexError("Slice out of bounds")
+
+    return b[start : start + length]
 
 
 def builtin_concat(*args):
