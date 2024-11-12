@@ -1,6 +1,5 @@
 from typing import Callable, Any, Union
 
-from vyper.ast.nodes import Decimal
 from vyper.semantics.types import VyperType, TupleT, DecimalT
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.utils import method_id

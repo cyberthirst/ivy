@@ -6,7 +6,7 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.subscriptable import TupleT
 
 from ivy.utils import compute_call_abi_data
-from ivy.variable import GlobalVariable, GlobalVariables
+from ivy.variable import GlobalVariables
 
 
 @dataclass

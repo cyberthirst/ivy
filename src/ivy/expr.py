@@ -1,6 +1,5 @@
 from abc import abstractmethod
 from typing import Optional
-import copy
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (

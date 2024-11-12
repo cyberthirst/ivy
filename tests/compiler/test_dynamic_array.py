@@ -1,6 +1,5 @@
 # adapted: https://github.com/vyperlang/vyper/blob/4594f8badf13a583875f8891698cd3bbefb1c787/tests/functional/codegen/types/test_dynamic_array.py#L1-L0
 
-import itertools
 from typing import Any, Callable
 import decimal
 

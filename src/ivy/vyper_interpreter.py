@@ -1,4 +1,4 @@
-from typing import Optional, Type, Union, Container
+from typing import Optional, Type, Union
 import inspect
 from collections import defaultdict
 from contextlib import contextmanager

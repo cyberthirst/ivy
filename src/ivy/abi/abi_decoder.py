@@ -4,8 +4,7 @@
 #   - structs get decoded as tuples, ivy returns them as struct objects
 #   - boolean get decoded as ints, ivy returns them as bools
 
-from typing import TYPE_CHECKING, Iterable, Union
-import decimal
+from typing import TYPE_CHECKING, Iterable
 
 from eth_utils import to_checksum_address
 

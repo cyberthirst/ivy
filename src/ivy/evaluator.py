@@ -1,5 +1,4 @@
 from typing import Any
-from collections import defaultdict
 from operator import (
     add,
     sub,

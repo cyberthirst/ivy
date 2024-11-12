@@ -3,7 +3,7 @@ import pytest
 from hypothesis import given, settings
 
 from vyper.compiler import compile_code
-from vyper.compiler.settings import OptimizationLevel, Settings
+from vyper.compiler.settings import OptimizationLevel
 from vyper.evm.opcodes import version_check
 from vyper.exceptions import ArgumentException, CompilerPanic, TypeMismatch
 
