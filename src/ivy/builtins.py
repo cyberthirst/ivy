@@ -1,6 +1,17 @@
 from typing import Callable, Any, Union
 
-from vyper.semantics.types import VyperType, TupleT, DecimalT
+from vyper.semantics.types import (
+    VyperType,
+    TupleT,
+    DecimalT,
+    IntegerT,
+    BoolT,
+    AddressT,
+    BytesT,
+    BytesM_T,
+    StringT,
+)
+from vyper.semantics.types.shortcuts import UINT256_T
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.utils import method_id
 
@@ -10,6 +21,7 @@ from ivy.evaluator import VyperEvaluator
 from ivy.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
+import ivy.convert_utils as convert_utils
 
 
 def builtin_range(*args, bound=None):
@@ -190,3 +202,63 @@ def builtin_concat(*args):
         return "".join(args)
     else:
         return b"".join(args)
+
+
+# all the convert functionality is adapted from vyper's test suite
+# - https://github.com/vyperlang/vyper/blob/c32b9b4c6f0d8b8cdb103d3017ff540faf56a305/tests/functional/builtins/codegen/test_convert.py#L301
+def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
+    assert len(typs) == 2
+    i_typ = typs[0]
+    val, o_typ = values
+
+    """
+    Perform conversion on the Python representation of a Vyper value.
+    Returns None if the conversion is invalid (i.e., would revert in Vyper)
+    """
+    if isinstance(i_typ, IntegerT) and isinstance(o_typ, IntegerT):
+        return convert_utils._convert_int_to_int(val, o_typ)
+
+    if isinstance(i_typ, DecimalT) and isinstance(o_typ, IntegerT):
+        return convert_utils._convert_decimal_to_int(val, o_typ)
+
+    if isinstance(i_typ, (BoolT, IntegerT)) and isinstance(o_typ, DecimalT):
+        # Note: Decimal(True) == Decimal("1")
+        return convert_utils._convert_int_to_decimal(val, o_typ)
+
+    val_bits = convert_utils._to_bits(val, i_typ)
+
+    if isinstance(i_typ, (BytesT, StringT)):
+        val_bits = val_bits[32:]
+
+    if convert_utils._padding_direction(i_typ) != convert_utils._padding_direction(
+        o_typ
+    ):
+        # subtle! the padding conversion follows the bytes argument
+        if isinstance(i_typ, (BytesM_T, BytesT)):
+            n = convert_utils.bytes_of_type(i_typ)
+            padding_byte = None
+        else:
+            # output type is bytes
+            n = convert_utils.bytes_of_type(o_typ)
+            padding_byte = b"\x00"
+
+        val_bits = convert_utils._padconvert(
+            val_bits, convert_utils._padding_direction(o_typ), n, padding_byte
+        )
+
+    if getattr(o_typ, "is_signed", False) and isinstance(i_typ, BytesM_T):
+        n_bits = convert_utils._bits_of_type(i_typ)
+        val_bits = convert_utils._signextend(val_bits, n_bits)
+
+    try:
+        if isinstance(o_typ, BoolT):
+            return convert_utils._from_bits(val_bits, UINT256_T) != 0
+
+        ret = convert_utils._from_bits(val_bits, o_typ)
+
+        if isinstance(o_typ, AddressT):
+            return Address(ret)
+        return ret
+
+    except convert_utils.ConvertError:
+        raise ValueError(f"Cannot convert value {val} of typ {i_typ} to {o_typ}")

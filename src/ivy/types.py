@@ -113,8 +113,11 @@ class VyperDecimal:
         result.value = cls.MIN_VALUE
         return result
 
-    def __init__(self, value: Union[str, int, float]):
-        self.value = int(value * self.SCALING_FACTOR)
+    def __init__(self, value: Union[str, int, float], scaled: bool = False):
+        if not scaled:
+            self.value = int(value * self.SCALING_FACTOR)
+        else:
+            self.value = value
 
         if self.value > self.MAX_VALUE or self.value < self.MIN_VALUE:
             raise ValueError("Decimal value out of bounds")
@@ -179,6 +182,17 @@ class VyperDecimal:
 
     def __repr__(self) -> str:
         return f"Decimal('{self.__str__()}')"
+
+    def truncate(self) -> "VyperDecimal":
+        result = VyperDecimal(0)
+        # Divide by scaling factor first (removes decimal places)
+        # Then multiply back to maintain the internal representation
+        if self.value >= 0:
+            result.value = (self.value // self.SCALING_FACTOR) * self.SCALING_FACTOR
+        else:
+            # For negative numbers, we need to handle truncation towards zero
+            result.value = -((-self.value // self.SCALING_FACTOR) * self.SCALING_FACTOR)
+        return result
 
 
 T = TypeVar("T")

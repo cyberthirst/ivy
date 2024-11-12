@@ -176,7 +176,7 @@ def _decode_r(
             if not ivy_compat:
                 return ret
 
-            return VyperDecimal(ret / VyperDecimal.SCALING_FACTOR)
+            return VyperDecimal(ret, scaled=True)
 
         return ret
 

@@ -561,7 +561,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             if id in ("raw_call", "send"):
                 # dependency injection
                 args = (self.message_call,) + args
-            elif id in ("abi_encode", "_abi_encode"):
+            elif id in ("abi_encode", "_abi_encode", "convert"):
                 args = (typs, args)
             return self.builtins[id](*args, **kws)
 
