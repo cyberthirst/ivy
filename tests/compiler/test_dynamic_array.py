@@ -373,7 +373,6 @@ def check(a: {type}) -> bool:
     assert c.check(false_value) is False
 
 
-@pytest.mark.skip(reason="convert built-in not yet supported")
 @pytest.mark.parametrize("type_", ("uint256", "bytes32", "address"))
 def test_member_in_empty_list(get_contract, type_):
     code = f"""

@@ -259,7 +259,6 @@ def foo(x: uint256, y: uint256) -> (uint256, String[12]):
     assert c.foo(11, 1) == (2**256 - 1, "d")
 
 
-@pytest.mark.skip(reason="Convert builtin not implemented")
 def test_slice_storage_bytes32(get_contract):
     code = """
 bytez: bytes32
@@ -291,7 +290,6 @@ def do_slice(inp: Bytes[50]) -> Bytes[50]:
     assert x == b"abcde", x
 
 
-@pytest.mark.skip(reason="Convert builtin not implemented")
 def test_slice_at_end(get_contract):
     code = """
 @external
@@ -305,7 +303,6 @@ def ret10_slice() -> Bytes[10]:
     assert c.ret10_slice() == b"A"
 
 
-@pytest.mark.skip(reason="Convert builtin not implemented")
 def test_slice_expr(get_contract):
     # test slice of a complex expression
     code = """
@@ -348,7 +345,6 @@ def assert_ne() -> bool:
     assert c.assert_ne()
 
 
-@pytest.mark.skip(reason="Convert builtin not implemented")
 def test_slice_convert(get_contract):
     # test slice of converting between bytes32 and Bytes
     code = """
@@ -413,7 +409,6 @@ def bar() -> Bytes[32]:
 ]
 
 
-@pytest.mark.skip(reason="Convert builtin not implemented")
 @pytest.mark.parametrize("code", code_bytes32)
 @pytest.mark.parametrize("start,length", _fun_bytes32_bounds)
 def test_slice_bytes32(get_contract, code, start, length):
