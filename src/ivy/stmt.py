@@ -67,26 +67,28 @@ class StmtVisitor(BaseVisitor):
 
     def visit_For(self, node: ast.For):
         iterable = self.visit(node.iter)
-
+        # Scope for the iterator variable (not stricly neccessary)
         self._push_scope()
+        target_name = node.target.target
+        target_typ = target_name._expr_info.typ
+        self._new_local(target_name.id, target_typ)
 
-        try:
-            target_name = node.target.target
-            target_typ = target_name._expr_info.typ
-            self._new_local(target_name.id, target_typ)
-            for item in iterable:
-                self._assign_target(target_name, item)
+        for item in iterable:
+            # New scope for each iteration
+            self._push_scope()
+            self._assign_target(target_name, item)
 
-                try:
-                    for stmt in node.body:
-                        self.visit(stmt)
-                except ContinueException:
-                    continue
-                except BreakException:
-                    break
-        finally:
-            self._pop_scope()
+            try:
+                for stmt in node.body:
+                    self.visit(stmt)
+            except ContinueException:
+                continue
+            except BreakException:
+                break
+            finally:
+                self._pop_scope()  # Pop iteration scope
 
+        self._pop_scope()  # Pop iterator variable scope
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
