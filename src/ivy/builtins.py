@@ -31,6 +31,9 @@ def builtin_range(*args, bound=None):
         assert len(args) == 1
         start, stop = 0, args[0]
 
+    if start > stop:
+        raise ValueError(f"start({start}) is greater than stop({stop})")
+
     if bound:
         if stop > bound and len(args) == 1:
             raise RuntimeError(f"Stop value is greater than bound={bound} value")
