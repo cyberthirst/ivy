@@ -227,7 +227,9 @@ def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
 
     val_bits = convert_utils._to_bits(val, i_typ)
 
-    if isinstance(i_typ, (BytesT, StringT)):
+    if isinstance(i_typ, (BytesT, StringT)) and not isinstance(
+        o_typ, (BytesT, StringT)
+    ):
         val_bits = val_bits[32:]
 
     if convert_utils._padding_direction(i_typ) != convert_utils._padding_direction(

@@ -125,7 +125,7 @@ def _from_bits(val_bits, o_typ):
         ret = abi_decode(o_typ, val_bits)
         return ret
     except DecodeError:
-        raise ConvertError
+        raise ConvertError()
 
 
 class ConvertError(Exception):
