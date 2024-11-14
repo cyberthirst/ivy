@@ -16,6 +16,17 @@ class EntryPointInfo:
     calldata_min_size: int
 
 
+# dict for constant variables
+# TODO: should we use it also for immutables?
+class AssignOnceDict(dict):
+    def __setitem__(self, key, value):
+        if key in self:
+            raise ValueError(
+                f"Cannot reassign key '{key}': already has value '{self[key]}'"
+            )
+        super().__setitem__(key, value)
+
+
 class ContractData:
     module_t: ModuleT
     ext_funs: dict[str, ContractFunctionT]
@@ -36,7 +47,7 @@ class ContractData:
             f: f for f in module.functions if f not in self.ext_funs.values()
         }
         self.immutables = {}
-        self.constants = {}
+        self.constants = AssignOnceDict()
         self.entry_points = {}
         self._generate_entry_points()
         self.global_vars = GlobalVariables()

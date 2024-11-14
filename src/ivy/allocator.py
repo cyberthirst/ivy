@@ -3,7 +3,7 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.data_locations import DataLocation
 
 # TODO enable constants
-IGNORED_LOCATIONS = (DataLocation.UNSET, DataLocation.CALLDATA)
+IGNORED_LOCATIONS = (DataLocation.CALLDATA,)
 
 
 class Allocator:
@@ -44,7 +44,7 @@ class Allocator:
 
             # sanity check
             assert varinfo not in self.visited
-            assert varinfo.location not in IGNORED_LOCATIONS
+            assert varinfo.is_state_variable or varinfo.is_constant
 
             varinfo.position = self._increment_counter(varinfo.location)
             self.visited.add(varinfo)

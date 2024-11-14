@@ -4,7 +4,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
-from vyper.semantics.analysis.base import StateMutability
+from vyper.semantics.analysis.base import StateMutability, Modifiability
 from vyper.semantics.types import (
     VyperType,
     TYPE_T,
@@ -236,6 +236,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         for var in globals:
             loc = self.storage_from_varinfo(var)
+
+            if var.is_constant:
+                value = self.visit(var.decl_node.value)  # the value of the constant
+                self.globals.new_variable(var, loc, value)
+                continue
+
             self.globals.new_variable(var, loc)
 
         self.globals.allocate_reentrant_key(nonreentrant, self.exec_ctx.transient)
@@ -417,10 +423,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         finally:
             pass
 
+    def _is_global_var(self, varinfo: Optional[VarInfo]):
+        if varinfo is None:
+            return False
+        return (
+            varinfo.is_state_variable()
+            or varinfo.modifiability == Modifiability.CONSTANT
+        )
+
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
         # in some scenarios (eg auxiliary helper variables) we don't have a node
         varinfo = node._expr_info.var_info if node else None
-        if varinfo is not None and varinfo.is_state_variable():
+        if self._is_global_var(varinfo):
             res = self.globals[varinfo].value
         else:
             res = self.memory[name]
@@ -430,7 +444,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
         # in some scenarios (eg auxiliary helper variables) we don't have a node
         varinfo = node._expr_info.var_info if node else None
-        if varinfo is not None and varinfo.is_state_variable():
+        if self._is_global_var(varinfo):
             with self.modifiable_context(varinfo):
                 var = self.globals[varinfo]
                 var.value = value
@@ -559,7 +573,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
             if id in ("raw_call", "send"):
-                # dependency injection
+                # dependency injection of the message_call function
                 args = (self.message_call,) + args
             elif id in ("abi_encode", "_abi_encode", "convert"):
                 args = (typs, args)
@@ -570,6 +584,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             typedef = func_t.typedef
             if isinstance(typedef, InterfaceT):
                 # TODO should we return an address here? or an interface object wrapping the address?
+                # we will likely need the attrs of the interface..
                 assert len(args) == 1
                 return args[0]
             else:

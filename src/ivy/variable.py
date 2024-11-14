@@ -20,11 +20,14 @@ class GlobalVariable:
         typ: VyperType,
         location: dict,
         varinfo: Optional[VarInfo] = None,
+        default_value: Optional[bool] = None,
     ):
         self.typ = typ
         self.location = location
         self.address = address
-        self.location[self.address] = VyperEvaluator.default_value(typ)
+        if default_value is None:
+            default_value = VyperEvaluator.default_value(typ)
+        self.location[self.address] = default_value
         self.varinfo = varinfo
 
     @property
@@ -52,10 +55,10 @@ class GlobalVariables:
     def _get_address(self, var: VarInfo):
         return (var.position, var.location)
 
-    def new_variable(self, var: VarInfo, location: dict):
+    def new_variable(self, var: VarInfo, location: dict, default_value=None):
         address = self._get_address(var)
         assert address not in self.variables
-        variable = GlobalVariable(var.position, var.typ, location, var)
+        variable = GlobalVariable(var.position, var.typ, location, var, default_value)
         self.variables[address] = variable
 
     def __setitem__(self, key: VarInfo, value):
