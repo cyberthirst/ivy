@@ -273,8 +273,10 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
             return DynamicArray(typ)
         if isinstance(typ, SArrayT):
             return StaticArray(typ)
-        if isinstance(typ, BytesT) or isinstance(typ, BytesM_T):
+        if isinstance(typ, BytesT):
             return b""
+        if isinstance(typ, BytesM_T):
+            return b"\x00" * 32
         if isinstance(typ, StringT):
             return ""
         if isinstance(typ, StructT):
