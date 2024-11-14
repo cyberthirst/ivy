@@ -1801,3 +1801,16 @@ def foo() -> uint256:
 
     c = get_contract(src)
     _ = c.foo()
+
+
+def test_return_constant(get_contract):
+    src = """
+u: constant(uint256) = 1
+    
+@external
+def foo() -> uint256:
+    return u
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 1
