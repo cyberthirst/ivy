@@ -185,7 +185,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
         for a in self.accessed_accounts:
             # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
-            # it might be better to refactor GlobalVariable to receive a function to retrieve storage
+            # NOTE: it might be better to refactor GlobalVariable to receive a function to retrieve storage
             # instaed of receiving the storage directly
             a.transient.clear()
         self.accessed_accounts.clear()
@@ -235,16 +235,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         nonreentrant, globals = allocator.allocate_addresses(module_t)
 
         for var in globals:
-            loc = self.storage_from_varinfo(var)
+            get_location = self.storage_getter_from_varinfo(var)
 
             if var.is_constant:
                 value = self.visit(var.decl_node.value)  # the value of the constant
-                self.globals.new_variable(var, loc, value)
+                self.globals.new_variable(var, get_location, value)
                 continue
 
-            self.globals.new_variable(var, loc)
+            self.globals.new_variable(var, get_location)
 
-        self.globals.allocate_reentrant_key(nonreentrant, self.exec_ctx.transient)
+        self.globals.allocate_reentrant_key(
+            nonreentrant, lambda: self.exec_ctx.transient
+        )
 
     def process_create_message(self, message: Message) -> EVMOutput:
         if message.create_address in self.state:
@@ -431,10 +433,17 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             or varinfo.modifiability == Modifiability.CONSTANT
         )
 
-    def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
+    def _resolve_variable_info(
+        self, node: Optional[ast.VyperNode] = None
+    ) -> tuple[Optional[VarInfo], bool]:
         # in some scenarios (eg auxiliary helper variables) we don't have a node
         varinfo = node._expr_info.var_info if node else None
-        if self._is_global_var(varinfo):
+        is_global = self._is_global_var(varinfo)
+        return varinfo, is_global
+
+    def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
+        varinfo, is_global = self._resolve_variable_info(node)
+        if is_global:
             res = self.globals[varinfo].value
         else:
             res = self.memory[name]
@@ -442,25 +451,27 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         return res
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
-        # in some scenarios (eg auxiliary helper variables) we don't have a node
-        varinfo = node._expr_info.var_info if node else None
-        if self._is_global_var(varinfo):
+        varinfo, is_global = self._resolve_variable_info(node)
+        if is_global:
             with self.modifiable_context(varinfo):
                 var = self.globals[varinfo]
                 var.value = value
         else:
             self.memory[name] = value
 
-    def storage_from_varinfo(self, varinfo: VarInfo):
+    # we want to decouple variables from the references to the actual storage location
+    # it makes implementing certain features easier. thus the variables
+    # will get the location based on current execution context on demand
+    def storage_getter_from_varinfo(self, varinfo: VarInfo):
         if varinfo.is_immutable:
-            return self.exec_ctx.immutables
+            return lambda: self.exec_ctx.immutables
         elif varinfo.is_constant:
-            return self.exec_ctx.constants
+            return lambda: self.exec_ctx.constants
         elif varinfo.is_transient:
-            return self.exec_ctx.transient
+            return lambda: self.exec_ctx.transient
         else:
             assert varinfo.is_storage
-            return self.exec_ctx.storage
+            return lambda: self.exec_ctx.storage
 
     def _new_local(self, identifier: str, typ: VyperType):
         self.memory.new_variable(identifier, typ)
