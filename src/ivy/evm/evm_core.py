@@ -1,35 +1,31 @@
-from typing import Optional, Union, List
+from typing import Optional, Union
 
 import vyper.ast.nodes as ast
 from vyper.semantics.types.module import ModuleT
 
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_structures import (
-    EVMState,
     Environment,
     ContractData,
     Message,
     EVMOutput,
 )
+from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
-from ivy.context import ExecutionContext
 from ivy.types import Address
 from ivy.exceptions import EVMException
 from ivy.utils import compute_contract_address
+from ivy.context import ExecutionContext
 
 
 class EVMCore:
     def __init__(self, callbacks: EVMCallbacks):
         # TODO use state accessor facade
-        self.state = EVMState()
+        self._state = EVMState()
+        self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
-        self.execution_contexts: List[ExecutionContext] = []
         self.environment: Optional[Environment] = None
-
-    @property
-    def current_context(self) -> Optional[ExecutionContext]:
-        return self.execution_contexts[-1] if self.execution_contexts else None
 
     def execute_tx(
         self,
@@ -49,7 +45,7 @@ class EVMCore:
             create_address = self.generate_create_address(sender)
             code = ContractData(module_t)
         else:
-            code = self.get_code(to)
+            code = self.state.get_code(to)
 
         message = Message(
             caller=sender,
@@ -97,7 +93,7 @@ class EVMCore:
         self.state.add_accessed_account(new_account)
 
         exec_ctx = ExecutionContext(new_account, message, message.code)
-        self.execution_contexts.append(exec_ctx)
+        self.state.push_context(exec_ctx)
 
         output = EVMOutput()
 
@@ -123,7 +119,7 @@ class EVMCore:
             del self.state[message.create_address]
 
         finally:
-            self.execution_contexts.pop()
+            self.state.pop_context()
 
         return output
 
@@ -135,7 +131,7 @@ class EVMCore:
             message,
             account.contract_data.module_t if account.contract_data else None,
         )
-        self.execution_contexts.append(exec_ctx)
+        self.state.push_context(exec_ctx)
 
         output = EVMOutput()
 
@@ -145,14 +141,14 @@ class EVMCore:
             if message.code:
                 self.callbacks.dispatch()
 
-            output.data = self.current_context.output
+            output.data = self.state.current_context.output
 
         except Exception as e:
             # TODO rollback the journal
             output.error = e
 
         finally:
-            self.execution_contexts.pop()
+            self.state.pop_context()
 
         return output
 
@@ -169,17 +165,17 @@ class EVMCore:
         code = self.state.get_code(code_address)
 
         if is_delegate:
-            target = self.current_context.msg.to
+            target = self.state.current_context.msg.to
 
         msg = Message(
-            caller=self.current_context.msg.to,
+            caller=self.state.current_context.msg.to,
             to=target,
             create_address=None,
             value=value,
             data=data,
             code_address=code_address,
             code=code,
-            depth=self.current_context.msg.depth + 1,
+            depth=self.state.current_context.msg.depth + 1,
             is_static=is_static,
         )
 
@@ -197,15 +193,6 @@ class EVMCore:
             self.state[message.to].balance += message.value
 
     def generate_create_address(self, sender):
-        nonce = self.get_nonce(sender.canonical_address)
+        nonce = self.state.get_nonce(sender.canonical_address)
         self.state.increment_nonce(sender.canonical_address)
         return Address(compute_contract_address(sender.canonical_address, nonce))
-
-    def get_balance(self, address: Address) -> int:
-        return self.state.get_balance(address)
-
-    def get_code(self, address: Address) -> Optional[ContractData]:
-        return self.state.get_code(address)
-
-    def get_nonce(self, address: Address) -> int:
-        return self.state.get_nonce(address)

@@ -36,6 +36,7 @@ from ivy.types import Address, Struct, StaticArray, DynamicArray, Map
 from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
+from ivy.evm.evm_state import StateAccess
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
@@ -44,6 +45,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def __init__(self):
         self.evaluator = VyperEvaluator
         self.evm = EVMCore(callbacks=self)
+        self.state: StateAccess = self.evm.state
         self.builtins = {}
         self._collect_builtins()
 
@@ -64,19 +66,19 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
     @property
     def fun_ctx(self):
-        return self.evm.current_context.current_fun_context()
+        return self.current_context.current_fun_context()
 
     @property
     def globals(self):
-        return self.exec_ctx.globals
+        return self.current_context.globals
 
     @property
     def msg(self):
-        return self.evm.current_context.msg
+        return self.current_context.msg
 
     @property
     def current_address(self):
-        return self.exec_ctx.msg.to
+        return self.current_context.msg.to
 
     @property
     def memory(self):
@@ -85,8 +87,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         return self.fun_ctx
 
     @property
-    def exec_ctx(self):
-        return self.evm.current_context
+    def current_context(self):
+        return self.evm.state.current_context
 
     def get_nonce(self, address):
         return self.evm.state.get_nonce(address)
@@ -107,16 +109,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self.evm.state.clear_transient_storage()
 
     def _push_fun_ctx(self, func_t):
-        self.exec_ctx.push_fun_context(func_t)
+        self.current_context.push_fun_context(func_t)
 
     def _pop_fun_ctx(self):
-        self.exec_ctx.pop_fun_context()
+        self.current_context.pop_fun_context()
 
     def _push_scope(self):
-        self.exec_ctx.push_scope()
+        self.current_context.push_scope()
 
     def _pop_scope(self):
-        self.exec_ctx.pop_scope()
+        self.current_context.pop_scope()
 
     def allocate_storage(self, module_t: ModuleT):
         allocator = Allocator()
@@ -135,7 +137,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             self.globals.new_variable(var, get_location)
 
         self.globals.allocate_reentrant_key(
-            nonreentrant, lambda: self.exec_ctx.transient
+            nonreentrant, lambda: self.current_context.transient
         )
 
     def lock(self, mutability):
@@ -203,7 +205,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
             selector = self.msg.data[:4]
 
-            entry_points = self.exec_ctx.entry_points
+            entry_points = self.current_context.entry_points
 
             if selector not in entry_points:
                 raise FunctionNotFound()
@@ -221,8 +223,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
 
         except FunctionNotFound as e:
-            if self.exec_ctx.contract.fallback:
-                func_t = self.exec_ctx.contract.fallback
+            if self.current_context.contract.fallback:
+                func_t = self.current_context.contract.fallback
                 args = ()
             else:
                 raise e
@@ -235,15 +237,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # abi-encode output
         typ = func_t.return_type
         if typ is None:
-            assert self.exec_ctx.output is None
+            assert self.current_context.output is None
             return None
         typ = calculate_type_for_external_return(typ)
-        output = self.exec_ctx.output
+        output = self.current_context.output
         # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
         output = (
             (output,) if (not isinstance(output, tuple) or len(output) <= 1) else output
         )
-        self.exec_ctx.output = abi_encode(typ, output)
+        self.current_context.output = abi_encode(typ, output)
 
     def _execute_function(self, func_t, args):
         # TODO: rewrite this using a ctx manager?
@@ -253,14 +255,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             try:
                 self.visit(stmt)
             except ReturnException as e:
-                self.exec_ctx.output = e.value
+                self.current_context.output = e.value
                 break
 
         self._epilogue(func_t)
 
         if func_t.is_deploy:
-            return self.exec_ctx.contract
-        return self.exec_ctx.output
+            return self.current_context.contract
+        return self.current_context.output
 
     @contextmanager
     def modifiable_context(self, target):
@@ -310,14 +312,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     # will get the location based on current execution context on demand
     def storage_getter_from_varinfo(self, varinfo: VarInfo):
         if varinfo.is_immutable:
-            return lambda: self.exec_ctx.immutables
+            return lambda: self.current_context.immutables
         elif varinfo.is_constant:
-            return lambda: self.exec_ctx.constants
+            return lambda: self.current_context.constants
         elif varinfo.is_transient:
-            return lambda: self.exec_ctx.transient
+            return lambda: self.current_context.transient
         else:
             assert varinfo.is_storage
-            return lambda: self.exec_ctx.storage
+            return lambda: self.current_context.storage
 
     def _new_local(self, identifier: str, typ: VyperType):
         self.memory.new_variable(identifier, typ)
@@ -486,9 +488,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
-        self.exec_ctx.returndata = output.bytes_output()
+        self.current_context.returndata = output.bytes_output()
 
-        if len(self.exec_ctx.returndata) == 0 and "default_return_value" in kwargs:
+        if (
+            len(self.current_context.returndata) == 0
+            and "default_return_value" in kwargs
+        ):
             return kwargs["default_return_value"]
 
         typ = func_t.return_type
@@ -501,8 +506,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         max_return_size = abi_typ.size_bound()
 
-        actual_output_size = min(max_return_size, len(self.exec_ctx.returndata))
-        to_decode = self.exec_ctx.returndata[:actual_output_size]
+        actual_output_size = min(max_return_size, len(self.current_context.returndata))
+        to_decode = self.current_context.returndata[:actual_output_size]
 
         # NOTE: abi_decode implicitly checks minimum return size
         decoded = abi_decode(typ, to_decode)

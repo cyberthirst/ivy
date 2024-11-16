@@ -1,0 +1,156 @@
+from collections import defaultdict
+from typing import Optional, Protocol
+
+from ivy.evm.evm_structures import Account, ContractData
+from ivy.types import Address
+from ivy.context import ExecutionContext
+
+
+class EVMState:
+    def __init__(self):
+        self.state = defaultdict(lambda: Account(0, 0, {}, {}, None))
+        self.execution_contexts: list[ExecutionContext] = []
+        self.accessed_accounts = set()
+
+    def __getitem__(self, key):
+        return self.state[key]
+
+    def __delitem__(self, key: Address):
+        if key in self.state:
+            # TODO do we care about accessed accounts?
+            # account = self.state[key]
+            # if account in self.accessed_accounts:
+            #    self.accessed_accounts.remove(account)
+            del self.state[key]
+
+    def has_account(self, address) -> bool:
+        # TODO add detection for an empty account (+ maybe rename to smth like non-empty)
+        return False
+
+    def get_nonce(self, address: Address) -> int:
+        return self.state[address].nonce
+
+    def increment_nonce(self, address: Address):
+        self.state[address].nonce += 1
+
+    def get_balance(self, address: Address) -> int:
+        return self.state[address].balance
+
+    def set_balance(self, address: Address, value: int):
+        self.state[address].balance = value
+
+    def get_code(self, address: Address) -> Optional[ContractData]:
+        return self.state[address].contract_data
+
+    def set_code(self, address: Address, code: ContractData):
+        self.state[address].contract_data = code
+
+    def get_storage(self, address: Address) -> dict:
+        return self.state[address].storage
+
+    def get_transient(self, address: Address) -> dict:
+        account = self.state[address]
+        self.accessed_accounts.add(account)
+        return account.transient
+
+    def add_accessed_account(self, acc):
+        self.accessed_accounts.add(acc)
+
+    def clear_transient_storage(self):
+        # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
+        # NOTE: it might be better to refactor GlobalVariable to receive a function to retrieve storage
+        # instaed of receiving the storage directly
+        for account in self.accessed_accounts:
+            account.transient.clear()
+        self.accessed_accounts.clear()
+
+    def get_account(self, address: Address) -> Account:
+        account = self.state[address]
+        self.accessed_accounts.add(account)
+        return account
+
+    @property
+    def current_context(self) -> Optional[ExecutionContext]:
+        return self.execution_contexts[-1] if self.execution_contexts else None
+
+    def push_context(self, context: ExecutionContext):
+        self.execution_contexts.append(context)
+
+    def pop_context(self):
+        self.execution_contexts.pop()
+
+
+class StateAccess(Protocol):
+    def __getitem__(self, address: Address) -> Account: ...
+
+    def __delitem__(self, key: Address): ...
+
+    def get_nonce(self, address: Address) -> int: ...
+
+    def increment_nonce(self, address: Address): ...
+
+    def get_balance(self, address: Address) -> int: ...
+
+    def set_balance(self, address: Address, value: int): ...
+
+    def get_code(self, address: Address) -> Optional[ContractData]: ...
+
+    def get_storage(self, address: Address, slot: int) -> int: ...
+
+    def add_accessed_account(self, acc): ...
+
+    def has_account(self, address) -> bool: ...
+
+    def clear_transient_storage(self) -> None: ...
+
+    @property
+    def current_context(self) -> ExecutionContext: ...
+
+    def push_context(self, context: ExecutionContext): ...
+
+    def pop_context(self): ...
+
+
+class StateAccessor(StateAccess):
+    def __init__(self, state: EVMState):
+        self._state = state
+
+    def __getitem__(self, address: Address) -> Account:
+        return self._state[address]
+
+    def __delitem__(self, address: Address):
+        del self._state[address]
+
+    def get_nonce(self, address):
+        return self._state.get_nonce(address)
+
+    def increment_nonce(self, address):
+        self._state.increment_nonce(address)
+
+    def get_balance(self, address):
+        return self._state.get_balance(address)
+
+    def set_balance(self, address: Address, value: int):
+        self._state.set_balance(address, value)
+
+    def get_code(self, address):
+        return self._state.get_code(address)
+
+    def add_accessed_account(self, acc):
+        self._state.add_accessed_account(acc)
+
+    def has_account(self, address) -> bool:
+        return self._state.has_account(address)
+
+    def clear_transient_storage(self) -> None:
+        self._state.clear_transient_storage()
+
+    @property
+    def current_context(self) -> ExecutionContext:
+        return self._state.current_context
+
+    def push_context(self, context: ExecutionContext):
+        self._state.push_context(context)
+
+    def pop_context(self):
+        self._state.pop_context()
