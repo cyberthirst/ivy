@@ -23,7 +23,7 @@ from vyper.semantics.analysis.base import VarInfo
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-import ivy.builtins as vyper_builtins
+from ivy.builtins import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.exceptions import (
@@ -46,14 +46,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self.evaluator = VyperEvaluator
         self.evm = EVMCore(callbacks=self)
         self.state: StateAccess = self.evm.state
-        self.builtins = {}
-        self._collect_builtins()
-
-    def _collect_builtins(self):
-        for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
-            if name.startswith("builtin_"):
-                builtin_name = name[8:]  # Remove 'builtin_' prefix
-                self.builtins[builtin_name] = func
+        self.builtins = BuiltinRegistry(self.evm, self.state)
 
     def execute(self, *args, **kwargs):
         return self.evm.execute_tx(*args, **kwargs)
@@ -413,12 +406,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
-            if id in ("raw_call", "send"):
-                # dependency injection of the message_call function
-                args = (self.evm.message_call,) + args
-            elif id in ("abi_encode", "_abi_encode", "convert"):
+            if id in ("abi_encode", "_abi_encode", "convert"):
                 args = (typs, args)
-            return self.builtins[id](*args, **kws)
+            return self.builtins.get(id)(*args, **kws)
 
         if isinstance(func_t, TYPE_T):
             # struct & interface constructors

@@ -1,4 +1,5 @@
 from typing import Callable, Any, Union, Optional
+from enum import Enum
 
 from vyper.exceptions import UnimplementedException
 from vyper.semantics.types import (
@@ -23,6 +24,8 @@ from ivy.evm.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
 import ivy.convert_utils as convert_utils
+from ivy.evm.evm_state import StateAccess
+from ivy.evm.evm_core import EVMCore
 
 
 def builtin_range(*args, bound=None):
@@ -149,14 +152,14 @@ def builtin_method_id(method: str, output_type: VyperType = None):
     return method_id(method)
 
 
-def builtin_send(mesage_call, to, value, gas: int = 0) -> None:
+def builtin_send(evm: EVMCore, to, value, gas: int = 0) -> None:
     if gas != 0:
         raise GasReference()
-    builtin_raw_call(mesage_call, to, b"", value=value)
+    builtin_raw_call(evm, to, b"", value=value)
 
 
 def builtin_raw_call(
-    message_call: Callable,
+    evm: EVMCore,
     to: Address,
     data: bytes,
     max_outsize: int = 0,
@@ -172,7 +175,9 @@ def builtin_raw_call(
     assert not (is_static_call and is_delegate_call)
     assert not (value != 0 and (is_static_call or is_delegate_call))
 
-    output: EVMOutput = message_call(to, value, data, is_static_call, is_delegate_call)
+    output: EVMOutput = evm.message_call(
+        to, value, data, is_static_call, is_delegate_call
+    )
 
     success = not output.is_error
 
@@ -287,3 +292,74 @@ def builtin_create_copy_of(
     salt: Optional[bytes] = None,
 ) -> Address:
     pass
+
+
+class BuiltinType(Enum):
+    PURE = "pure"  # Functions that don't need state/evm access
+    STATE = "state"  # Functions that need state access
+    EVM = "evm"  # Functions that need full EVM access
+
+
+class PureBuiltin:
+    def __init__(self, fn: Callable):
+        self.fn = fn
+
+    def execute(self, *args, **kwargs) -> Any:
+        return self.fn(*args, **kwargs)
+
+
+class StateBuiltin:
+    def __init__(self, state: StateAccess, fn: Callable):
+        self.state = state
+        self.fn = fn
+
+    def execute(self, *args, **kwargs) -> Any:
+        return self.fn(self.state, *args, **kwargs)
+
+
+class EVMBuiltin:
+    def __init__(self, evm: EVMCore, fn: Callable):
+        self.evm = evm
+        self.fn = fn
+
+    def execute(self, *args, **kwargs) -> Any:
+        return self.fn(self.evm, *args, **kwargs)
+
+
+class BuiltinRegistry:
+    def __init__(self, evm_core: EVMCore, state: StateAccess):
+        self.evm = evm_core
+        self.state = state
+        self.builtins = self._register_builtins()
+
+    def _register_builtins(self):
+        return {
+            # Pure builtins
+            "len": PureBuiltin(builtin_len),
+            "slice": PureBuiltin(builtin_slice),
+            "concat": PureBuiltin(builtin_concat),
+            "max": PureBuiltin(builtin_max),
+            "min": PureBuiltin(builtin_min),
+            "uint2str": PureBuiltin(builtin_uint2str),
+            "empty": PureBuiltin(builtin_empty),
+            "max_value": PureBuiltin(builtin_max_value),
+            "min_value": PureBuiltin(builtin_min_value),
+            "range": PureBuiltin(builtin_range),
+            "convert": PureBuiltin(builtin_convert),
+            "as_wei_value": PureBuiltin(builtin_as_wei_value),
+            "_abi_decode": PureBuiltin(builtin_abi_decode),
+            "abi_decode": PureBuiltin(builtin_abi_decode),
+            "abi_encode": PureBuiltin(builtin_abi_encode),
+            "_abi_encode": PureBuiltin(builtin_abi_encode),
+            "method_id": PureBuiltin(builtin_method_id),
+            "print": PureBuiltin(builtin_print),
+            # State builtins
+            # EVM builtins
+            "raw_call": EVMBuiltin(self.evm, builtin_raw_call),
+            "send": EVMBuiltin(self.evm, builtin_send),
+        }
+
+    def get(self, name: str) -> Callable:
+        if name not in self.builtins:
+            raise ValueError(f"Unknown builtin: {name}")
+        return self.builtins[name].execute
