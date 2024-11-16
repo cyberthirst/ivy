@@ -1,6 +1,5 @@
 import pytest
 
-from vyper.exceptions import StaticAssertionException
 from vyper.utils import SizeLimits
 
 

@@ -5,6 +5,7 @@ from vyper import ast as vy_ast
 
 from ivy.vyper_interpreter import VyperInterpreter
 from ivy.types import Address
+from ivy.evm.evm_state import StateAccess
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes
@@ -22,12 +23,15 @@ class Env:
     ):
         super().__init__(**kwargs)
         self.interpreter = VyperInterpreter()
+        self.state: StateAccess = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
         self._accounts = []
 
     def clear_state(self):
+        # TODO should we just clear the EVM state instead of instantiating the itp?
         self.interpreter = VyperInterpreter()
+        self.state = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
 
@@ -74,10 +78,10 @@ class Env:
         return self.raw_call(to_address, calldata=data)
 
     def get_balance(self, address: _AddressType) -> int:
-        return self.interpreter.get_balance(Address(address))
+        return self.state.get_balance(address)
 
     def set_balance(self, address: _AddressType, value: int):
-        self.interpreter.set_balance(Address(address), value)
+        self.state.set_balance(Address(address), value)
 
     @property
     def accounts(self):

@@ -90,24 +90,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def current_context(self):
         return self.evm.state.current_context
 
-    def get_nonce(self, address):
-        return self.evm.state.get_nonce(address)
-
-    def increment_nonce(self, address):
-        self.evm.state.increment_nonce(address)
-
-    def get_balance(self, address):
-        return self.evm.state.get_balance(address)
-
-    def set_balance(self, address, value):
-        self.evm.state.set_balance(address, value)
-
-    def get_code(self, address):
-        return self.evm.state.get_code(address)
-
-    def clear_transient_storage(self):
-        self.evm.state.clear_transient_storage()
-
     def _push_fun_ctx(self, func_t):
         self.current_context.push_fun_context(func_t)
 
@@ -365,14 +347,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # x.balance: balance of address x
         if node.attr == "balance":
             addr = self.visit(node.value)
-            return self.get_balance(addr)
+            return self.state.get_balance(addr)
         # x.codesize: codesize of address x
         elif node.attr == "codesize" or node.attr == "is_contract":
             addr = self.visit(node.value)
             if node.attr == "codesize":
                 raise NotImplementedError("codesize")
             else:
-                return self.get_code(addr) is not None
+                return self.state.get_code(addr) is not None
         # x.codehash: keccak of address x
         elif node.attr == "codehash":
             raise NotImplementedError("codehash")

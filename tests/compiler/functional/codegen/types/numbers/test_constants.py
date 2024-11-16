@@ -1,11 +1,4 @@
-import itertools
-
-import pytest
-
 from tests.utils import ZERO_ADDRESS, decimal_to_int
-from vyper.compiler import compile_code
-from vyper.exceptions import TypeMismatch
-from vyper.utils import MemoryPositions
 
 
 def search_for_sublist(ir, sublist):

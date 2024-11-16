@@ -848,7 +848,6 @@ bad_code_names = [
 ]
 
 
-
 def test_iterator_modification_module_attribute(make_input_bundle):
     # test modifying iterator via attribute
     lib1 = """

@@ -1,5 +1,6 @@
-from typing import Callable, Any, Union
+from typing import Callable, Any, Union, Optional
 
+from vyper.exceptions import UnimplementedException
 from vyper.semantics.types import (
     VyperType,
     TupleT,
@@ -18,7 +19,7 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
-from ivy.evm_structures import EVMOutput
+from ivy.evm.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
 import ivy.convert_utils as convert_utils
@@ -41,6 +42,16 @@ def builtin_range(*args, bound=None):
             raise RuntimeError(f"Range is greater than bound={bound} value")
 
     return range(start, stop)
+
+
+def builtin_as_wei_value(value: int, denom: str):
+    if denom == "ether":
+        return value * 10**18
+    if denom == "wei":
+        return value
+    if denom == "gwei":
+        return value * 10**9
+    raise UnimplementedException()
 
 
 def builtin_len(x):
@@ -267,3 +278,12 @@ def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
 
     except convert_utils.ConvertError:
         raise ValueError(f"Cannot convert value {val} of typ {i_typ} to {o_typ}")
+
+
+def builtin_create_copy_of(
+    target: Address,
+    value: int = 0,
+    revert_on_failure: bool = True,
+    salt: Optional[bytes] = None,
+) -> Address:
+    pass

@@ -13,7 +13,7 @@ from vyper.semantics.types import (
     BoolT,
     AddressT,
 )
-from vyper.utils import round_towards_zero, unsigned_to_signed
+from vyper.utils import unsigned_to_signed
 
 from ivy.abi import abi_encode, abi_decode, DecodeError
 from ivy.types import VyperDecimal

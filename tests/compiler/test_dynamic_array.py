@@ -6,16 +6,6 @@ import decimal
 import pytest
 
 from vyper.utils import round_towards_zero, DECIMAL_EPSILON
-from vyper.exceptions import (
-    ArgumentException,
-    ArrayIndexException,
-    CompilerPanic,
-    ImmutableViolation,
-    OverflowException,
-    StackTooDeep,
-    StateAccessViolation,
-    TypeMismatch,
-)
 
 
 def decimal_to_int(*args):

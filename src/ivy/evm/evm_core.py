@@ -160,7 +160,6 @@ class EVMCore:
         is_static: bool = False,
         is_delegate: bool = False,
     ) -> EVMOutput:
-        """Handle internal message calls"""
         code_address = target
         code = self.state.get_code(code_address)
 
