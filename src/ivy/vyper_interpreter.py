@@ -1,6 +1,5 @@
 from typing import Optional, Type, Union
 import inspect
-from collections import defaultdict
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
@@ -22,7 +21,14 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.analysis.base import VarInfo
 
 from ivy.expr import ExprVisitor
-from ivy.evm_structures import Account, Environment, Message, ContractData, EVMOutput
+from ivy.evm_structures import (
+    Account,
+    Environment,
+    Message,
+    ContractData,
+    EVMOutput,
+    EVMState,
+)
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
 from ivy.context import ExecutionContext
@@ -44,13 +50,11 @@ from ivy.allocator import Allocator
 class VyperInterpreter(ExprVisitor, StmtVisitor):
     execution_ctxs: list[ExecutionContext]
     env: Optional[Environment]
-    contract: Optional[ContractData]
     evaluator: Type[VyperEvaluator]
-    accessed_accounts: set[Account]
     journal: Journal
 
     def __init__(self):
-        self.state = defaultdict(lambda: Account(0, 0, {}, {}, None))
+        self.state = EVMState()
         self.returndata = None
         self.evaluator = VyperEvaluator
         self.execution_ctxs = []
@@ -58,7 +62,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self._collect_builtins()
         self.env = None
         self.journal = Journal()
-        self.accessed_accounts = set()
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
@@ -98,16 +101,23 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
     def exec_ctx(self):
         return self.execution_ctxs[-1]
 
-    def clear_transient_storage(self):
-        for address in self.accessed_accounts:
-            self.state[address].transient.clear()
-        self.accessed_accounts.clear()
-
     def get_nonce(self, address):
-        return self.state[address].nonce
+        return self.state.get_nonce(address)
 
     def increment_nonce(self, address):
-        self.state[address].nonce += 1
+        self.state.increment_nonce(address)
+
+    def get_balance(self, address):
+        return self.state.get_balance(address)
+
+    def set_balance(self, address, value):
+        self.state.set_balance(address, value)
+
+    def get_code(self, address):
+        return self.state.get_code(address)
+
+    def clear_transient_storage(self):
+        self.state.clear_transient_storage()
 
     def _push_fun_ctx(self, func_t):
         self.execution_ctxs[-1].push_fun_context(func_t)
@@ -125,12 +135,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         nonce = self.get_nonce(sender.canonical_address)
         self.increment_nonce(sender.canonical_address)
         return Address(compute_contract_address(sender.canonical_address, nonce))
-
-    def get_balance(self, address):
-        return self.state[address].balance
-
-    def set_balance(self, address, value):
-        self.state[address].balance = value
 
     def execute_tx(
         self,
@@ -183,12 +187,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
         self.journal.finalize_call(output.is_error)
 
-        for a in self.accessed_accounts:
-            # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
-            # NOTE: it might be better to refactor GlobalVariable to receive a function to retrieve storage
-            # instaed of receiving the storage directly
-            a.transient.clear()
-        self.accessed_accounts.clear()
+        self.state.clear_transient_storage()
 
         if output.is_error:
             raise output.error
@@ -197,7 +196,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     def process_message(self, message: Message) -> EVMOutput:
         account = self.state[message.to]
-        self.accessed_accounts.add(account)
+        self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(
             account,
             message,
@@ -249,11 +248,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         )
 
     def process_create_message(self, message: Message) -> EVMOutput:
-        if message.create_address in self.state:
+        if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 
         new_account = self.state[message.create_address]
-        self.accessed_accounts.add(new_account)
+        self.state.add_accessed_account(new_account)
 
         exec_ctx = ExecutionContext(new_account, message, message.code)
         self.execution_ctxs.append(exec_ctx)
@@ -288,9 +287,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             self.execution_ctxs.pop()
 
         return output
-
-    def get_code(self, address):
-        return self.state[address].contract_data
 
     def lock(self, mutability):
         lock = self.globals.get_reentrant_key()
