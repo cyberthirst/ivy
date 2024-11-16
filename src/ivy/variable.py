@@ -57,7 +57,7 @@ class GlobalVariables:
     def _get_address(self, var: VarInfo):
         return (var.position, var.location)
 
-    def new_variable(self, var: VarInfo, get_location: dict, default_value=None):
+    def new_variable(self, var: VarInfo, get_location: callable, default_value=None):
         address = self._get_address(var)
         assert address not in self.variables
         variable = GlobalVariable(

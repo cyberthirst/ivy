@@ -100,7 +100,7 @@ class Env:
     ):
         sender = self._get_sender(sender)
 
-        contract_address = self.interpreter.execute_tx(
+        contract_address = self.interpreter.execute(
             sender=sender,
             to=b"",
             module=module,
@@ -124,7 +124,7 @@ class Env:
 
         is_static = not is_modifying
 
-        ret = self.interpreter.execute_tx(
+        ret = self.interpreter.execute(
             sender=sender,
             to=to,
             value=value,

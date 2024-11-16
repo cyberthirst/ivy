@@ -1,4 +1,4 @@
-from typing import Optional, Type, Union
+from typing import Optional, Type
 import inspect
 from contextlib import contextmanager
 
@@ -21,23 +21,12 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.analysis.base import VarInfo
 
 from ivy.expr import ExprVisitor
-from ivy.evm_structures import (
-    Account,
-    Environment,
-    Message,
-    ContractData,
-    EVMOutput,
-    EVMState,
-)
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-from ivy.context import ExecutionContext
 import ivy.builtins as vyper_builtins
-from ivy.utils import compute_call_abi_data, compute_contract_address
+from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
-from ivy.journal import Journal
 from ivy.exceptions import (
-    EVMException,
     StaticCallViolation,
     AccessViolation,
     GasReference,
@@ -45,29 +34,27 @@ from ivy.exceptions import (
 )
 from ivy.types import Address, Struct, StaticArray, DynamicArray, Map
 from ivy.allocator import Allocator
+from ivy.evm.evm_callbacks import EVMCallbacks
+from ivy.evm.evm_core import EVMCore
 
 
-class VyperInterpreter(ExprVisitor, StmtVisitor):
-    execution_ctxs: list[ExecutionContext]
-    env: Optional[Environment]
+class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     evaluator: Type[VyperEvaluator]
-    journal: Journal
 
     def __init__(self):
-        self.state = EVMState()
-        self.returndata = None
         self.evaluator = VyperEvaluator
-        self.execution_ctxs = []
+        self.evm = EVMCore(callbacks=self)
         self.builtins = {}
         self._collect_builtins()
-        self.env = None
-        self.journal = Journal()
 
     def _collect_builtins(self):
         for name, func in inspect.getmembers(vyper_builtins, inspect.isfunction):
             if name.startswith("builtin_"):
                 builtin_name = name[8:]  # Remove 'builtin_' prefix
                 self.builtins[builtin_name] = func
+
+    def execute(self, *args, **kwargs):
+        return self.evm.execute_tx(*args, **kwargs)
 
     @property
     def deployer(self):
@@ -77,7 +64,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     @property
     def fun_ctx(self):
-        return self.execution_ctxs[-1].current_fun_context()
+        return self.evm.current_context.current_fun_context()
 
     @property
     def globals(self):
@@ -85,7 +72,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     @property
     def msg(self):
-        return self.execution_ctxs[-1].msg
+        return self.evm.current_context.msg
 
     @property
     def current_address(self):
@@ -99,135 +86,39 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
 
     @property
     def exec_ctx(self):
-        return self.execution_ctxs[-1]
+        return self.evm.current_context
 
     def get_nonce(self, address):
-        return self.state.get_nonce(address)
+        return self.evm.state.get_nonce(address)
 
     def increment_nonce(self, address):
-        self.state.increment_nonce(address)
+        self.evm.state.increment_nonce(address)
 
     def get_balance(self, address):
-        return self.state.get_balance(address)
+        return self.evm.state.get_balance(address)
 
     def set_balance(self, address, value):
-        self.state.set_balance(address, value)
+        self.evm.state.set_balance(address, value)
 
     def get_code(self, address):
-        return self.state.get_code(address)
+        return self.evm.state.get_code(address)
 
     def clear_transient_storage(self):
-        self.state.clear_transient_storage()
+        self.evm.state.clear_transient_storage()
 
     def _push_fun_ctx(self, func_t):
-        self.execution_ctxs[-1].push_fun_context(func_t)
+        self.exec_ctx.push_fun_context(func_t)
 
     def _pop_fun_ctx(self):
-        self.execution_ctxs[-1].pop_fun_context()
+        self.exec_ctx.pop_fun_context()
 
     def _push_scope(self):
-        self.execution_ctxs[-1].push_scope()
+        self.exec_ctx.push_scope()
 
     def _pop_scope(self):
-        self.execution_ctxs[-1].pop_scope()
+        self.exec_ctx.pop_scope()
 
-    def generate_create_address(self, sender):
-        nonce = self.get_nonce(sender.canonical_address)
-        self.increment_nonce(sender.canonical_address)
-        return Address(compute_contract_address(sender.canonical_address, nonce))
-
-    def execute_tx(
-        self,
-        sender: Address,
-        to: Union[Address, bytes],
-        value: int,
-        calldata: bytes = b"",
-        is_static: bool = False,
-        module: Optional[ast.Module] = None,
-    ):
-        is_deploy = to == b""
-        create_address, code = None, None
-
-        if is_deploy:
-            module_t = module._metadata["type"]
-            assert isinstance(module_t, ModuleT)
-            create_address = self.generate_create_address(sender)
-            code = ContractData(module_t)
-        else:
-            code = self.get_code(to)
-
-        message = Message(
-            caller=sender,
-            to=b"" if is_deploy else to,
-            create_address=create_address,
-            value=value,
-            data=calldata,
-            code_address=to,
-            code=code,
-            depth=0,
-            is_static=is_static,
-        )
-
-        self.env = Environment(
-            caller=sender,
-            block_hashes=[],
-            origin=to,
-            coinbase=sender,
-            number=0,
-            time=0,
-            prev_randao=b"",
-            chain_id=0,
-        )
-
-        self.journal.begin_call()
-        output = (
-            self.process_create_message(message)
-            if is_deploy
-            else self.process_message(message)
-        )
-        self.journal.finalize_call(output.is_error)
-
-        self.state.clear_transient_storage()
-
-        if output.is_error:
-            raise output.error
-
-        return create_address if is_deploy else output.bytes_output()
-
-    def process_message(self, message: Message) -> EVMOutput:
-        account = self.state[message.to]
-        self.state.add_accessed_account(account)
-        exec_ctx = ExecutionContext(
-            account,
-            message,
-            account.contract_data.module_t if account.contract_data else None,
-        )
-        self.execution_ctxs.append(exec_ctx)
-
-        output = EVMOutput()
-
-        try:
-            if message.value > 0:
-                if self.state[message.caller].balance < message.value:
-                    raise EVMException("Insufficient balance for transfer")
-                self.state[message.caller].balance -= message.value
-                self.state[message.to].balance += message.value
-
-            if message.code:
-                self._dispatch()
-
-            output.data = self.exec_ctx.output
-
-        except Exception as e:
-            # TODO rollback the journal
-            output.error = e
-
-        finally:
-            self.execution_ctxs.pop()
-
-        return output
-
-    def _allocate_storage(self, module_t: ModuleT):
+    def allocate_storage(self, module_t: ModuleT):
         allocator = Allocator()
         # separeate address allocation from variable allocation
         # the allocator rewrites the varinfo.position
@@ -246,47 +137,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self.globals.allocate_reentrant_key(
             nonreentrant, lambda: self.exec_ctx.transient
         )
-
-    def process_create_message(self, message: Message) -> EVMOutput:
-        if self.state.has_account(message.create_address):
-            raise EVMException("Address already taken")
-
-        new_account = self.state[message.create_address]
-        self.state.add_accessed_account(new_account)
-
-        exec_ctx = ExecutionContext(new_account, message, message.code)
-        self.execution_ctxs.append(exec_ctx)
-
-        output = EVMOutput()
-
-        try:
-            if message.value > 0:
-                if self.state[message.caller].balance < message.value:
-                    raise EVMException(
-                        f"Insufficient balance: {self.state[message.caller].balance} < {message.value}"
-                    )
-                self.state[message.caller].balance -= message.value
-
-            module_t = message.code.module_t
-
-            self._allocate_storage(module_t)
-
-            new_contract_code = message.code
-
-            if module_t.init_function is not None:
-                new_contract_code = self._execute_init_function(module_t.init_function)
-
-            new_account.contract_data = new_contract_code
-
-        except Exception as e:
-            # TODO rollback the journal
-            output.error = e
-            del self.state[message.create_address]
-
-        finally:
-            self.execution_ctxs.pop()
-
-        return output
 
     def lock(self, mutability):
         lock = self.globals.get_reentrant_key()
@@ -333,7 +183,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         self._pop_scope()
         self._pop_fun_ctx()
 
-    def _execute_init_function(self, func_t):
+    def execute_init_function(self, func_t):
         _, calldata_args_t = compute_call_abi_data(func_t, 0)
         min_size = calldata_args_t.abi_type.static_size()
         self._min_calldata_size_check(min_size)
@@ -346,7 +196,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         if len(self.msg.data) < min_size:
             raise BufferError(f"Provided calldata is too small, min_size is {min_size}")
 
-    def _dispatch(self):
+    def dispatch(self):
         try:
             if len(self.msg.data) < 4:
                 raise FunctionNotFound()
@@ -581,7 +431,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
             id = call.func.id
             if id in ("raw_call", "send"):
                 # dependency injection of the message_call function
-                args = (self.message_call,) + args
+                args = (self.evm.message_call,) + args
             elif id in ("abi_encode", "_abi_encode", "convert"):
                 args = (typs, args)
             return self.builtins[id](*args, **kws)
@@ -632,7 +482,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         data = selector
         data += abi_encode(calldata_args_t, args)
 
-        output = self.message_call(
+        output = self.evm.message_call(
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
@@ -659,35 +509,3 @@ class VyperInterpreter(ExprVisitor, StmtVisitor):
         assert len(decoded) == 1
         # unwrap the tuple
         return decoded[0]
-
-    def message_call(
-        self,
-        target: Address,
-        value: int,
-        data: bytes,
-        is_static: bool = False,
-        is_delegate=False,
-    ) -> EVMOutput:
-        code_address = target
-        code = self.get_code(code_address)
-
-        if is_delegate:
-            target = self.current_address
-
-        msg = Message(
-            caller=self.msg.to,
-            to=target,
-            create_address=None,
-            value=value,
-            data=data,
-            code_address=code_address,
-            code=code,
-            depth=self.exec_ctx.msg.depth + 1,
-            is_static=is_static,
-        )
-
-        self.journal.begin_call()
-        output = self.process_message(msg)
-        self.journal.finalize_call(output.is_error)
-
-        return output
