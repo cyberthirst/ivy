@@ -102,12 +102,7 @@ class EVMCore:
         output = EVMOutput()
 
         try:
-            if message.value > 0:
-                if self.state[message.caller].balance < message.value:
-                    raise EVMException(
-                        f"Insufficient balance: {self.state[message.caller].balance} < {message.value}"
-                    )
-                self.state[message.caller].balance -= message.value
+            self._handle_value_transfer(message)
 
             module_t = message.code.module_t
 
@@ -145,11 +140,7 @@ class EVMCore:
         output = EVMOutput()
 
         try:
-            if message.value > 0:
-                if self.state[message.caller].balance < message.value:
-                    raise EVMException("Insufficient balance for transfer")
-                self.state[message.caller].balance -= message.value
-                self.state[message.to].balance += message.value
+            self._handle_value_transfer(message)
 
             if message.code:
                 self.callbacks.dispatch()
@@ -199,13 +190,11 @@ class EVMCore:
         return output
 
     def _handle_value_transfer(self, message: Message) -> None:
-        """Helper to handle value transfers"""
         if message.value > 0:
             if self.state[message.caller].balance < message.value:
                 raise EVMException("Insufficient balance for transfer")
             self.state[message.caller].balance -= message.value
-            if message.to:  # Skip for contract creation
-                self.state[message.to].balance += message.value
+            self.state[message.to].balance += message.value
 
     def generate_create_address(self, sender):
         nonce = self.get_nonce(sender.canonical_address)
