@@ -7,7 +7,7 @@ from vyper.semantics.types.function import ContractFunctionT
 
 class EVMCallbacks(ABC):
     @abstractmethod
-    def allocate_storage(self, module_t: ModuleT) -> None:
+    def allocate_variables(self, module_t: ModuleT) -> None:
         pass
 
     @abstractmethod

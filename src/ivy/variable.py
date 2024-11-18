@@ -20,14 +20,14 @@ class GlobalVariable:
         typ: VyperType,
         get_location: callable,  # Now receives a function instead of direct location
         varinfo: Optional[VarInfo] = None,
-        default_value: Optional[bool] = None,
+        initial_value: Optional[bool] = None,
     ):
         self.typ = typ
         self.get_location = get_location
         self.address = address
-        if default_value is None:
-            default_value = VyperEvaluator.default_value(typ)
-        self.get_location()[self.address] = default_value
+        if initial_value is None:
+            initial_value = VyperEvaluator.default_value(typ)
+        self.get_location()[self.address] = initial_value
         self.varinfo = varinfo
 
     @property
@@ -57,11 +57,11 @@ class GlobalVariables:
     def _get_address(self, var: VarInfo):
         return (var.position, var.location)
 
-    def new_variable(self, var: VarInfo, get_location: callable, default_value=None):
+    def new_variable(self, var: VarInfo, get_location: callable, initial_value=None):
         address = self._get_address(var)
         assert address not in self.variables
         variable = GlobalVariable(
-            var.position, var.typ, get_location, var, default_value
+            var.position, var.typ, get_location, var, initial_value
         )
         self.variables[address] = variable
 
@@ -71,7 +71,9 @@ class GlobalVariables:
 
     def __getitem__(self, key: VarInfo):
         address = self._get_address(key)
-        return self.variables[address]
+        res = self.variables[address]
+        assert res is not None
+        return res
 
     def allocate_reentrant_key(self, position: int, get_location):
         assert self.reentrant_key_address is None

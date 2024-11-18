@@ -1,5 +1,4 @@
 from typing import Optional, Type
-import inspect
 from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
@@ -95,9 +94,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def _pop_scope(self):
         self.current_context.pop_scope()
 
-    def allocate_storage(self, module_t: ModuleT):
+    def allocate_variables(self, module_t: ModuleT):
         allocator = Allocator()
-        # separeate address allocation from variable allocation
+        # separeate address allocation from variable creation
         # the allocator rewrites the varinfo.position
         nonreentrant, globals = allocator.allocate_addresses(module_t)
 
@@ -406,6 +405,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
+            # we don't tag runtime values with a corresponding vyper type, thus we have to
+            # collect the types separately and for certain builtins inject them
             if id in ("abi_encode", "_abi_encode", "convert"):
                 args = (typs, args)
             return self.builtins.get(id)(*args, **kws)
@@ -419,8 +420,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 assert len(args) == 1
                 return args[0]
             else:
-                assert isinstance(typedef, StructT)
-                assert len(args) == 0
+                assert isinstance(typedef, StructT) and len(args) == 0
                 return Struct(typedef, kws)
 
         if isinstance(func_t, MemberFunctionT):
@@ -432,15 +432,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 darray.append(args[0])
                 return None
             else:
-                assert func_t.name == "pop"
-                assert len(args) == 0
+                assert func_t.name == "pop" and len(args) == 0
                 return darray.pop()
 
         assert isinstance(func_t, ContractFunctionT)
 
         if func_t.is_external:
-            assert target is not None
-            assert isinstance(func_t, ContractFunctionT)
+            assert target is not None and isinstance(func_t, ContractFunctionT)
             return self.external_function_call(func_t, args, kws, is_static, target)
 
         assert func_t.is_internal
@@ -456,7 +454,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         data = selector
         data += abi_encode(calldata_args_t, args)
 
-        output = self.evm.message_call(
+        output = self.evm.do_message_call(
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 

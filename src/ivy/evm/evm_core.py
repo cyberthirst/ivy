@@ -85,7 +85,9 @@ class EVMCore:
 
         return create_address if is_deploy else output.bytes_output()
 
-    def process_create_message(self, message: Message) -> EVMOutput:
+    def process_create_message(
+        self, message: Message, is_runtime_copy: Optional[bool] = False
+    ) -> EVMOutput:
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 
@@ -102,11 +104,13 @@ class EVMCore:
 
             module_t = message.code.module_t
 
-            self.callbacks.allocate_storage(module_t)
+            if not is_runtime_copy:
+                self.callbacks.allocate_variables(module_t)
 
             new_contract_code = message.code
 
-            if module_t.init_function is not None:
+            # skip if we're doing a runtime code copy
+            if module_t.init_function is not None and not is_runtime_copy:
                 new_contract_code = self.callbacks.execute_init_function(
                     module_t.init_function
                 )
@@ -152,7 +156,7 @@ class EVMCore:
 
         return output
 
-    def message_call(
+    def do_message_call(
         self,
         target: Address,
         value: int,
@@ -183,6 +187,42 @@ class EVMCore:
         self.journal.finalize_call(output.is_error)
 
         return output
+
+    def do_create_message_call(
+        self,
+        value: int,
+        data: bytes,
+        code: ContractData,
+        salt: Optional[bytes] = None,
+        is_runtime_copy: Optional[bool] = False,
+    ) -> tuple[EVMOutput, Address]:
+        if salt is not None:
+            raise NotImplemented(
+                "Create2 depends on bytecode which isn't currently supported"
+            )
+
+        current_address = self.state.current_context.msg.to
+        create_address = self.generate_create_address(current_address)
+
+        self.state.increment_nonce(current_address)
+
+        msg = Message(
+            caller=self.state.current_context.msg.to,
+            to=b"",
+            create_address=create_address,
+            value=value,
+            data=data,
+            code_address=b"",
+            code=code,
+            depth=self.state.current_context.msg.depth + 1,
+            is_static=False,
+        )
+
+        self.journal.begin_call()
+        output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
+        self.journal.finalize_call(output.is_error)
+
+        return output, create_address
 
     def _handle_value_transfer(self, message: Message) -> None:
         if message.value > 0:

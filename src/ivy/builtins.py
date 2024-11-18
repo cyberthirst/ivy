@@ -1,3 +1,4 @@
+import copy
 from typing import Callable, Any, Union, Optional
 from enum import Enum
 
@@ -20,7 +21,7 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
-from ivy.evm.evm_structures import EVMOutput
+from ivy.evm.evm_structures import EVMOutput, Message
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
 import ivy.convert_utils as convert_utils
@@ -175,7 +176,7 @@ def builtin_raw_call(
     assert not (is_static_call and is_delegate_call)
     assert not (value != 0 and (is_static_call or is_delegate_call))
 
-    output: EVMOutput = evm.message_call(
+    output: EVMOutput = evm.do_message_call(
         to, value, data, is_static_call, is_delegate_call
     )
 
@@ -286,12 +287,28 @@ def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
 
 
 def builtin_create_copy_of(
+    evm: EVMCore,
     target: Address,
     value: int = 0,
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
-    pass
+    state: StateAccess = evm.state
+
+    # deep copy the target code
+    code = state.get_code(target)
+    code = copy.deepcopy(code)
+
+    res, address = evm.do_create_message_call(value, b"", code, salt)
+
+    if not res.is_error:
+        return address
+
+    # child evm resulted in error but we shouldn't revert so return zero address
+    if not revert_on_failure:
+        return Address(0)
+
+    raise res.error
 
 
 class BuiltinType(Enum):

@@ -8,7 +8,6 @@ from tests.conftest import get_contract
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback(reverts, get_contract):
-    reverts = True
     src = f"""
 c: public(uint256)
 
