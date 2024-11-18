@@ -21,7 +21,7 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 from ivy.evaluator import VyperEvaluator
-from ivy.evm.evm_structures import EVMOutput, Message
+from ivy.evm.evm_structures import EVMOutput, Message, ContractData
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
 import ivy.convert_utils as convert_utils
@@ -286,20 +286,21 @@ def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
         raise ValueError(f"Cannot convert value {val} of typ {i_typ} to {o_typ}")
 
 
-def builtin_create_copy_of(
+def _deepcopy_code(state, target):
+    code = state.get_code(target)
+    return copy.deepcopy(code)
+
+
+def _create_builtin_shared(
     evm: EVMCore,
-    target: Address,
+    code: ContractData,
+    data: bytes = b"",
     value: int = 0,
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
-) -> Address:
-    state: StateAccess = evm.state
-
-    # deep copy the target code
-    code = state.get_code(target)
-    code = copy.deepcopy(code)
-
-    res, address = evm.do_create_message_call(value, b"", code, salt)
+    is_runtime_copy: Optional[bool] = False,
+):
+    res, address = evm.do_create_message_call(value, data, code, salt, is_runtime_copy)
 
     if not res.is_error:
         return address
@@ -309,6 +310,58 @@ def builtin_create_copy_of(
         return Address(0)
 
     raise res.error
+
+
+def builtin_create_copy_of(
+    evm: EVMCore,
+    target: Address,
+    value: int = 0,
+    revert_on_failure: bool = True,
+    salt: Optional[bytes] = None,
+) -> Address:
+    code = _deepcopy_code(evm.state, target)
+    return _create_builtin_shared(
+        evm,
+        code,
+        data=b"",
+        value=value,
+        revert_on_failure=revert_on_failure,
+        salt=salt,
+        is_runtime_copy=True,
+    )
+
+
+def create_from_blueprint(
+    evm: EVMCore,
+    typs: tuple[VyperType],
+    target: Address,
+    values: tuple[Any],
+    value: int = 0,
+    raw_args: bool = False,
+    code_offset: int = 3,
+    revert_on_failure: bool = True,
+    salt: Optional[bytes] = None,
+) -> Address:
+    code = _deepcopy_code(evm.state, target)
+
+    if not raw_args:
+        # encode the arguments
+        encoded_args = builtin_abi_encode(typs, values)
+    else:
+        assert len(values) == 1
+        encoded_args = values[0]
+
+    if code_offset != 3:
+        raise UnimplementedException("Code offset != 3 is not supported")
+
+    return _create_builtin_shared(
+        evm,
+        code,
+        data=encoded_args,
+        value=value,
+        revert_on_failure=revert_on_failure,
+        salt=salt,
+    )
 
 
 class BuiltinType(Enum):
