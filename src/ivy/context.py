@@ -1,11 +1,11 @@
 from typing import Any, Optional
 
-from attr import dataclass
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
 from ivy.evaluator import VyperEvaluator
 from ivy.evm.evm_structures import Account, Message, ContractData
+from ivy.types import Address
 
 
 class FunctionContext:
@@ -50,18 +50,6 @@ class FunctionContext:
         return f"Ctx({self.scopes})"
 
 
-@dataclass
-class Storage:
-    transient: dict[str, Any]
-    storage: dict[str, Any]
-
-
-@dataclass
-class Code:
-    immutables: dict[str, Any]
-    constants: dict[str, Any]
-
-
 class ExecutionContext:
     def __init__(
         self, acc: Account, msg: Message, contract_data: Optional[ContractData]
@@ -83,8 +71,13 @@ class ExecutionContext:
         self.immutables = msg.code.immutables
         self.constants = msg.code.constants
         self.entry_points = msg.code.entry_points
+        self.execution_output = ExecutionOutput()
+        # return_data is not part of the ExecutionOutput, it's filled from the output
+        # of child evm calls
         self.returndata: bytes = b""
-        self.output: Optional[bytes] = None
+        # TODO should we keep it or only use execution_output.output?
+        # - is it used for internal functions?
+        self.func_return: Optional[bytes] = None
 
     def push_fun_context(self, func_t: ContractFunctionT):
         self.function_contexts.append(FunctionContext(func_t))
@@ -100,3 +93,32 @@ class ExecutionContext:
 
     def pop_scope(self):
         self.current_fun_context().pop()
+
+
+class ExecutionOutput:
+    def __init__(self):
+        self.output: Optional[bytes] = None
+        self.error: Optional[Exception] = None
+        self.accessed_accounts: set[Address] = set()
+        self.accounts_to_delete: set[Address] = set()
+        self.logs: list = []
+
+    @property
+    def is_error(self):
+        return self.error is not None
+
+    def bytes_output(self, safe=True):
+        if safe and self.is_error:
+            raise self.error
+
+        if self.output is None:
+            return b""
+        return self.output
+
+    def incorporate_child(self, child: "ExecutionOutput", success: bool):
+        if success:
+            self.accessed_accounts.update(child.accessed_accounts)
+            self.accounts_to_delete.update(child.accounts_to_delete)
+            self.logs.extend(child.logs)
+        else:
+            pass

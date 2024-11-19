@@ -206,37 +206,35 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self._execute_external_function(func_t, args)
 
     def _execute_external_function(self, func_t, args):
-        self._execute_function(func_t, args)
+        ret = self._execute_function(func_t, args)
 
         # abi-encode output
         typ = func_t.return_type
         if typ is None:
-            assert self.current_context.output is None
+            assert ret is None
             return None
         typ = calculate_type_for_external_return(typ)
-        output = self.current_context.output
         # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
-        output = (
-            (output,) if (not isinstance(output, tuple) or len(output) <= 1) else output
-        )
-        self.current_context.output = abi_encode(typ, output)
+        output = (ret,) if (not isinstance(ret, tuple) or len(ret) <= 1) else ret
+        self.current_context.execution_output.output = abi_encode(typ, output)
 
     def _execute_function(self, func_t, args):
         # TODO: rewrite this using a ctx manager?
         self._prologue(func_t, args)
+        ret = None
 
         for stmt in func_t.decl_node.body:
             try:
                 self.visit(stmt)
             except ReturnException as e:
-                self.current_context.output = e.value
+                ret = e.value
                 break
 
         self._epilogue(func_t)
 
         if func_t.is_deploy:
             return self.current_context.contract
-        return self.current_context.output
+        return ret
 
     @contextmanager
     def modifiable_context(self, target):

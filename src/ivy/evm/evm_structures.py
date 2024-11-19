@@ -91,27 +91,6 @@ class ContractData:
             )
 
 
-class EVMOutput:
-    data: bytes
-    error: Exception
-
-    def __init__(self, data: bytes = None, error: Exception = None):
-        self.data = data
-        self.error = error
-
-    @property
-    def is_error(self):
-        return self.error is not None
-
-    def bytes_output(self, safe=True):
-        if safe and self.is_error:
-            raise self.error
-
-        if self.data is None:
-            return b""
-        return self.data
-
-
 @dataclass
 class Account:
     nonce: Any
@@ -134,14 +113,9 @@ class Environment:  # env from execution specs
     origin: Any  # Address
     coinbase: Any  # Address
     number: Any  # Uint
-    # base_fee_per_gas: Uint
-    # gas_limit: Uint
-    # gas_price: Uint
     time: Any  # U256
     prev_randao: Any  # Bytes32
-    # state: Any#State
     chain_id: Any  # U64
-    # traces: List[dict]
 
 
 @dataclass
@@ -149,14 +123,9 @@ class Message:  # msg from execution specs
     caller: Any  # Address
     to: Any  # Union[Bytes0, Address]
     create_address: Any  # Address
-    # gas: Uint
     value: Any  # U256
     data: Any  # Bytes
     code_address: Any  # Optional[Address]
     code: ContractData
     depth: Any  # Uint
-    # should_transfer_value: bool
     is_static: bool
-    # accessed_addresses: Set[Address]
-    # accessed_storage_keys: Set[Tuple[Address, Bytes32]]
-    # parent_evm: Optional["Evm"]

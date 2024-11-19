@@ -3,7 +3,7 @@ from typing import Optional, Protocol
 
 from ivy.evm.evm_structures import Account, ContractData
 from ivy.types import Address
-from ivy.context import ExecutionContext
+from ivy.context import ExecutionContext, ExecutionOutput
 
 
 class EVMState:
@@ -79,6 +79,10 @@ class EVMState:
     def pop_context(self):
         self.execution_contexts.pop()
 
+    @property
+    def current_output(self) -> ExecutionOutput:
+        return self.current_context.execution_output
+
 
 class StateAccess(Protocol):
     def __getitem__(self, address: Address) -> Account: ...
@@ -109,6 +113,9 @@ class StateAccess(Protocol):
     def push_context(self, context: ExecutionContext): ...
 
     def pop_context(self): ...
+
+    @property
+    def current_output(self) -> ExecutionOutput: ...
 
 
 class StateAccessor(StateAccess):
@@ -154,3 +161,7 @@ class StateAccessor(StateAccess):
 
     def pop_context(self):
         self._state.pop_context()
+
+    @property
+    def current_output(self) -> ExecutionOutput:
+        return self._state.current_output

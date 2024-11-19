@@ -8,14 +8,13 @@ from ivy.evm.evm_structures import (
     Environment,
     ContractData,
     Message,
-    EVMOutput,
 )
 from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
 from ivy.exceptions import EVMException
 from ivy.utils import compute_contract_address
-from ivy.context import ExecutionContext
+from ivy.context import ExecutionContext, ExecutionOutput
 
 
 class EVMCore:
@@ -25,6 +24,7 @@ class EVMCore:
         self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
+        # TODO move this to state
         self.environment: Optional[Environment] = None
 
     def execute_tx(
@@ -87,7 +87,7 @@ class EVMCore:
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
-    ) -> EVMOutput:
+    ) -> ExecutionOutput:
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 
@@ -96,8 +96,6 @@ class EVMCore:
 
         exec_ctx = ExecutionContext(new_account, message, message.code)
         self.state.push_context(exec_ctx)
-
-        output = EVMOutput()
 
         try:
             self._handle_value_transfer(message)
@@ -119,15 +117,16 @@ class EVMCore:
 
         except Exception as e:
             # TODO rollback the journal
-            output.error = e
+            self.state.current_output.error = e
             del self.state[message.create_address]
 
         finally:
+            ret = self.state.current_output
             self.state.pop_context()
 
-        return output
+        return ret
 
-    def process_message(self, message: Message) -> EVMOutput:
+    def process_message(self, message: Message) -> ExecutionOutput:
         account = self.state[message.to]
         self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(
@@ -137,24 +136,21 @@ class EVMCore:
         )
         self.state.push_context(exec_ctx)
 
-        output = EVMOutput()
-
         try:
             self._handle_value_transfer(message)
 
             if message.code:
                 self.callbacks.dispatch()
 
-            output.data = self.state.current_context.output
-
         except Exception as e:
             # TODO rollback the journal
-            output.error = e
+            self.state.current_output.error = e
 
         finally:
+            ret = self.state.current_output
             self.state.pop_context()
 
-        return output
+        return ret
 
     def do_message_call(
         self,
@@ -163,7 +159,7 @@ class EVMCore:
         data: bytes,
         is_static: bool = False,
         is_delegate: bool = False,
-    ) -> EVMOutput:
+    ) -> ExecutionOutput:
         code_address = target
         code = self.state.get_code(code_address)
 
@@ -195,7 +191,7 @@ class EVMCore:
         code: ContractData,
         salt: Optional[bytes] = None,
         is_runtime_copy: Optional[bool] = False,
-    ) -> tuple[EVMOutput, Address]:
+    ) -> tuple[ExecutionOutput, Address]:
         if salt is not None:
             raise NotImplemented(
                 "Create2 depends on bytecode which isn't currently supported"
@@ -204,6 +200,7 @@ class EVMCore:
         current_address = self.state.current_context.msg.to
         create_address = self.generate_create_address(current_address)
 
+        # TODO move nonce_inc to process_create_message
         self.state.increment_nonce(current_address)
 
         msg = Message(
@@ -222,6 +219,7 @@ class EVMCore:
         output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
         self.journal.finalize_call(output.is_error)
 
+        # TODO we probably shouldn't return this tuple
         return output, create_address
 
     def _handle_value_transfer(self, message: Message) -> None:

@@ -20,8 +20,8 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 import ivy.builtins.create_utils as create_utils
+from ivy.context import ExecutionOutput
 from ivy.evaluator import VyperEvaluator
-from ivy.evm.evm_structures import EVMOutput
 from ivy.exceptions import GasReference
 from ivy.types import Address, VyperDecimal
 import ivy.builtins.convert_utils as convert_utils
@@ -176,7 +176,7 @@ def builtin_raw_call(
     assert not (is_static_call and is_delegate_call)
     assert not (value != 0 and (is_static_call or is_delegate_call))
 
-    output: EVMOutput = evm.do_message_call(
+    output: ExecutionOutput = evm.do_message_call(
         to, value, data, is_static_call, is_delegate_call
     )
 
