@@ -22,7 +22,7 @@ from vyper.semantics.analysis.base import VarInfo
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-from ivy.builtins import BuiltinRegistry
+from ivy.builtins.builtins import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.exceptions import (
