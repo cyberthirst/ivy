@@ -70,13 +70,11 @@ class EVMCore:
             chain_id=0,
         )
 
-        self.journal.begin_call()
         output = (
             self.process_create_message(message)
             if is_deploy
             else self.process_message(message)
         )
-        self.journal.finalize_call(output.is_error)
 
         self.state.clear_transient_storage()
 
@@ -88,6 +86,8 @@ class EVMCore:
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
     ) -> ExecutionOutput:
+        self.journal.begin_call()
+
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 
@@ -124,9 +124,11 @@ class EVMCore:
             ret = self.state.current_output
             self.state.pop_context()
 
+        self.journal.finalize_call(ret.is_error)
         return ret
 
     def process_message(self, message: Message) -> ExecutionOutput:
+        self.journal.begin_call()
         account = self.state[message.to]
         self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(
@@ -143,13 +145,13 @@ class EVMCore:
                 self.callbacks.dispatch()
 
         except Exception as e:
-            # TODO rollback the journal
             self.state.current_output.error = e
 
         finally:
             ret = self.state.current_output
             self.state.pop_context()
 
+        self.journal.finalize_call(ret.is_error)
         return ret
 
     def do_message_call(
@@ -178,9 +180,7 @@ class EVMCore:
             is_static=is_static,
         )
 
-        self.journal.begin_call()
         output = self.process_message(msg)
-        self.journal.finalize_call(output.is_error)
 
         return output
 
@@ -215,9 +215,7 @@ class EVMCore:
             is_static=False,
         )
 
-        self.journal.begin_call()
         output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
-        self.journal.finalize_call(output.is_error)
 
         # TODO we probably shouldn't return this tuple
         return output, create_address
