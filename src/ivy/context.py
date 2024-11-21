@@ -97,28 +97,24 @@ class ExecutionContext:
 
 class ExecutionOutput:
     def __init__(self):
-        self.output: Optional[bytes] = None
+        self._output: Optional[bytes] = None
         self.error: Optional[Exception] = None
-        self.accessed_accounts: set[Address] = set()
+        self.accessed_addresses: set[Address] = set()
         self.accounts_to_delete: set[Address] = set()
         self.logs: list = []
+        self.refund_counter = 0
+        self.touched_accounts: set[Address] = set()
+
+    @property
+    def output(self):
+        if self._output is None:
+            return b""
+        return self._output
+
+    @output.setter
+    def output(self, value):
+        self._output = value
 
     @property
     def is_error(self):
         return self.error is not None
-
-    def bytes_output(self, safe=True):
-        if safe and self.is_error:
-            raise self.error
-
-        if self.output is None:
-            return b""
-        return self.output
-
-    def incorporate_child(self, child: "ExecutionOutput", success: bool):
-        if success:
-            self.accessed_accounts.update(child.accessed_accounts)
-            self.accounts_to_delete.update(child.accounts_to_delete)
-            self.logs.extend(child.logs)
-        else:
-            pass

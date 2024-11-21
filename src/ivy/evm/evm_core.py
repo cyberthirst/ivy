@@ -39,6 +39,7 @@ class EVMCore:
         is_deploy = to == b""
         create_address, code = None, None
 
+        # TODO merge this with do_create_message_call and do_message_call
         if is_deploy:
             module_t = module._metadata["type"]
             assert isinstance(module_t, ModuleT)
@@ -81,7 +82,7 @@ class EVMCore:
         if output.is_error:
             raise output.error
 
-        return create_address if is_deploy else output.bytes_output()
+        return create_address if is_deploy else output.output
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
@@ -180,9 +181,19 @@ class EVMCore:
             is_static=is_static,
         )
 
-        output = self.process_message(msg)
+        child_output = self.process_message(msg)
+        current_context = self.state.current_context
 
-        return output
+        if child_output.error:
+            # incorporate_child_on_error(evm, child_evm)
+            current_context.returndata = child_output.output
+            # push(evm.stack, U256(0))
+        else:
+            self.incorporate_child_on_success(child_output)
+            current_context.returndata = child_output.output
+            # push(evm.stack, U256(1))
+
+        return child_output
 
     def do_create_message_call(
         self,
@@ -200,7 +211,12 @@ class EVMCore:
         current_address = self.state.current_context.msg.to
         create_address = self.generate_create_address(current_address)
 
-        # TODO move nonce_inc to process_create_message
+        if self.account_has_code_or_nonce(create_address):
+            self.state.increment_nonce(current_address)
+            # TODO handle the return (probably return address(0)
+            return
+
+        # TODO should we move nonce_inc to process_create_message?
         self.state.increment_nonce(current_address)
 
         msg = Message(
@@ -215,10 +231,21 @@ class EVMCore:
             is_static=False,
         )
 
-        output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
+        child_output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
+        current_output = self.state.current_output
+        return_address = create_address
+
+        if child_output.is_error:
+            # TODO: eventually implemente this incorporate
+            # self.incorporate_child_on_error(evm, child_evm)
+            current_output.return_data = child_output.output
+            return_address = Address(0)
+        else:
+            self.incorporate_child_on_success(child_output)
+            current_output.return_data = b""
 
         # TODO we probably shouldn't return this tuple
-        return output, create_address
+        return child_output, return_address
 
     def _handle_value_transfer(self, message: Message) -> None:
         if message.value > 0:
@@ -231,3 +258,22 @@ class EVMCore:
         nonce = self.state.get_nonce(sender.canonical_address)
         self.state.increment_nonce(sender.canonical_address)
         return Address(compute_contract_address(sender.canonical_address, nonce))
+
+    def account_has_code_or_nonce(self, address: Address) -> bool:
+        code = self.state.get_code(address)
+        nonce = self.state.get_nonce(address)
+        return code is not None or nonce > 0
+
+    def incorporate_child_on_success(self, child_output: ExecutionOutput) -> None:
+        output = self.state.current_output
+
+        output.logs += child_output.logs
+        output.refund_counter += child_output.refund_counter
+        output.accounts_to_delete.update(child_output.accounts_to_delete)
+        output.touched_accounts.update(child_output.touched_accounts)
+        # TODO enable this
+        # if account_exists_and_is_empty(
+        #        evm.env.state, child_output.message.current_target
+        # ):
+        #    evm.touched_accounts.add(child_output.message.current_target)
+        output.accessed_addresses.update(child_output.accessed_addresses)

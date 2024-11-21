@@ -456,12 +456,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             target, kwargs.get("value", 0), data, is_static=is_static, is_delegate=False
         )
 
-        self.current_context.returndata = output.bytes_output()
+        returndata = self.current_context.returndata
 
-        if (
-            len(self.current_context.returndata) == 0
-            and "default_return_value" in kwargs
-        ):
+        if output.error:
+            # TODO do we forward the returndata on failure
+            self.state.current_output.output = returndata
+            raise output.error
+
+        if len(returndata) == 0 and "default_return_value" in kwargs:
             return kwargs["default_return_value"]
 
         typ = func_t.return_type
@@ -474,8 +476,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         max_return_size = abi_typ.size_bound()
 
-        actual_output_size = min(max_return_size, len(self.current_context.returndata))
-        to_decode = self.current_context.returndata[:actual_output_size]
+        actual_output_size = min(max_return_size, len(returndata))
+        to_decode = returndata[:actual_output_size]
 
         # NOTE: abi_decode implicitly checks minimum return size
         decoded = abi_decode(typ, to_decode)

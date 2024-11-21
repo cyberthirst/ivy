@@ -181,14 +181,15 @@ def builtin_raw_call(
     )
 
     success = not output.is_error
+    returndata = evm.state.current_context.returndata
 
     if not revert_on_failure:
-        return success, output.bytes_output(safe=False)[:max_outsize]
+        return success, returndata[:max_outsize]
 
     if not success:
         raise output.error
 
-    return output.bytes_output()[:max_outsize]
+    return returndata[:max_outsize]
 
 
 def builtin_slice(b: Union[bytes, str], start: int, length: int) -> Union[bytes, str]:
