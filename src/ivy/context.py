@@ -51,23 +51,16 @@ class FunctionContext:
 
 
 class ExecutionContext:
-    def __init__(
-        self, acc: Account, msg: Message, contract_data: Optional[ContractData]
-    ):
-        self.acc = acc
-        if acc.contract_data is None:
-            assert contract_data is not None
-            self.contract = contract_data
-        else:
-            self.contract = acc.contract_data
+    def __init__(self, acc: Account, msg: Message):
+        self.msg = msg
+        self.contract = msg.code
         self.function = None
         self.function_contexts = []
         # set storage-related attributes based on the target account
         self.storage = acc.storage
         self.transient = acc.transient
-        self.globals = self.contract.global_vars
         # set code-related attributes based on message.code
-        self.msg = msg
+        self.globals = msg.code.global_vars
         self.immutables = msg.code.immutables
         self.constants = msg.code.constants
         self.entry_points = msg.code.entry_points

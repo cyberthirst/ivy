@@ -43,18 +43,20 @@ class MinimalProxyFactory:
     # however, through an escape hatch in the interpreter we maintain clean passthrough of
     # data without touching abi-encoding
     _SOURCE = """
-implementation: address
+implementation: immutable(address)
 
 @deploy
-def __init__(implementation: address):
-    self.implementation = implementation
+def __init__(_implementation: address):
+    implementation = _implementation
 
 # use 2**32 which is sufficiently large not to cause runtime problems,
-# and small enough not to cause allocator exception in the frontend
+# and small enough # not to cause allocator exception in the frontend
 @external
 @payable
 def __default__() -> Bytes[2**32]:
-    return raw_call(self.implementation, msg.data, is_delegate_call=True, max_outsize=2**32)
+    return raw_call(implementation, msg.data, is_delegate_call=True, max_outsize=2**32)
+
+    
     """
     _ast: ast.Module = None
 

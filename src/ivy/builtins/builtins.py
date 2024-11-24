@@ -344,8 +344,7 @@ def builtin_create_minimal_proxy_to(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
-    # 1. abi encode target
-    encoded_target = abi_encode(AddressT(), (target,))
+    encoded_target = builtin_abi_encode((AddressT(),), (target,))
     code = create_utils.MinimalProxyFactory.get_proxy_contract_data()
     return create_utils.create_builtin_shared(
         evm,

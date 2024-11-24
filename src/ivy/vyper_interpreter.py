@@ -208,6 +208,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def _execute_external_function(self, func_t, args):
         ret = self._execute_function(func_t, args)
 
+        # an escape hatch for the minimal proxy where we want plain pass-through
+        if self._inside_minimal_proxy():
+            self.current_context.execution_output.output = ret
+            return
+
         # abi-encode output
         typ = func_t.return_type
         if typ is None:
@@ -474,10 +479,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if typ is None:
             return None
-
-        # an escape hatch for the minimal proxy where we want plain pass-through
-        if self._inside_minimal_proxy():
-            return returndata
 
         typ = calculate_type_for_external_return(typ)
         abi_typ = typ.abi_type

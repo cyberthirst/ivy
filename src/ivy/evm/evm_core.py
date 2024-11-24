@@ -95,7 +95,7 @@ class EVMCore:
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
 
-        exec_ctx = ExecutionContext(new_account, message, message.code)
+        exec_ctx = ExecutionContext(new_account, message)
         self.state.push_context(exec_ctx)
 
         try:
@@ -132,11 +132,7 @@ class EVMCore:
         self.journal.begin_call()
         account = self.state[message.to]
         self.state.add_accessed_account(account)
-        exec_ctx = ExecutionContext(
-            account,
-            message,
-            account.contract_data.module_t if account.contract_data else None,
-        )
+        exec_ctx = ExecutionContext(account, message)
         self.state.push_context(exec_ctx)
 
         try:
