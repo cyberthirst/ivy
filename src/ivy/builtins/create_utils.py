@@ -1,6 +1,10 @@
 import copy
 from typing import Optional
 
+from vyper.compiler import CompilerData
+from vyper.semantics.types.module import ModuleT
+from vyper.ast import nodes as ast
+
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
 from ivy.evm.evm_structures import ContractData
@@ -34,16 +38,36 @@ def create_builtin_shared(
     raise res.error
 
 
-class ProxyFactory:
-    src = """"
+class MinimalProxyFactory:
+    # NOTE: the contract is not semantically eq. to the minimal proxy as per EIP1167
+    # however, through an escape hatch in the interpreter we maintain clean passthrough of
+    # data without touching abi-encoding
+    _SOURCE = """
 implementation: address
 
 @deploy
 def __init__(implementation: address):
     self.implementation = implementation
 
+# use 2**32 which is sufficiently large not to cause runtime problems,
+# and small enough not to cause allocator exception in the frontend
 @external
 @payable
-def __default__():
-    return raw_call(self.implementation, msg.data, is_delegate_call=True)
+def __default__() -> Bytes[2**32]:
+    return raw_call(self.implementation, msg.data, is_delegate_call=True, max_outsize=2**32)
     """
+    _ast: ast.Module = None
+
+    @classmethod
+    def get_proxy_contract_data(cls):
+        if cls._ast is None:
+            compiler_data = CompilerData(file_input=cls._SOURCE)
+            cls._ast = compiler_data.annotated_vyper_module
+
+        ast = cls._ast
+        ast._metadata["is_minimal_proxy"] = True
+
+        module_t = ast._metadata["type"]
+        assert isinstance(module_t, ModuleT)
+
+        return ContractData(module_t)

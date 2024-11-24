@@ -22,7 +22,7 @@ from vyper.semantics.analysis.base import VarInfo
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.evaluator import VyperEvaluator
-from ivy.builtins.builtins import BuiltinRegistry
+from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.exceptions import (
@@ -389,6 +389,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         elif key == "chain.id":
             return self.env.chain_id
 
+    def _inside_minimal_proxy(self):
+        decl_node = self.current_context.contract.module_t.decl_node
+        return "is_minimal_proxy" in decl_node._metadata
+
     def generic_call_handler(
         self,
         call: ast.Call,
@@ -470,6 +474,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if typ is None:
             return None
+
+        # an escape hatch for the minimal proxy where we want plain pass-through
+        if self._inside_minimal_proxy():
+            return returndata
 
         typ = calculate_type_for_external_return(typ)
         abi_typ = typ.abi_type
