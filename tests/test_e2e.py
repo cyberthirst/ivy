@@ -1816,7 +1816,7 @@ def foo() -> uint256:
     assert c.foo() == 1
 
 
-def test_create_minimal_proxy(get_contract):
+def test_create_minimal_proxy_state(get_contract):
     src = """
 c: uint256
 
@@ -1840,7 +1840,7 @@ def foo() -> (uint256, uint256):
     assert c.foo() == (1, 0)
 
 
-def test_create_minimal_proxy2(get_contract):
+def test_create_minimal_proxy_msg_sender(get_contract):
     src = """
 interface Self:
     def return_sender() -> address: nonpayable
@@ -1859,3 +1859,98 @@ def foo() -> address:
     c = get_contract(src)
 
     assert c.foo() == c.address
+
+
+def test_create_minimal_proxy_extcall(get_contract):
+    src = """
+contract: immutable(address) 
+c: uint256
+    
+interface Bar:
+    def bar() -> uint256: nonpayable
+    
+interface Proxy:
+    def call_3rd_contract() -> uint256: nonpayable
+    
+@deploy
+def __init__(addr: address):
+    contract = addr
+    
+@external
+def call_3rd_contract() -> uint256:
+    return extcall Bar(contract).bar()
+
+@external
+def foo() -> (uint256, uint256):
+    proxy: address = create_minimal_proxy_to(self) 
+    res: uint256 = extcall Proxy(proxy).call_3rd_contract() 
+    return res, self.c
+    """
+
+    src2 = """
+c: uint256 
+    
+@external
+def bar() -> uint256:
+    self.c = 66
+    return self.c
+    """
+
+    c2 = get_contract(src2)
+    c = get_contract(src, c2.address)
+
+    assert c.foo() == (66, 0)
+
+
+def test_create_minimal_proxy_raw_call(get_contract):
+    src = """
+c: uint256
+
+interface Self:
+    def side_effect() -> uint256: nonpayable
+
+@external
+def side_effect() -> uint256:
+    self.c += 1
+    return self.c
+
+@external
+def foo() -> (uint256, uint256):
+    proxy: address = create_minimal_proxy_to(self)
+    res: Bytes[32] = raw_call(proxy, method_id("side_effect()"), max_outsize=32)
+    return abi_decode(res, uint256), self.c
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == (1, 0)
+
+
+def test_create_minimal_proxy_state_rollback(get_contract):
+    src = """
+c: public(uint256)
+
+interface Self:
+    def side_effect() -> uint256: nonpayable
+    def c() -> uint256: view
+
+@external
+def side_effect(u: uint256) -> uint256:
+    self.c += 1
+    assert u == 1
+    return self.c
+
+@external
+def foo() -> (uint256, uint256):
+    proxy: address = create_minimal_proxy_to(self)
+    b: Bytes[32] = b""
+    s: bool = False
+    u: uint256 = 0
+    s, b = raw_call(proxy, abi_encode(u, method_id=method_id("side_effect(uint256)")), max_outsize=32, revert_on_failure=False)
+    assert s == False
+    return staticcall Self(proxy).c(), self.c
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == (0, 0)
