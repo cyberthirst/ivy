@@ -1954,3 +1954,118 @@ def foo() -> (uint256, uint256):
     c = get_contract(src)
 
     assert c.foo() == (0, 0)
+
+
+def test_create_copy_of(get_contract):
+    src = """
+a: public(uint256)
+    
+interface Foo:
+    def a() -> uint256: view
+    
+@external
+def foo() -> (uint256, uint256):
+    self.a = 18 
+    copy: address = create_copy_of(self)
+    return staticcall Foo(copy).a(), self.a
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == (0, 18)
+
+
+def test_create_copy_of_with_constant(get_contract):
+    src = """
+a: public(constant(uint256)) = 144
+
+interface Foo:
+    def a() -> uint256: view
+
+@external
+def foo() -> uint256:
+    copy: address = create_copy_of(self)
+    return staticcall Foo(copy).a()
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == 144
+
+
+def test_create_copy_of_with_immutable(get_contract):
+    src = """
+a: public(immutable(uint256))
+
+@deploy
+def __init__():
+    a = 144
+
+interface Foo:
+    def a() -> uint256: view
+
+@external
+def foo() -> uint256:
+    copy: address = create_copy_of(self)
+    return staticcall Foo(copy).a()
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == 144
+
+
+def test_create_copy_of_3rd_contract(get_contract):
+    src = """
+interface Foo:
+    def a() -> uint256: view
+
+@external
+def foo(target: address) -> uint256:
+    copy: address = create_copy_of(target)
+    return staticcall Foo(copy).a()
+    """
+
+    src2 = """
+@external
+def a() -> uint256:
+    return 144 
+    """
+
+    target = get_contract(src2)
+    c = get_contract(src)
+
+    assert c.foo(target) == 144
+
+
+def test_create_copy_of_3rd_contract_state_not_coppied(get_contract):
+    src = """
+interface Foo:
+    def a() -> uint256: view
+
+@external
+def foo(target: address) -> uint256:
+    copy: address = create_copy_of(target)
+    return staticcall Foo(copy).a()
+    """
+
+    src2 = """
+u: uint256
+str: String[32] 
+arr: DynArray[uint256, 10]
+    
+@deploy 
+def __init__():
+    self.u = 144
+    self.str = "wise man"
+    self.arr = [1, 2, 3] 
+    
+@external
+def a() -> uint256:
+    return self.u + len(self.str) + len(self.arr) 
+    """
+
+    target = get_contract(src2)
+    c = get_contract(src)
+
+    assert c.foo(target) == 0
