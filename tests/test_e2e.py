@@ -1830,9 +1830,7 @@ def side_effect() -> uint256:
 
 @external
 def foo() -> (uint256, uint256):
-    print("self: ", self)
     proxy: address = create_minimal_proxy_to(self) 
-    print("proxy: ", proxy)
     res: uint256 = extcall Self(proxy).side_effect() 
     return res, self.c 
     """
@@ -1840,3 +1838,24 @@ def foo() -> (uint256, uint256):
     c = get_contract(src)
 
     assert c.foo() == (1, 0)
+
+
+def test_create_minimal_proxy2(get_contract):
+    src = """
+interface Self:
+    def return_sender() -> address: nonpayable
+
+@external
+def return_sender() -> address:
+    return msg.sender
+
+@external
+def foo() -> address:
+    proxy: address = create_minimal_proxy_to(self) 
+    res: address = extcall Self(proxy).return_sender() 
+    return res
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == c.address
