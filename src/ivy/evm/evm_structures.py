@@ -7,6 +7,7 @@ from vyper.semantics.types.subscriptable import TupleT
 
 from ivy.utils import compute_call_abi_data
 from ivy.variable import GlobalVariables
+from ivy.types import Address
 
 
 @dataclass
@@ -129,3 +130,10 @@ class Message:  # msg from execution specs
     code: ContractData
     depth: Any  # Uint
     is_static: bool
+
+
+@dataclass
+class Log:
+    address: Address
+    topics: list[bytes, ...]
+    data: bytes

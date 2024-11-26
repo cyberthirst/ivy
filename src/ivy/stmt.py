@@ -106,6 +106,10 @@ class StmtVisitor(BaseVisitor):
     def visit_Break(self, node: ast.Break):
         raise BreakException
 
+    def visit_Log(self, node: ast.Log):
+        assert isinstance(node.value, ast.Call)
+        self.visit(node.value)
+
     def visit_Return(self, node: ast.Return):
         if node.value:
             value = self.deep_copy_visit(node.value)

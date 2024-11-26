@@ -1,15 +1,20 @@
-from typing import Optional, Type
+from typing import Optional, Type, Any
 from contextlib import contextmanager
+
+from eth_utils import keccak
 
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability, Modifiability
 from vyper.semantics.types import (
     VyperType,
+    TupleT,
     TYPE_T,
     InterfaceT,
     StructT,
     MemberFunctionT,
     SelfT,
+    EventT,
+    _BytestringT,
 )
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
@@ -18,6 +23,7 @@ from vyper.semantics.types.function import (
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.analysis.base import VarInfo
+from vyper.exceptions import TypeMismatch
 
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
@@ -36,6 +42,7 @@ from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
+from ivy.evm.evm_structures import Log
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
@@ -398,6 +405,44 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         decl_node = self.current_context.contract.module_t.decl_node
         return "is_minimal_proxy" in decl_node._metadata
 
+    def _encode_log_topics(self, event: EventT, arg_nodes: list[tuple[Any, VyperType]]):
+        topics = [event.event_id]
+
+        for arg, typ in arg_nodes:
+            if typ._is_prim_word:
+                value = abi_encode(typ, arg)
+            elif isinstance(typ, _BytestringT):
+                value = keccak(arg)
+            else:
+                # this check is done in vyper's codegen so we need to replicate it
+                # TODO block at higher level
+                raise TypeMismatch("Event indexes may only be value types", event)
+            topics.append(value)
+
+        return topics
+
+    def _log(self, event: EventT, args, typs):
+        topic_nodes = []
+        data_nodes = []
+        assert len(args) == len(event.indexed) and len(typs) == len(args)
+        for arg, typ, is_indexed in zip(args, typs, event.indexed):
+            if is_indexed:
+                topic_nodes.append((arg, typ))
+            else:
+                data_nodes.append((arg, typ))
+
+        topics = self._encode_log_topics(event, topic_nodes)
+
+        data_values = tuple((arg for arg, _ in data_nodes))
+        data_typs = TupleT(list(typ for _, typ in data_nodes))
+
+        encoded_data = abi_encode(data_typs, data_values)
+
+        assert len(topics) <= 4, "too many topics"  # sanity check
+
+        address = self.current_address
+        self.state.current_output.logs.append(Log(address, topics, encoded_data))
+
     def generic_call_handler(
         self,
         call: ast.Call,
@@ -426,6 +471,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 # we will likely need the attrs of the interface..
                 assert len(args) == 1
                 return args[0]
+            elif isinstance(typedef, EventT):
+                _args = args if len(args) > 0 else kws
+                self._log(typedef, _args, typs)
+                return None
             else:
                 assert isinstance(typedef, StructT) and len(args) == 0
                 return Struct(typedef, kws)
