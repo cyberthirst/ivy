@@ -6,6 +6,7 @@ from vyper import ast as vy_ast
 from ivy.vyper_interpreter import VyperInterpreter
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
+from ivy.context import ExecutionOutput
 
 # make mypy happy
 _AddressType: TypeAlias = Address | str | bytes
@@ -71,7 +72,10 @@ class Env:
 
         ret = self.execute_code(to_address, sender, value, calldata, is_modifying)
 
-        return ret
+        if ret.is_error:
+            raise ret.error
+
+        return ret.output
 
     # compatability alias for vyper env
     def message_call(self, to_address: _AddressType, data: bytes):
@@ -101,10 +105,10 @@ class Env:
         raw_args: bytes = None,
         sender: Optional[_AddressType] = None,
         value: int = 0,
-    ):
+    ) -> tuple[Address, ExecutionOutput]:
         sender = self._get_sender(sender)
 
-        contract_address = self.interpreter.execute(
+        contract_address, execution_output = self.interpreter.execute(
             sender=sender,
             to=b"",
             module=module,
@@ -112,7 +116,7 @@ class Env:
             calldata=raw_args,
         )
 
-        return contract_address
+        return contract_address, execution_output
 
     def execute_code(
         self,
@@ -121,14 +125,14 @@ class Env:
         value: int = 0,
         calldata: bytes = b"",
         is_modifying: bool = True,
-    ) -> Any:
+    ) -> ExecutionOutput:
         sender = self._get_sender(sender)
 
         to = Address(to_address)
 
         is_static = not is_modifying
 
-        ret = self.interpreter.execute(
+        execution_output = self.interpreter.execute(
             sender=sender,
             to=to,
             value=value,
@@ -136,4 +140,4 @@ class Env:
             is_static=is_static,
         )
 
-        return ret
+        return execution_output

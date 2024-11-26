@@ -79,10 +79,10 @@ class EVMCore:
 
         self.state.clear_transient_storage()
 
-        if output.is_error:
-            raise output.error
+        if is_deploy:
+            return create_address, output
 
-        return create_address if is_deploy else output.output
+        return output
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False

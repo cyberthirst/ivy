@@ -7,6 +7,7 @@ from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
 
+from ivy.context import ExecutionOutput
 from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
@@ -55,6 +56,7 @@ class VyperContract:
         self.compiler_data = compiler_data
         self.env = env or Env.get_singleton()
         self.filename = filename
+        self._execution_output = None
 
         # TODO collect all the exposed funcs in ivy to avoid introducing
         # a potential Vyper bug
@@ -88,12 +90,20 @@ class VyperContract:
             raise RuntimeError("Contract address is not set")
         return self._address
 
-    def marshal_to_python(self, computation, vyper_typ):
+    def handle_error(self, execution_output: ExecutionOutput):
+        raise execution_output.error
+
+    def marshal_to_python(self, execution_output: ExecutionOutput, vyper_typ):
+        self._execution_output = execution_output
+
+        if execution_output.is_error:
+            self.handle_error(execution_output)
+
         if vyper_typ is None:
             return None
 
         return_typ = calculate_type_for_external_return(vyper_typ)
-        ret = abi_decode(return_typ, computation, ivy_compat=False)
+        ret = abi_decode(return_typ, execution_output.output, ivy_compat=False)
 
         # unwrap the tuple if needed
         if not isinstance(vyper_typ, TupleT):
@@ -108,11 +118,16 @@ class VyperContract:
 
         module = self.compiler_data.annotated_vyper_module
 
-        address = self.env.deploy(
+        address, execution_output = self.env.deploy(
             module=module,
             raw_args=encoded_args,
             value=value,
         )
+
+        self._execution_output = execution_output
+
+        if execution_output.is_error:
+            self.handle_error(execution_output)
 
         return address
 
