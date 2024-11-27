@@ -1,5 +1,9 @@
+# this file is very closesly based on titanoboa: https://github.com/vyperlang/titanoboa/blob/f58c33cde50f6deaaeefff1136b18f92ef747c6b/boa/contracts/vyper/vyper_contract.py
+
+from typing import Any
 from functools import cached_property
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from vyper.codegen.core import calculate_type_for_external_return
 
@@ -12,6 +16,7 @@ from ivy.frontend.env import Env
 from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
 from ivy.types import Address
+from ivy.frontend.event import Event, RawEvent
 
 
 class BaseDeployer(ABC):
@@ -79,6 +84,8 @@ class VyperContract:
         for fn_name, fn in exposed_fns.items():
             setattr(self, fn_name, VyperFunction(fn, self))
 
+        self.env.register_contract(self._address, self)
+
     @cached_property
     def abi(self):
         return build_abi_output(self.compiler_data)
@@ -92,6 +99,69 @@ class VyperContract:
 
     def handle_error(self, execution_output: ExecutionOutput):
         raise execution_output.error
+
+    @cached_property
+    def event_for(self):
+        module_t = self.compiler_data.global_ctx
+        return {e.event_id: e for e in module_t.used_events}
+
+    def decode_log(self, e):
+        log_id, address, topics, data = e
+        assert self._address.canonical_address == address
+        event_hash = topics[0]
+        event_t = self.event_for[event_hash]
+
+        topic_typs = []
+        arg_typs = []
+        for is_topic, typ in zip(event_t.indexed, event_t.arguments.values()):
+            if not is_topic:
+                arg_typs.append(typ)
+            else:
+                topic_typs.append(typ)
+
+        decoded_topics = []
+        for typ, t in zip(topic_typs, topics[1:]):
+            # convert to bytes for abi decoder
+            encoded_topic = t.to_bytes(32, "big")
+            decoded_topics.append(
+                abi_decode(typ.abi_type.selector_name(), encoded_topic)
+            )
+
+        tuple_typ = TupleT(arg_typs)
+
+        args = abi_decode(tuple_typ.abi_type.selector_name(), data)
+
+        return Event(log_id, self._address, event_t, decoded_topics, args)
+
+    def _get_logs(self, execution_output: ExecutionOutput):
+        if execution_output is None:
+            return []
+
+        if execution_output.is_error:
+            return []
+
+        return execution_output.logs
+
+    def get_logs(self, execution_output=None):
+        if execution_output is None:
+            execution_output = self._execution_output
+
+        entries = self._get_logs(execution_output)
+
+        # py-evm log format is (log_id, topics, data)
+        # sort on log_id
+        entries = sorted(entries)
+
+        ret = []
+        for e in entries:
+            logger_address = e[1]
+            c = self.env.lookup_contract(logger_address)
+            if c is not None:
+                ret.append(c.decode_log(e))
+            else:
+                ret.append(RawEvent(e))
+
+        return ret
 
     def marshal_to_python(self, execution_output: ExecutionOutput, vyper_typ):
         self._execution_output = execution_output

@@ -28,6 +28,7 @@ class Env:
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
         self._accounts = []
+        self._contracts = {}
 
     def clear_state(self):
         # TODO should we just clear the EVM state instead of instantiating the itp?
@@ -57,6 +58,14 @@ class Env:
 
     def alias(self, address, name):
         self._aliases[Address(address).canonical_address] = name
+
+    def register_contract(self, address, obj):
+        self._contracts[address.canonical_address] = obj
+
+    def lookup_contract(self, address: _AddressType):
+        if address == b"":
+            return None
+        return self._contracts.get(Address(address).canonical_address)
 
     def raw_call(
         self,
