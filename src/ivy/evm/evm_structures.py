@@ -135,5 +135,5 @@ class Message:  # msg from execution specs
 @dataclass
 class Log:
     address: Address
-    topics: list[bytes, ...]
+    topics: list[bytes]
     data: bytes

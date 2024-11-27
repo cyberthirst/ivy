@@ -5,6 +5,7 @@ from vyper.compiler.input_bundle import FilesystemInputBundle
 
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads
+from ivy.frontend.vyper_contract import VyperContract
 
 
 @pytest.fixture(scope="module")
@@ -21,7 +22,7 @@ def env(clear_env):
 
 @pytest.fixture(scope="module")
 def get_contract(clear_env):
-    def fn(source_code, *args, **kwargs):
+    def fn(source_code, *args, **kwargs) -> VyperContract:
         return loads(source_code, *args, **kwargs)
 
     return fn
@@ -68,5 +69,13 @@ def make_input_bundle(tmp_path, make_file):
         for file_name, file_contents in sources_dict.items():
             make_file(file_name, file_contents)
         return FilesystemInputBundle([tmp_path])
+
+    return fn
+
+
+@pytest.fixture
+def get_logs():
+    def fn(contract: VyperContract):
+        return contract.get_logs(include_id=True)
 
     return fn

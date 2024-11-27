@@ -24,6 +24,7 @@ from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.analysis.base import VarInfo
 from vyper.exceptions import TypeMismatch
+from vyper.semantics.types.shortcuts import UINT256_T
 
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
@@ -77,6 +78,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
     @property
     def current_address(self):
+        if self.current_context.msg.to == b"":
+            return self.current_context.msg.create_address
+
         return self.current_context.msg.to
 
     @property
@@ -406,7 +410,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         return "is_minimal_proxy" in decl_node._metadata
 
     def _encode_log_topics(self, event: EventT, arg_nodes: list[tuple[Any, VyperType]]):
-        topics = [event.event_id]
+        event_id = abi_encode(UINT256_T, event.event_id)
+        topics = [event_id]
 
         for arg, typ in arg_nodes:
             if typ._is_prim_word:
@@ -441,7 +446,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         assert len(topics) <= 4, "too many topics"  # sanity check
 
         address = self.current_address
-        self.state.current_output.logs.append(Log(address, topics, encoded_data))
+        self.state.current_output.logs.append(
+            Log(address.canonical_address, topics, encoded_data)
+        )
 
     def generic_call_handler(
         self,

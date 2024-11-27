@@ -4,9 +4,9 @@ from typing import Any
 
 @dataclass
 class Event:
-    log_id: int  # internal py-evm log id, for ordering purposes
     address: str  # checksum address
     event_type: Any  # vyper.semantics.types.user.EventT
+    event: str  # for compatibility with vyper
     topics: list[Any]  # list of decoded topics
     args: list[Any]  # list of decoded args
 
