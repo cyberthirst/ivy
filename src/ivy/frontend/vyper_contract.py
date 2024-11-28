@@ -122,11 +122,14 @@ class VyperContract:
         for typ, t in zip(topic_typs, topics[1:]):
             # convert to bytes for abi decoder
             # encoded_topic = t.to_bytes(32, "big")
-            decoded_topics.append(abi_decode(typ, t))
+            if typ._is_prim_word:
+                decoded_topics.append(abi_decode(typ, t, ivy_compat=False))
+            else:
+                decoded_topics.append(t)
 
         tuple_typ = TupleT(arg_typs)
 
-        args = abi_decode(tuple_typ, data)
+        args = abi_decode(tuple_typ, data, ivy_compat=False)
 
         return Event(self._address, event_t, event_t.name, decoded_topics, args)
 

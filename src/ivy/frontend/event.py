@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -9,9 +9,19 @@ class Event:
     event: str  # for compatibility with vyper
     topics: list[Any]  # list of decoded topics
     args: list[Any]  # list of decoded args
+    args_obj: Any = field(default=None, init=False)
 
-    def __repr__(self):
-        t_i = 0
+    def __post_init__(self):
+        class Args:
+            pass
+
+        self.args_obj = Args()
+        for name, value in self.ordered_args():
+            setattr(self.args_obj, name, value)
+
+    def ordered_args(self):
+        # TODO what about raw_log?
+        t_i = 1  # skip the first topic which is the event_id
         a_i = 0
         b = []
         # align the evm topic + args lists with the way they appear in the source
@@ -26,6 +36,10 @@ class Event:
                 b.append((k, self.args[a_i]))
                 a_i += 1
 
+        return b
+
+    def __repr__(self):
+        b = self.ordered_args()
         args = ", ".join(f"{k}={v}" for k, v in b)
         return f"{self.event_type.name}({args})"
 

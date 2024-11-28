@@ -1,8 +1,6 @@
 from typing import Optional, Type, Any
 from contextlib import contextmanager
 
-from eth_utils import keccak
-
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability, Modifiability
 from vyper.semantics.types import (
@@ -25,6 +23,7 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.analysis.base import VarInfo
 from vyper.exceptions import TypeMismatch
 from vyper.semantics.types.shortcuts import UINT256_T
+from vyper.utils import keccak256
 
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
@@ -421,7 +420,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             if typ._is_prim_word:
                 value = abi_encode(typ, arg)
             elif isinstance(typ, _BytestringT):
-                value = keccak(arg)
+                if isinstance(arg, str):
+                    arg = arg.encode("utf-8")
+                value = keccak256(arg)
             else:
                 # this check is done in vyper's codegen so we need to replicate it
                 # TODO block at higher level
@@ -430,9 +431,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         return topics
 
-    def _log(self, event: EventT, args, typs):
+    def _log(self, event: EventT, args):
         topic_nodes = []
         data_nodes = []
+        typs = event.members.values()
         assert len(args) == len(event.indexed) and len(typs) == len(args)
         for arg, typ, is_indexed in zip(args, typs, event.indexed):
             if is_indexed:
@@ -483,8 +485,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 assert len(args) == 1
                 return args[0]
             elif isinstance(typedef, EventT):
-                _args = args if len(args) > 0 else kws
-                self._log(typedef, _args, typs)
+                _args = args if len(args) > 0 else kws.values()
+                self._log(typedef, _args)
                 return None
             else:
                 assert isinstance(typedef, StructT) and len(args) == 0
