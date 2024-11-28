@@ -108,6 +108,10 @@ class Env:
     def deployer(self):
         return self.eoa
 
+    @property
+    def timestamp(self):
+        return self.state.env.time
+
     def deploy(
         self,
         module: vy_ast.Module,

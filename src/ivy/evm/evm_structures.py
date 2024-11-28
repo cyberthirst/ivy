@@ -108,7 +108,7 @@ class Account:
 
 
 @dataclass
-class Environment:  # env from execution specs
+class Environment:
     caller: Any  # Address
     block_hashes: Any  # List[Hash32]
     origin: Any  # Address

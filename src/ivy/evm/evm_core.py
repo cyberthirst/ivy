@@ -24,8 +24,6 @@ class EVMCore:
         self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
-        # TODO move this to state
-        self.environment: Optional[Environment] = None
 
     def execute_tx(
         self,
@@ -60,7 +58,7 @@ class EVMCore:
             is_static=is_static,
         )
 
-        self.env = Environment(
+        self.state.env = Environment(
             caller=sender,
             block_hashes=[],
             origin=to,

@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Optional, Protocol
 
-from ivy.evm.evm_structures import Account, ContractData
+from ivy.evm.evm_structures import Account, ContractData, Environment
 from ivy.types import Address
 from ivy.context import ExecutionContext, ExecutionOutput
 
@@ -11,6 +11,7 @@ class EVMState:
         self.state = defaultdict(lambda: Account(0, 0, {}, {}, None))
         self.execution_contexts: list[ExecutionContext] = []
         self.accessed_accounts = set()
+        self._env = None
 
     def __getitem__(self, key):
         return self.state[key]
@@ -82,6 +83,10 @@ class EVMState:
     @property
     def current_output(self) -> ExecutionOutput:
         return self.current_context.execution_output
+
+    @property
+    def env(self):
+        return self._env
 
 
 class StateAccess(Protocol):
@@ -165,3 +170,11 @@ class StateAccessor(StateAccess):
     @property
     def current_output(self) -> ExecutionOutput:
         return self._state.current_output
+
+    @property
+    def env(self) -> Environment:
+        return self._state.env
+
+    @env.setter
+    def env(self, value):
+        self._state._env = value

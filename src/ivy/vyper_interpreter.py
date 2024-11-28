@@ -73,6 +73,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         return self.current_context.globals
 
     @property
+    def env(self):
+        return self.evm.state.env
+
+    @property
     def msg(self):
         return self.current_context.msg
 
