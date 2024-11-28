@@ -1,3 +1,5 @@
+from typing import Optional
+
 import pytest
 from contextlib import contextmanager
 
@@ -75,7 +77,20 @@ def make_input_bundle(tmp_path, make_file):
 
 @pytest.fixture
 def get_logs():
-    def fn(contract: VyperContract):
-        return contract.get_logs(include_id=True)
+    def fn(
+        contract: VyperContract,
+        event_name: Optional[str] = None,
+        vyper_compat: bool = True,
+    ):
+        logs = contract.get_logs(include_id=True)
+
+        if vyper_compat:
+            for log in logs:
+                log.args = log.args_obj
+
+        if event_name:
+            return [log for log in logs if log.event == event_name]
+
+        return logs
 
     return fn

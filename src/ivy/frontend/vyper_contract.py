@@ -119,9 +119,8 @@ class VyperContract:
                 topic_typs.append(typ)
 
         decoded_topics = [] if not include_id else [e.topics[0]]
+
         for typ, t in zip(topic_typs, topics[1:]):
-            # convert to bytes for abi decoder
-            # encoded_topic = t.to_bytes(32, "big")
             if typ._is_prim_word:
                 decoded_topics.append(abi_decode(typ, t, ivy_compat=False))
             else:

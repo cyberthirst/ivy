@@ -2069,3 +2069,18 @@ def a() -> uint256:
     c = get_contract(src)
 
     assert c.foo(target) == 0
+
+
+def test_log(get_contract):
+    src = """
+event Foo:
+    a: uint256
+    
+@external
+def foo():
+    log Foo(1)
+    """
+
+    c = get_contract(src)
+
+    c.foo()
