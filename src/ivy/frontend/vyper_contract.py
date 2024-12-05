@@ -1,4 +1,5 @@
 # this file is very closesly based on titanoboa: https://github.com/vyperlang/titanoboa/blob/f58c33cde50f6deaaeefff1136b18f92ef747c6b/boa/contracts/vyper/vyper_contract.py
+from typing import Any
 from dataclasses import astuple
 from functools import cached_property
 from abc import ABC, abstractmethod
@@ -8,6 +9,7 @@ from vyper.codegen.core import calculate_type_for_external_return
 from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
 from vyper.semantics.types import TupleT
+from vyper.semantics.data_locations import DataLocation
 
 from ivy.context import ExecutionOutput
 from ivy.frontend.env import Env
@@ -157,6 +159,17 @@ class VyperContract:
                 ret.append(RawEvent(e))
 
         return ret
+
+    def storage_dump(self) -> dict[str, Any]:
+        # TODO: add a param to access self._execution_output.touched_accounts
+        # and also dump their storage
+        acc = self.env.get_account(self._address)
+        storage = acc.storage
+        gvars = acc.contract_data.global_vars
+        res = {}
+        for k, v in storage.items():
+            res[gvars.adrr_to_name[(k, DataLocation.STORAGE)]] = v
+        return res
 
     def marshal_to_python(self, execution_output: ExecutionOutput, vyper_typ):
         self._execution_output = execution_output

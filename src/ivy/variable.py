@@ -53,17 +53,26 @@ class GlobalVariables:
     def __init__(self):
         self.variables = {}
         self.reentrant_key_address = None
+        self.adrr_to_name = {}
 
     def _get_address(self, var: VarInfo):
         return (var.position, var.location)
 
-    def new_variable(self, var: VarInfo, get_location: callable, initial_value=None):
+    def new_variable(
+        self,
+        var: VarInfo,
+        get_location: callable,
+        initial_value=None,
+        name=Optional[str],
+    ):
         address = self._get_address(var)
         assert address not in self.variables
         variable = GlobalVariable(
             var.position, var.typ, get_location, var, initial_value
         )
         self.variables[address] = variable
+        if name:
+            self.adrr_to_name[address] = name
 
     def __setitem__(self, key: VarInfo, value):
         address = self._get_address(key)

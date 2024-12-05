@@ -96,6 +96,8 @@ class StateAccess(Protocol):
 
     def get_nonce(self, address: Address) -> int: ...
 
+    def get_account(self, address: Address) -> Account: ...
+
     def increment_nonce(self, address: Address): ...
 
     def get_balance(self, address: Address) -> int: ...
@@ -104,7 +106,7 @@ class StateAccess(Protocol):
 
     def get_code(self, address: Address) -> Optional[ContractData]: ...
 
-    def get_storage(self, address: Address, slot: int) -> int: ...
+    def get_storage(self, address: Address) -> int: ...
 
     def add_accessed_account(self, acc): ...
 
@@ -144,6 +146,9 @@ class StateAccessor(StateAccess):
 
     def set_balance(self, address: Address, value: int):
         self._state.set_balance(address, value)
+
+    def get_account(self, address: Address) -> Account:
+        return self._state.get_account(address)
 
     def get_code(self, address):
         return self._state.get_code(address)

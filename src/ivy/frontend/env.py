@@ -96,6 +96,9 @@ class Env:
     def set_balance(self, address: _AddressType, value: int):
         self.state.set_balance(Address(address), value)
 
+    def get_account(self, address: _AddressType):
+        return self.state.get_account(Address(address))
+
     @property
     def accounts(self):
         if not self._accounts:

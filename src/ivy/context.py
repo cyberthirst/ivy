@@ -27,6 +27,10 @@ class FunctionContext:
         assert key not in self.scopes[-1]
         self.scopes[-1][key] = value
 
+    # TODO should we optimize this? we have guarantee of unique names
+    # so we could use one global dict (however, when popping a scope
+    # we would have to iterate over its keys to delete them from
+    # the dict
     def __contains__(self, item):
         for scope in reversed(self.scopes):
             if item in scope:

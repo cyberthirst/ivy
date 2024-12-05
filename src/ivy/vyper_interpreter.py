@@ -116,13 +116,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         for var in globals:
             get_location = self.storage_getter_from_varinfo(var)
-
+            name = var.decl_node.target.id
             if var.is_constant:
                 value = self.visit(var.decl_node.value)  # the value of the constant
-                self.globals.new_variable(var, get_location, value)
+                self.globals.new_variable(
+                    var, get_location, initial_value=value, name=name
+                )
                 continue
 
-            self.globals.new_variable(var, get_location)
+            self.globals.new_variable(var, get_location, name=name)
 
         self.globals.allocate_reentrant_key(
             nonreentrant, lambda: self.current_context.transient

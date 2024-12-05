@@ -2084,3 +2084,24 @@ def foo():
     c = get_contract(src)
 
     c.foo()
+
+
+def test_storage_dump(get_contract):
+    src = """
+i: uint256
+k: String[32]
+j: Bytes[10]
+
+@external
+def foo():
+    self.i = 1
+    self.k = "hello"
+    self.j = b"hello"
+    """
+
+    c = get_contract(src)
+    c.foo()
+    dump = c.storage_dump()
+    assert dump["i"] == 1
+    assert dump["k"] == "hello"
+    assert dump["j"] == b"hello"
