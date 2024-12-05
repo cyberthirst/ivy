@@ -17,6 +17,7 @@ from ivy.abi import abi_decode, abi_encode
 from ivy.utils import compute_call_abi_data
 from ivy.types import Address
 from ivy.frontend.event import Event, RawEvent
+from ivy.frontend.decoder_utils import decode_ivy_object, typ_needs_decode
 from ivy.evm.evm_structures import Log
 
 
@@ -168,6 +169,9 @@ class VyperContract:
         gvars = acc.contract_data.global_vars
         res = {}
         for k, v in storage.items():
+            typ = gvars.variables[k, DataLocation.STORAGE].varinfo.typ
+            if typ_needs_decode(typ):
+                v = decode_ivy_object(v, typ)
             res[gvars.adrr_to_name[(k, DataLocation.STORAGE)]] = v
         return res
 

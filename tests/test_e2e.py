@@ -2086,22 +2086,60 @@ def foo():
     c.foo()
 
 
+def test_encode_static_array(get_contract):
+    src = """
+
+a: uint256[3]
+
+@external
+def foo() -> uint256[3]:
+    self.a[0] = 1
+    self.a[1] = 2
+    return self.a
+    """
+
+    c = get_contract(src)
+
+    res = c.foo()
+
+    assert res == [1, 2, 0]
+
+
 def test_storage_dump(get_contract):
     src = """
 i: uint256
 k: String[32]
 j: Bytes[10]
+s: uint256[3]
+d: DynArray[DynArray[uint256, 3], 3]
+h: HashMap[uint256, String[32]]
+
+struct S:
+    a: uint256
+    b: DynArray[uint256, 3]
+    
+v: S
 
 @external
 def foo():
     self.i = 1
     self.k = "hello"
     self.j = b"hello"
+    self.s[0] = 1
+    self.s[1] = 2
+    self.d = [[1], [2, 3, 4], [5, 6]]
+    for i: uint8 in range(3):
+        self.h[convert(i, uint256)] = uint2str(i)
+    self.v = S(a=1, b=self.d[1])
     """
 
     c = get_contract(src)
     c.foo()
     dump = c.storage_dump()
+    print(dump)
     assert dump["i"] == 1
     assert dump["k"] == "hello"
     assert dump["j"] == b"hello"
+    assert dump["s"] == [1, 2, 0]
+    assert dump["d"] == [[1], [2, 3, 4], [5, 6]]
+    assert dump["h"] == {0: "0", 1: "1", 2: "2"}

@@ -339,6 +339,18 @@ class Map(_Container):
         self._journal(key, loc)
         self._values[key] = value
 
+    def __len__(self):
+        return len(self._values)
+
+    def __iter__(self):
+        return iter(self._values)
+
+    def keys(self):
+        return self._values.keys()
+
+    def items(self):
+        return self._values.items()
+
 
 class Struct(_Container):
     def __init__(
