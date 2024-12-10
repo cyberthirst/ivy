@@ -3,9 +3,9 @@ name = "ivy"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.10"
 dependencies = [
-    "vyper",
+    "vyper @ git+https://github.com/vyperlang/vyper.git@v0.4.1b2",
     "ruff>=0.6.4",
     "pre-commit>=3.8.0",
     "pytest>=8.3.2",
@@ -22,5 +22,5 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv.sources]
-vyper = { git = "https://github.com/vyperlang/vyper" }
+[tool.hatch.metadata]
+allow-direct-references = true

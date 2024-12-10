@@ -52,7 +52,7 @@ def _strict_slice(payload, start, length):
 
 
 def _read_int(payload, ofst):
-    return int.from_bytes(_strict_slice(payload, ofst, 32))
+    return int.from_bytes(_strict_slice(payload, ofst, 32), byteorder="big")
 
 
 # TODO maybe split into 2 decoders - one which will decode into ivy

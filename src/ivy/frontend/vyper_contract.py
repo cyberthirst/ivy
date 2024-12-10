@@ -110,7 +110,7 @@ class VyperContract:
     def decode_log(self, e: Log, include_id=False):
         address, topics, data = astuple(e)
         assert self._address.canonical_address == address
-        event_hash = int.from_bytes(topics[0])
+        event_hash = int.from_bytes(topics[0], byteorder="big")
         event_t = self.event_for[event_hash]
 
         topic_typs = []
