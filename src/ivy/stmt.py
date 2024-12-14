@@ -2,8 +2,12 @@ from abc import abstractmethod
 
 from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
+from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.types import VyperType
+from vyper.utils import method_id
 
+from ivy.abi import abi_encode
+from ivy.exceptions import Assert, Raise, Invalid, Revert
 from ivy.visitor import BaseVisitor
 
 
@@ -48,22 +52,39 @@ class StmtVisitor(BaseVisitor):
             return self.visit_body(node.orelse)
         return None
 
+    def _revert_with_msg(self, msg_node, is_assert=False):
+        msg_string = self.visit(msg_node)
+
+        assert isinstance(msg_string, str)
+        if msg_string == "UNREACHABLE":
+            raise Invalid()
+
+        # encode the msg and raise Revert
+        error_method_id = method_id("Error(string)")
+        typ = msg_node._metadata["type"]
+        wrapped_typ = calculate_type_for_external_return(typ)
+        wrapped_msg = (msg_string, )
+
+        encoded = abi_encode(wrapped_typ, wrapped_msg)
+
+        to_raise = Assert if is_assert else Raise
+
+        raise  to_raise(message=msg_string, data=error_method_id + encoded)
+
     def visit_Assert(self, node: ast.Assert):
         condition = self.visit(node.test)
         if not condition:
             if node.msg:
-                msg = self.visit(node.msg)
-                raise AssertionError(msg)
+                self._revert_with_msg(node.msg, is_assert=True)
             else:
-                raise AssertionError()
+                raise Assert()
         return None
 
     def visit_Raise(self, node: ast.Raise):
         if node.exc:
-            exc = self.visit(node.exc)
-            raise exc
+            self._revert_with_msg(node.exc)
         else:
-            raise Exception("Generic raise")
+            raise Raise()
 
     def visit_For(self, node: ast.For):
         iterable = self.visit(node.iter)

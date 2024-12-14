@@ -11,9 +11,31 @@ class GasReference(EVMException):
         super().__init__(message)
 
 
-class AccessViolation(Exception):
+class VyperException(Exception):
     pass
 
 
-class FunctionNotFound(Exception):
+class Revert(VyperException):
+    def __init__(self, message="Revert", data=b""):
+        super().__init__(message)
+        self.data = data
+
+
+class Invalid(VyperException):
+    pass
+
+
+class AccessViolation(Revert):
+    pass
+
+
+class FunctionNotFound(Revert):
+    pass
+
+
+class Raise(Revert):
+    pass
+
+
+class Assert(Revert):
     pass

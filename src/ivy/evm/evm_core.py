@@ -12,7 +12,7 @@ from ivy.evm.evm_structures import (
 from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
-from ivy.exceptions import EVMException
+from ivy.exceptions import EVMException, Revert
 from ivy.utils import compute_contract_address
 from ivy.context import ExecutionContext, ExecutionOutput
 
@@ -114,10 +114,14 @@ class EVMCore:
 
             new_account.contract_data = new_contract_code
 
+        # TODO can we merge the exception handler from
+        # process_message and process_create_message?
         except Exception as e:
             # TODO rollback the journal
             self.state.current_output.error = e
             del self.state[message.create_address]
+            if isinstance(e, Revert):
+                self.state.current_output.output = e.data
 
         finally:
             ret = self.state.current_output
@@ -141,6 +145,8 @@ class EVMCore:
 
         except Exception as e:
             self.state.current_output.error = e
+            if isinstance(e, Revert):
+                self.state.current_output.output = e.data
 
         finally:
             ret = self.state.current_output

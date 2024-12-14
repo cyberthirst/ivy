@@ -1,7 +1,7 @@
 import pytest
 
 from ivy.frontend.loader import loads
-from ivy.exceptions import StaticCallViolation
+from ivy.exceptions import StaticCallViolation, Assert, Raise
 
 
 def test_if_control_flow():
@@ -2143,3 +2143,90 @@ def foo():
     assert dump["s"] == [1, 2, 0]
     assert dump["d"] == [[1], [2, 3, 4], [5, 6]]
     assert dump["h"] == {0: "0", 1: "1", 2: "2"}
+
+
+def test_elif_condition(get_contract):
+    src = """
+@external
+def foo(a: uint256) -> uint256:
+    if a == 10:
+        return 1
+    elif a == 11:
+        return 2
+    elif a == 12:
+        return 3
+    else:
+        return 4
+    """
+
+    c = get_contract(src)
+
+    assert c.foo(10) == 1
+    assert c.foo(11) == 2
+    assert c.foo(12) == 3
+    assert c.foo(66) == 4
+
+
+def test_assert_passes(get_contract):
+    src = """
+@external
+def foo():
+    assert True
+    """
+
+    c = get_contract(src)
+    c.foo()
+
+
+def test_assert_passes2(get_contract):
+    src = """
+@external
+def foo(a: uint256):
+    assert True and a > 10
+    assert a == 25 or (True and a == 29)
+    """
+
+    c = get_contract(src)
+    c.foo(29)
+    c.foo(25)
+
+
+def test_assert_fails(get_contract):
+    src = """
+@external
+def foo(a: uint256):
+    assert True and a > 10
+    assert a == 25 or (True and a == 29)
+    """
+
+    c = get_contract(src)
+    for i in [11, 26, 30]:
+        with pytest.raises(Assert):
+            c.foo(i)
+
+
+def test_assert_fails_with_message(get_contract):
+    src = """
+@external
+def foo(a: uint256):
+    assert True and a > 10
+    assert a == 25 or (True and a == 29), "assertion failed"
+    """
+
+    c = get_contract(src)
+    for i in [11, 26, 30]:
+        with pytest.raises(Assert) as e:
+            c.foo(i)
+        assert str(e.value) == "assertion failed"
+
+def test_raise_raises(get_contract):
+    src = """
+@external
+def foo():
+    raise "you shall not pass"
+    """
+
+    c = get_contract(src)
+    with pytest.raises(Raise) as e:
+        c.foo()
+    assert str(e.value) == "you shall not pass"
