@@ -21,7 +21,7 @@ from ivy.abi import abi_decode, abi_encode
 import ivy.builtins.create_utils as create_utils
 from ivy.context import ExecutionOutput
 from ivy.evaluator import VyperEvaluator
-from ivy.exceptions import GasReference
+from ivy.exceptions import GasReference, Revert
 from ivy.types import Address, VyperDecimal
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
@@ -354,3 +354,8 @@ def builtin_create_minimal_proxy_to(
         revert_on_failure=revert_on_failure,
         salt=salt,
     )
+
+
+def builtin_raw_revert(x):
+    assert isinstance(x, bytes)
+    raise Revert(data=x)

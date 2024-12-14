@@ -23,6 +23,7 @@ from ivy.builtins.builtins import (
     builtin_create_copy_of,
     builtin_create_from_blueprint,
     builtin_create_minimal_proxy_to,
+    builtin_raw_revert,
 )
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
@@ -87,6 +88,7 @@ class BuiltinRegistry:
             "_abi_encode": PureBuiltin(builtin_abi_encode),
             "method_id": PureBuiltin(builtin_method_id),
             "print": PureBuiltin(builtin_print),
+            "raw_revert": PureBuiltin(builtin_raw_revert),
             # State builtins
             # EVM builtins
             "raw_call": EVMBuiltin(self.evm, builtin_raw_call),

@@ -4,7 +4,7 @@ from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
 from ivy.evaluator import VyperEvaluator
-from ivy.evm.evm_structures import Account, Message, ContractData
+from ivy.evm.evm_structures import Account, Message
 from ivy.types import Address
 
 

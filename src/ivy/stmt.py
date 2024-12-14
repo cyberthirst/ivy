@@ -7,7 +7,7 @@ from vyper.semantics.types import VyperType
 from vyper.utils import method_id
 
 from ivy.abi import abi_encode
-from ivy.exceptions import Assert, Raise, Invalid, Revert
+from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
 
 
@@ -63,13 +63,13 @@ class StmtVisitor(BaseVisitor):
         error_method_id = method_id("Error(string)")
         typ = msg_node._metadata["type"]
         wrapped_typ = calculate_type_for_external_return(typ)
-        wrapped_msg = (msg_string, )
+        wrapped_msg = (msg_string,)
 
         encoded = abi_encode(wrapped_typ, wrapped_msg)
 
         to_raise = Assert if is_assert else Raise
 
-        raise  to_raise(message=msg_string, data=error_method_id + encoded)
+        raise to_raise(message=msg_string, data=error_method_id + encoded)
 
     def visit_Assert(self, node: ast.Assert):
         condition = self.visit(node.test)

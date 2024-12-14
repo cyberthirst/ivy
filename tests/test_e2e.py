@@ -1,7 +1,8 @@
 import pytest
 
 from ivy.frontend.loader import loads
-from ivy.exceptions import StaticCallViolation, Assert, Raise
+from ivy.exceptions import StaticCallViolation, Assert, Raise, Revert
+from vyper.utils import method_id
 
 
 def test_if_control_flow():
@@ -2219,6 +2220,7 @@ def foo(a: uint256):
             c.foo(i)
         assert str(e.value) == "assertion failed"
 
+
 def test_raise_raises(get_contract):
     src = """
 @external
@@ -2230,3 +2232,19 @@ def foo():
     with pytest.raises(Raise) as e:
         c.foo()
     assert str(e.value) == "you shall not pass"
+
+
+def test_raw_revert(get_contract):
+    reverty_code = """
+@external
+def foo():
+    data: Bytes[4] = method_id("NoFives()")
+    raw_revert(data)
+    """
+
+    revert_bytes = method_id("NoFives()")
+
+    with pytest.raises(Revert) as e:
+        get_contract(reverty_code).foo()
+
+    assert e.value.data == revert_bytes

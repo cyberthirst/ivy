@@ -208,7 +208,7 @@ class EVMCore:
         is_runtime_copy: Optional[bool] = False,
     ) -> tuple[ExecutionOutput, Address]:
         if salt is not None:
-            raise NotImplemented(
+            raise NotImplementedError(
                 "Create2 depends on bytecode which isn't currently supported"
             )
 
