@@ -276,7 +276,7 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
         if isinstance(typ, BytesT):
             return b""
         if isinstance(typ, BytesM_T):
-            return b"\x00" * 32
+            return b"\x00" * typ.length
         if isinstance(typ, StringT):
             return ""
         if isinstance(typ, StructT):

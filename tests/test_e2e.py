@@ -2114,6 +2114,7 @@ j: Bytes[10]
 s: uint256[3]
 d: DynArray[DynArray[uint256, 3], 3]
 h: HashMap[uint256, String[32]]
+bm: bytes2
 
 struct S:
     a: uint256
@@ -2144,6 +2145,7 @@ def foo():
     assert dump["s"] == [1, 2, 0]
     assert dump["d"] == [[1], [2, 3, 4], [5, 6]]
     assert dump["h"] == {0: "0", 1: "1", 2: "2"}
+    assert dump["bm"] == b"\x00\x00"
 
 
 def test_elif_condition(get_contract):
