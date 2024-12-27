@@ -544,7 +544,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise output.error
 
         if len(returndata) == 0 and "default_return_value" in kwargs:
-            return kwargs["default_return_value"]
+            to_eval = kwargs["default_return_value"]
+            return self.deep_copy_visit(to_eval)
 
         typ = func_t.return_type
 

@@ -193,5 +193,12 @@ class ExprVisitor(BaseVisitor):
             else:
                 args += (self.deep_copy_visit(arg),)
                 typs += (typ,)
-        kws = {kw.arg: self.deep_copy_visit(kw.value) for kw in node.keywords}
+        kws = {}
+        for kw in node.keywords:
+            if kw.arg == "default_return_value":
+                # defer evaluation of default_return_value until the call is made
+                # and evaluate if the len(returndata) == 0
+                kws[kw.arg] = kw.value
+                continue
+            kws[kw.arg] = self.deep_copy_visit(kw.value)
         return self.generic_call_handler(node, args, kws, typs, target, is_static)
