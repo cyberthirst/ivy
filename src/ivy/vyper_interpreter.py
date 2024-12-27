@@ -69,7 +69,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
     @property
     def globals(self):
-        return self.current_context.globals
+        return self.current_context.global_vars
 
     @property
     def env(self):
