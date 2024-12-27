@@ -36,6 +36,7 @@ class Env:
         self.state = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
+        self._contracts = {}
 
     @classmethod
     def get_singleton(cls):

@@ -43,6 +43,7 @@ from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
 from ivy.evm.evm_structures import Log
+from ivy.exceptions import Revert
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
@@ -518,6 +519,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def external_function_call(
         self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address
     ):
+        skip_contract_check = kwargs.get("skip_contract_check", False)
+        if not skip_contract_check:
+            code = self.state.get_code(target)
+            if code is None:
+                raise Revert(message=f"Account at {target} does not have code")
+
         num_kwargs = len(args) - func_t.n_positional_args
 
         selector, calldata_args_t = compute_call_abi_data(func_t, num_kwargs)

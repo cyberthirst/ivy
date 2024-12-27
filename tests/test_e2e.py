@@ -2115,6 +2115,7 @@ s: uint256[3]
 d: DynArray[DynArray[uint256, 3], 3]
 h: HashMap[uint256, String[32]]
 bm: bytes2
+bytesm_list: bytes1[1]
 
 struct S:
     a: uint256
@@ -2146,6 +2147,7 @@ def foo():
     assert dump["d"] == [[1], [2, 3, 4], [5, 6]]
     assert dump["h"] == {0: "0", 1: "1", 2: "2"}
     assert dump["bm"] == b"\x00\x00"
+    assert dump["bytesm_list"] == [b"\x00"]
 
 
 def test_elif_condition(get_contract):
@@ -2250,3 +2252,79 @@ def foo():
         get_contract(reverty_code).foo()
 
     assert e.value.data == revert_bytes
+
+
+# raw_call into an account without code shouldn't revert
+# as there's no code to revert
+def test_raw_call_into_acc_without_code(get_contract):
+    src = """
+@external
+def foo() -> bool:
+    success: bool = False
+    response: Bytes[32] = empty(Bytes[32])
+    success, response = raw_call(
+    empty(address),
+    method_id("foo()"),
+    max_outsize=32,
+    revert_on_failure=False
+    )
+    return success
+    """
+
+    c = get_contract(src)
+    assert c.foo() == True
+
+
+def test_raw_call_into_acc_without_code2(get_contract):
+    src = """
+@external
+def foo() -> Bytes[32]:
+    response: Bytes[32] = raw_call(
+        empty(address),
+        method_id("foo()"),
+        max_outsize=32
+    )
+    return response
+    """
+
+    c = get_contract(src)
+    assert c.foo() == b""
+
+
+# don't use skip_contract_check and thus force revert
+def test_extcall_into_acc_without_code(get_contract):
+    src = """
+interface Foo:
+    def foo(): nonpayable
+    
+@external
+def foo() -> bool:
+    zero_addess: address = empty(address)
+    extcall Foo(zero_addess).foo()
+    return True
+    """
+
+    c = get_contract(src)
+
+    with pytest.raises(Revert) as e:
+        c.foo()
+
+    assert str(e.value) == f"Account at {"0x" + 20 * "00"} does not have code"
+
+
+# use skip_contract_check and thus don't force
+def test_extcall_into_acc_without_code2(get_contract):
+    src = """
+interface Foo:
+    def foo(): nonpayable
+
+@external
+def foo() -> bool:
+    zero_addess: address = empty(address)
+    extcall Foo(zero_addess).foo(skip_contract_check=True)
+    return True
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == True
