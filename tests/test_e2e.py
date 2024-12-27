@@ -2328,3 +2328,42 @@ def foo() -> bool:
     c = get_contract(src)
 
     assert c.foo() == True
+
+
+IDENTITY_ADDRESS = "0x" + 19 * "00" + "04"
+
+
+def test_identity_precompile(get_contract):
+    src = f"""
+@external
+def foo(input: Bytes[32]) -> Bytes[32]:
+    output: Bytes[32] = raw_call(
+        {IDENTITY_ADDRESS},
+        input,
+        max_outsize=32
+    )
+    return output
+    """
+
+    c = get_contract(src)
+
+    input_data = b"Hello, World!"
+    assert c.foo(input_data) == b"Hello, World!"
+
+
+def test_identity_precompile2(get_contract):
+    src = f"""
+@external
+def foo(input: Bytes[64]) -> Bytes[32]:
+    output: Bytes[32] = raw_call(
+        {IDENTITY_ADDRESS},
+        input,
+        max_outsize=32
+    )
+    return output
+    """
+
+    c = get_contract(src)
+
+    input_data = (64 * "a").encode("utf8")
+    assert c.foo(input_data) == input_data[:32]
