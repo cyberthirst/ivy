@@ -19,7 +19,10 @@ from vyper.semantics.types.function import (
     ContractFunctionT,
 )
 from vyper.builtins._signatures import BuiltinFunctionT
-from vyper.codegen.core import calculate_type_for_external_return
+from vyper.codegen.core import (
+    calculate_type_for_external_return,
+    needs_external_call_wrap,
+)
 from vyper.semantics.analysis.base import VarInfo
 from vyper.exceptions import TypeMismatch
 from vyper.semantics.types.shortcuts import UINT256_T
@@ -181,7 +184,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         min_size = calldata_args_t.abi_type.static_size()
         self._min_calldata_size_check(min_size)
         # msg.data doesn't contain bytecode in ivy's case
-        args = abi_decode(calldata_args_t, self.msg.data)
+        args = abi_decode(calldata_args_t, self.msg.data, from_calldata=True)
 
         return self._execute_function(func_t, args)
 
@@ -211,7 +214,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             self._min_calldata_size_check(entry_point.calldata_min_size)
 
             func_t = entry_point.function
-            args = abi_decode(entry_point.calldata_args_t, self.msg.data[4:])
+            args = abi_decode(
+                entry_point.calldata_args_t, self.msg.data[4:], from_calldata=True
+            )
 
         except FunctionNotFound as e:
             if self.current_context.contract.fallback:
@@ -549,6 +554,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         typ = func_t.return_type
 
+        # TODO maybe this return is premature and we should validate the return size
         if typ is None:
             return None
 
@@ -560,8 +566,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         actual_output_size = min(max_return_size, len(returndata))
         to_decode = returndata[:actual_output_size]
 
-        # NOTE: abi_decode implicitly checks minimum return size
+        # NOTE: abi_decode validates return size
         decoded = abi_decode(typ, to_decode)
+        if not needs_external_call_wrap(func_t.return_type):
+            return decoded
         assert len(decoded) == 1
         # unwrap the tuple
         return decoded[0]
