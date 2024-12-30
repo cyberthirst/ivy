@@ -15,6 +15,7 @@ from ivy.types import Address
 from ivy.exceptions import EVMException, Revert
 from ivy.utils import compute_contract_address
 from ivy.context import ExecutionContext, ExecutionOutput
+from ivy.evm.precompiles import PRECOMPILE_REGISTRY
 
 
 class EVMCore:
@@ -130,6 +131,11 @@ class EVMCore:
         self.journal.finalize_call(ret.is_error)
         return ret
 
+    def _execute_precompile(self, message: Message):
+        to = message.to
+        data = message.data
+        self.state.current_output.output = PRECOMPILE_REGISTRY[to](data)
+
     def process_message(self, message: Message) -> ExecutionOutput:
         self.journal.begin_call()
         account = self.state[message.to]
@@ -140,7 +146,10 @@ class EVMCore:
         try:
             self._handle_value_transfer(message)
 
-            if message.code:
+            if message.to in PRECOMPILE_REGISTRY:
+                self._execute_precompile(message)
+
+            elif message.code:
                 self.callbacks.dispatch()
 
         except Exception as e:

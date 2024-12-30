@@ -94,10 +94,10 @@ class ContractData:
 
 @dataclass
 class Account:
-    nonce: Any
-    balance: Any
-    storage: Any
-    transient: Any
+    nonce: int
+    balance: int
+    storage: dict[int, Any]
+    transient: dict[int, Any]
     contract_data: Optional[ContractData]
 
     def __hash__(self):

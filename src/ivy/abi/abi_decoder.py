@@ -58,12 +58,20 @@ def _read_int(payload, ofst):
 # TODO maybe split into 2 decoders - one which will decode into ivy
 # one which will decode into vyper
 # vyper abi_decode spec implementation
-def abi_decode(typ: VyperType, payload: bytes, ivy_compat: bool = True):
+def abi_decode(
+    typ: VyperType, payload: bytes, ivy_compat: bool = True, from_calldata: bool = False
+):
     abi_t = typ.abi_type
 
     lo, hi = abi_t.static_size(), abi_t.size_bound()
-    if not (lo <= len(payload) <= hi):
-        raise DecodeError(f"bad payload size {lo}, {len(payload)}, {hi}")
+
+    payload_len = len(payload)
+    if from_calldata:
+        if not (lo <= payload_len):
+            raise DecodeError(f"bad calldata size {lo}>{payload_len}")
+    else:
+        if not (lo <= payload_len <= hi):
+            raise DecodeError(f"bad payload size {lo}, {payload_len}, {hi}")
 
     return _decode_r(abi_t, typ, 0, payload, ivy_compat)
 

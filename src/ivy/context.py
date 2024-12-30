@@ -63,11 +63,10 @@ class ExecutionContext:
         # set storage-related attributes based on the target account
         self.storage = acc.storage
         self.transient = acc.transient
-        # set code-related attributes based on message.code
-        self.globals = msg.code.global_vars
-        self.immutables = msg.code.immutables
-        self.constants = msg.code.constants
-        self.entry_points = msg.code.entry_points
+        # set code-related attributes based on whether message.code is None
+        code_attrs = ["global_vars", "immutables", "constants", "entry_points"]
+        for attr in code_attrs:
+            setattr(self, attr, getattr(msg.code, attr) if msg.code else None)
         self.execution_output = ExecutionOutput()
         # return_data is not part of the ExecutionOutput, it's filled from the output
         # of child evm calls

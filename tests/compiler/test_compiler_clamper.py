@@ -448,10 +448,10 @@ def foo(a: uint256, b: DynArray[int128, 5], c: uint256) -> DynArray[int128, 5]:
     assert c.foo(2**127, d, 2**127) == d
 
 
-# TODO: selector not found
 @pytest.mark.parametrize("bad_value", [2**127, -(2**127) - 1, 2**255 - 1, -(2**255)])
 @pytest.mark.parametrize("idx", range(5))
-def test_int128_sarray_clamper_failing(bad_value, idx):
+def test_int128_array_clamper_failing(env, tx_failed, get_contract, bad_value, idx):
+    # ensure the invalid value is detected at all locations in the array
     code = """
 @external
 def foo(b: int128[5]) -> int128[5]:
@@ -460,13 +460,10 @@ def foo(b: int128[5]) -> int128[5]:
 
     values = [0] * 5
     values[idx] = bad_value
-    signature = "foo(int128[5])"
 
-    c = loads(code)
-
-    data = _make_dynarray_data(32, 5, values)
-    with pytest.raises(DecodeError):
-        _make_invalid_dynarray_tx(c.address, signature, data)
+    c = get_contract(code)
+    with tx_failed(exception=DecodeError):
+        _make_tx(c.address, "foo(int128[5])", values)
 
 
 @pytest.mark.parametrize("value", [0, 1, -1, 2**127 - 1, -(2**127)])
