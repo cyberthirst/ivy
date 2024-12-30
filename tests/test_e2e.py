@@ -1,5 +1,6 @@
 import pytest
 
+from conftest import get_contract
 from ivy.frontend.loader import loads
 from ivy.exceptions import StaticCallViolation, Assert, Raise, Revert
 from vyper.utils import method_id
@@ -2367,3 +2368,16 @@ def foo(input: Bytes[64]) -> Bytes[32]:
 
     input_data = (64 * "a").encode("utf8")
     assert c.foo(input_data) == input_data[:32]
+
+
+@pytest.mark.xfail(reason="Convert failing")
+def test_blah(get_contract):
+    src = """
+@external
+def foo(a: uint256) -> uint256:
+    b: Bytes[32] = b''
+    return convert(b, uint256)
+    """
+
+    c = get_contract(src)
+    assert c.foo(0) == 0
