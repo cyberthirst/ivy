@@ -1,6 +1,5 @@
 import pytest
 
-from conftest import get_contract
 from ivy.frontend.loader import loads
 from ivy.exceptions import StaticCallViolation, Assert, Raise, Revert
 from vyper.utils import method_id
@@ -2381,3 +2380,19 @@ def foo(a: uint256) -> uint256:
 
     c = get_contract(src)
     assert c.foo(0) == 0
+
+
+def test_raw_call_with_revert_on_failure(get_contract):
+    src = """
+    
+x_BOOL_0: public(bool)
+C_INT_0: constant(uint8) = 0
+
+@external
+def func_1():
+    self.x_BOOL_0 = raw_call(0x0000000000000000000000000000000000000000, b"0", revert_on_failure=False)
+    """
+
+    c = get_contract(src)
+    c.func_1()
+    assert c.x_BOOL_0() == True

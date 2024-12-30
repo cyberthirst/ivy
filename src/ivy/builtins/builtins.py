@@ -182,6 +182,8 @@ def builtin_raw_call(
     returndata = evm.state.current_context.returndata
 
     if not revert_on_failure:
+        if max_outsize == 0:
+            return success
         return success, returndata[:max_outsize]
 
     if not success:
