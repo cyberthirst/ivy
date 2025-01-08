@@ -7,8 +7,11 @@
 - calls the compiler to get the annotated AST
 - an Account in the EVM doesn't contain the code, but the contract's annotated AST
 - when a tx/call is made to the contract, the AST (instead of bytecode) is interpreted
+
+
 - as in `boa` contracts can be deployed using `load` function
   - it returns a user-facing contract representation for user interaction
+- the interpreter maintains a global state (storage, balances, etc.)
 
 ## Run & Test
 - run: ` uv run python -m ivy tests/example_contracts/example.vy`
@@ -33,6 +36,6 @@ def foo(a: uint256=42) -> uint256:
 ### Implementation notes
 - the concept of `gas` is not supported (can't map gas costs to AST interpretation)
 - `delegatecall` support is basic - it's true semantics are tied to the storage layout, 
-   however, in `Ivy` we represent storage as a map from names to values, i.e., the concept of variable addresses is
-   not present. It is thus impossible to map variables from the caller to the callee. Therefore, `delegatecall` works
-   as expected only if the contracts have the same layout and use the same names.
+   however, in `Ivy` we used a simplified adressing model.It is thus impossible to properly map variables from the caller to the callee. Therefore, `delegatecall` works
+   as expected only if the contracts satisfy specific layout requirements.
+- frontend of the interpreter is heavily inspired by [boa](https://github.com/vyperlang/titanoboa), and it's code is often reused in the frontend parts (user-facing contracts, environment, etc.)
