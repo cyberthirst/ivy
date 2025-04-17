@@ -21,6 +21,10 @@ from ivy.builtins.builtins import (
     builtin_create_from_blueprint,
     builtin_create_minimal_proxy_to,
     builtin_raw_revert,
+    builtin_unsafe_add,
+    builtin_unsafe_sub,
+    builtin_unsafe_mul,
+    builtin_unsafe_div,
 )
 
 
@@ -36,10 +40,9 @@ class BuiltinWrapper:
         if self.needs_types:
             if typs is None:
                 raise ValueError("Type information is required for this built-in")
-            args = (typs, args)
             if self.context:
-                return self.fn(self.context, *args, **kwargs)
-            return self.fn(*args, **kwargs)
+                return self.fn(self.context, typs, *args, **kwargs)
+            return self.fn(typs, *args, **kwargs)
         if self.context:
             return self.fn(self.context, *args, **kwargs)
         return self.fn(*args, **kwargs)
@@ -84,6 +87,10 @@ class BuiltinRegistry:
             "create_minimal_proxy_to": BuiltinWrapper(
                 builtin_create_minimal_proxy_to, context=self.evm
             ),
+            "unsafe_add": BuiltinWrapper(builtin_unsafe_add, needs_types=True),
+            "unsafe_sub": BuiltinWrapper(builtin_unsafe_sub, needs_types=True),
+            "unsafe_mul": BuiltinWrapper(builtin_unsafe_mul, needs_types=True),
+            "unsafe_div": BuiltinWrapper(builtin_unsafe_div, needs_types=True),
         }
 
     def get(self, name):

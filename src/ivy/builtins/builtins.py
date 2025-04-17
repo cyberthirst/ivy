@@ -25,6 +25,7 @@ from ivy.exceptions import GasReference, Revert
 from ivy.types import Address, VyperDecimal
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
+from ivy.builtins import unsafe_math_utils as unsafe_math
 
 
 def builtin_range(*args, bound=None):
@@ -108,7 +109,7 @@ def builtin_empty(typ):
     return VyperEvaluator.default_value(typ)
 
 
-def get_bound(typ, get_high: bool):
+def _get_bound(typ, get_high: bool):
     if isinstance(typ, DecimalT):
         return VyperDecimal.max() if get_high else VyperDecimal.min()
     low, high = typ.int_bounds
@@ -116,11 +117,11 @@ def get_bound(typ, get_high: bool):
 
 
 def builtin_max_value(typ):
-    return get_bound(typ, get_high=True)
+    return _get_bound(typ, get_high=True)
 
 
 def builtin_min_value(typ):
-    return get_bound(typ, get_high=False)
+    return _get_bound(typ, get_high=False)
 
 
 def builtin_max(x, y):
@@ -217,7 +218,7 @@ def builtin_concat(*args):
 
 # all the convert functionality is adapted from vyper's test suite
 # - https://github.com/vyperlang/vyper/blob/c32b9b4c6f0d8b8cdb103d3017ff540faf56a305/tests/functional/builtins/codegen/test_convert.py#L301
-def builtin_convert(typs: tuple[VyperType], values: tuple[Any, VyperType]):
+def builtin_convert(typs: tuple[VyperType], *values: tuple[Any, VyperType]):
     assert len(typs) == 2
     i_typ = typs[0]
     val, o_typ = values
@@ -336,7 +337,7 @@ def builtin_create_minimal_proxy_to(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
-    encoded_target = builtin_abi_encode((AddressT(),), (target,))
+    encoded_target = builtin_abi_encode((AddressT(),), *(target,))
     code = create_utils.MinimalProxyFactory.get_proxy_contract_data()
     return create_utils.create_builtin_shared(
         evm,
@@ -351,3 +352,23 @@ def builtin_create_minimal_proxy_to(
 def builtin_raw_revert(x):
     assert isinstance(x, bytes)
     raise Revert(data=x)
+
+
+def builtin_unsafe_add(typs, x, y):
+    bits, signed = unsafe_math.validate_typs(typs)
+    return unsafe_math.wrap_value(x + y, bits, signed)
+
+
+def builtin_unsafe_sub(typs, x, y):
+    bits, signed = unsafe_math.validate_typs(typs)
+    return unsafe_math.wrap_value(x - y, bits, signed)
+
+
+def builtin_unsafe_mul(typs, x, y):
+    bits, signed = unsafe_math.validate_typs(typs)
+    return unsafe_math.wrap_value(x * y, bits, signed)
+
+
+def builtin_unsafe_div(typs, x, y):
+    bits, signed = unsafe_math.validate_typs(typs)
+    return unsafe_math.wrap_value(unsafe_math.evm_div(x, y), bits, signed)
