@@ -4,6 +4,7 @@ import pytest
 from contextlib import contextmanager
 
 from vyper.compiler.input_bundle import FilesystemInputBundle
+from vyper.utils import keccak256
 
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads
@@ -94,3 +95,8 @@ def get_logs():
         return logs
 
     return fn
+
+
+@pytest.fixture
+def keccak():
+    return keccak256

@@ -134,9 +134,9 @@ def fivetimes(inp: bytes32) -> Bytes[160]:
     """
 
     c = get_contract(test_concat_bytes32)
-    assert (
-        c.sandwich(b"cow", b"\x35" * 32) == b"\x35" * 32 + b"cow" + b"\x35" * 32
-    ), c.sandwich(b"cow", b"\x35" * 32)  # noqa: E501
+    assert c.sandwich(b"cow", b"\x35" * 32) == b"\x35" * 32 + b"cow" + b"\x35" * 32, (
+        c.sandwich(b"cow", b"\x35" * 32)
+    )  # noqa: E501
     assert c.sandwich(b"", b"\x46" * 32) == b"\x46" * 64
     assert c.sandwich(b"\x57" * 95, b"\x57" * 32) == b"\x57" * 159
     assert c.sandwich(b"\x57" * 96, b"\x57" * 32) == b"\x57" * 160
