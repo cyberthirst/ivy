@@ -161,6 +161,13 @@ class VyperContract:
 
         return ret
 
+    def message_call(self, data: bytes, value: int = 0):
+        ret = self.env.message_call(
+            self.address, data, value, get_execution_output=True
+        )
+        self._execution_output = ret
+        return ret.output
+
     def storage_dump(self) -> dict[str, Any]:
         # TODO: add a param to access self._execution_output.touched_accounts
         # and also dump their storage

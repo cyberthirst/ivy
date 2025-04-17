@@ -75,6 +75,7 @@ class Env:
         value: int = 0,
         calldata: Union[bytes, str] = b"",
         is_modifying: bool = True,
+        get_execution_output: bool = False,
     ) -> Any:
         if isinstance(calldata, str):
             assert calldata.startswith("0x")
@@ -85,11 +86,25 @@ class Env:
         if ret.is_error:
             raise ret.error
 
+        if get_execution_output:
+            return ret
+
         return ret.output
 
     # compatability alias for vyper env
-    def message_call(self, to_address: _AddressType, data: bytes, value: int = 0):
-        return self.raw_call(to_address, calldata=data, value=value)
+    def message_call(
+        self,
+        to_address: _AddressType,
+        data: bytes,
+        value: int = 0,
+        get_execution_output: bool = False,
+    ) -> Any:
+        return self.raw_call(
+            to_address,
+            calldata=data,
+            value=value,
+            get_execution_output=get_execution_output,
+        )
 
     def get_balance(self, address: _AddressType) -> int:
         return self.state.get_balance(address)
