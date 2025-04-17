@@ -478,11 +478,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id
-            # we don't tag runtime values with a corresponding vyper type, thus we have to
-            # collect the types separately and for certain builtins inject them
-            if id in ("abi_encode", "_abi_encode", "convert"):
-                args = (typs, args)
-            return self.builtins.get(id)(*args, **kws)
+            return self.builtins.get(id).execute(*args, typs=typs, **kws)
 
         if isinstance(func_t, TYPE_T):
             # struct & interface constructors

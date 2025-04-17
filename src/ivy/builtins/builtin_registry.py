@@ -1,6 +1,3 @@
-from enum import Enum
-from typing import Callable, Any
-
 from ivy.builtins.builtins import (
     builtin_len,
     builtin_slice,
@@ -25,84 +22,71 @@ from ivy.builtins.builtins import (
     builtin_create_minimal_proxy_to,
     builtin_raw_revert,
 )
-from ivy.evm.evm_core import EVMCore
-from ivy.evm.evm_state import StateAccess
 
 
-class BuiltinType(Enum):
-    PURE = "pure"  # Functions that don't need state/evm access
-    STATE = "state"  # Functions that need state access
-    EVM = "evm"  # Functions that need full EVM access
-
-
-class PureBuiltin:
-    def __init__(self, fn: Callable):
+class BuiltinWrapper:
+    def __init__(self, fn, context=None, needs_types=False):
         self.fn = fn
+        self.context = context
+        # we don't tag runtime values with a corresponding vyper type, thus we have to
+        # collect the types separately and for certain builtins inject them
+        self.needs_types = needs_types
 
-    def execute(self, *args, **kwargs) -> Any:
+    def execute(self, *args, typs=None, **kwargs):
+        if self.needs_types:
+            if typs is None:
+                raise ValueError("Type information is required for this built-in")
+            args = (typs, args)
+            if self.context:
+                return self.fn(self.context, *args, **kwargs)
+            return self.fn(*args, **kwargs)
+        if self.context:
+            return self.fn(self.context, *args, **kwargs)
         return self.fn(*args, **kwargs)
 
 
-class StateBuiltin:
-    def __init__(self, state: StateAccess, fn: Callable):
-        self.state = state
-        self.fn = fn
-
-    def execute(self, *args, **kwargs) -> Any:
-        return self.fn(self.state, *args, **kwargs)
-
-
-class EVMBuiltin:
-    def __init__(self, evm: EVMCore, fn: Callable):
-        self.evm = evm
-        self.fn = fn
-
-    def execute(self, *args, **kwargs) -> Any:
-        return self.fn(self.evm, *args, **kwargs)
-
-
 class BuiltinRegistry:
-    def __init__(self, evm_core: EVMCore, state: StateAccess):
+    def __init__(self, evm_core, state):
         self.evm = evm_core
         self.state = state
         self.builtins = self._register_builtins()
 
     def _register_builtins(self):
         return {
-            # Pure builtins
-            "len": PureBuiltin(builtin_len),
-            "slice": PureBuiltin(builtin_slice),
-            "concat": PureBuiltin(builtin_concat),
-            "max": PureBuiltin(builtin_max),
-            "min": PureBuiltin(builtin_min),
-            "uint2str": PureBuiltin(builtin_uint2str),
-            "empty": PureBuiltin(builtin_empty),
-            "max_value": PureBuiltin(builtin_max_value),
-            "min_value": PureBuiltin(builtin_min_value),
-            "range": PureBuiltin(builtin_range),
-            "convert": PureBuiltin(builtin_convert),
-            "as_wei_value": PureBuiltin(builtin_as_wei_value),
-            "_abi_decode": PureBuiltin(builtin_abi_decode),
-            "abi_decode": PureBuiltin(builtin_abi_decode),
-            "abi_encode": PureBuiltin(builtin_abi_encode),
-            "_abi_encode": PureBuiltin(builtin_abi_encode),
-            "method_id": PureBuiltin(builtin_method_id),
-            "print": PureBuiltin(builtin_print),
-            "raw_revert": PureBuiltin(builtin_raw_revert),
-            # State builtins
-            # EVM builtins
-            "raw_call": EVMBuiltin(self.evm, builtin_raw_call),
-            "send": EVMBuiltin(self.evm, builtin_send),
-            "create_copy_of": EVMBuiltin(self.evm, builtin_create_copy_of),
-            "create_from_blueprint": EVMBuiltin(
-                self.evm, builtin_create_from_blueprint
+            # Pure built-ins (no context, no types)
+            "len": BuiltinWrapper(builtin_len),
+            "slice": BuiltinWrapper(builtin_slice),
+            "concat": BuiltinWrapper(builtin_concat),
+            "max": BuiltinWrapper(builtin_max),
+            "min": BuiltinWrapper(builtin_min),
+            "uint2str": BuiltinWrapper(builtin_uint2str),
+            "empty": BuiltinWrapper(builtin_empty),
+            "max_value": BuiltinWrapper(builtin_max_value),
+            "min_value": BuiltinWrapper(builtin_min_value),
+            "range": BuiltinWrapper(builtin_range),
+            "as_wei_value": BuiltinWrapper(builtin_as_wei_value),
+            "_abi_decode": BuiltinWrapper(builtin_abi_decode),
+            "abi_decode": BuiltinWrapper(builtin_abi_decode),
+            "method_id": BuiltinWrapper(builtin_method_id),
+            "print": BuiltinWrapper(builtin_print),
+            "raw_revert": BuiltinWrapper(builtin_raw_revert),
+            # Pure built-ins (no context, with types)
+            "convert": BuiltinWrapper(builtin_convert, needs_types=True),
+            "abi_encode": BuiltinWrapper(builtin_abi_encode, needs_types=True),
+            "_abi_encode": BuiltinWrapper(builtin_abi_encode, needs_types=True),
+            # EVM built-ins (with evm context, no types)
+            "raw_call": BuiltinWrapper(builtin_raw_call, context=self.evm),
+            "send": BuiltinWrapper(builtin_send, context=self.evm),
+            "create_copy_of": BuiltinWrapper(builtin_create_copy_of, context=self.evm),
+            "create_from_blueprint": BuiltinWrapper(
+                builtin_create_from_blueprint, context=self.evm
             ),
-            "create_minimal_proxy_to": EVMBuiltin(
-                self.evm, builtin_create_minimal_proxy_to
+            "create_minimal_proxy_to": BuiltinWrapper(
+                builtin_create_minimal_proxy_to, context=self.evm
             ),
         }
 
-    def get(self, name: str) -> Callable:
+    def get(self, name):
         if name not in self.builtins:
             raise ValueError(f"Unknown builtin: {name}")
-        return self.builtins[name].execute
+        return self.builtins[name]
