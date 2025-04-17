@@ -206,10 +206,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             else:
                 entry_point = entry_points[selector]
 
-            if entry_point.function.is_payable:
-                if self.msg.value != 0:
-                    # TODO raise and rollback
-                    pass
+
 
             self._min_calldata_size_check(entry_point.calldata_min_size)
 
@@ -224,6 +221,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 args = ()
             else:
                 raise e
+
+        if not func_t.is_payable:
+            if self.msg.value != 0:
+                raise RuntimeError(f"Function {func_t.name} is not payable")
 
         self._execute_external_function(func_t, args)
 
