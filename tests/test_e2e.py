@@ -2396,3 +2396,89 @@ def func_1():
     c = get_contract(src)
     c.func_1()
     assert c.x_BOOL_0() == True
+
+def test_unsafe_add(get_contract):
+    src = """
+    @external
+    @view
+    def foo(x: uint8, y: uint8) -> uint8:
+        return unsafe_add(x, y)
+        
+    @external
+    @view
+    def bar(x: int8, y: int8) -> int8:
+        return unsafe_add(x, y)
+    """
+    c = get_contract(src)
+
+    assert c.foo(1, 1) == 2
+
+    assert c.foo(255, 255) == 254
+
+    assert c.bar(127, 127) == -2
+
+
+def test_unsafe_sub(get_contract):
+    src = """
+    @external
+    @view
+    def foo(x: uint8, y: uint8) -> uint8:
+        return unsafe_sub(x, y)
+
+    @external
+    @view
+    def bar(x: int8, y: int8) -> int8:
+        return unsafe_sub(x, y)
+    """
+    c = get_contract(src)
+
+    assert c.foo(4, 3) == 1
+
+    assert c.foo(0, 1) == 255
+
+    assert c.bar(-128, 1) == 127
+
+
+def test_unsafe_mul(get_contract):
+    src = """
+    @external
+    @view
+    def foo(x: uint8, y: uint8) -> uint8:
+        return unsafe_mul(x, y)
+
+    @external
+    @view
+    def bar(x: int8, y: int8) -> int8:
+        return unsafe_mul(x, y)
+    """
+    c = get_contract(src)
+
+    assert c.foo(1, 1) == 1
+
+    assert c.foo(255, 255) == 1
+
+    assert c.bar(-128, -128) == 0
+
+    assert c.bar(127, -128) == -128
+
+
+
+def test_unsafe_div(get_contract):
+    src = """
+    @external
+    @view
+    def foo(x: uint8, y: uint8) -> uint8:
+        return unsafe_div(x, y)
+
+    @external
+    @view
+    def bar(x: int8, y: int8) -> int8:
+        return unsafe_div(x, y)
+    """
+    c = get_contract(src)
+
+    assert c.foo(1, 1) == 1
+
+    assert c.foo(1, 0) == 0
+
+    assert c.bar(-128, -1) == -128
