@@ -8,6 +8,7 @@ from vyper.semantics.types.subscriptable import TupleT
 from ivy.utils import compute_call_abi_data
 from ivy.variable import GlobalVariables
 from ivy.types import Address
+from ivy import journal
 
 
 @dataclass
@@ -95,10 +96,25 @@ class ContractData:
 @dataclass
 class Account:
     nonce: int
-    balance: int
+    _balance: int
     storage: dict[int, Any]
     transient: dict[int, Any]
     contract_data: Optional[ContractData]
+
+    # Define balance as a property
+    @property
+    def balance(self) -> int:
+        return self._balance
+
+    @balance.setter
+    def balance(self, new_value: int):
+        journal.Journal().record(
+            entry_type=journal.JournalEntryType.BALANCE,
+            obj=self,
+            key="balance",
+            old_value=self._balance,
+        )
+        self._balance = new_value
 
     def __hash__(self):
         return hash(id(self))

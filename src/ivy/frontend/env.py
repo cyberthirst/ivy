@@ -88,8 +88,8 @@ class Env:
         return ret.output
 
     # compatability alias for vyper env
-    def message_call(self, to_address: _AddressType, data: bytes):
-        return self.raw_call(to_address, calldata=data)
+    def message_call(self, to_address: _AddressType, data: bytes, value: int = 0):
+        return self.raw_call(to_address, calldata=data, value=value)
 
     def get_balance(self, address: _AddressType) -> int:
         return self.state.get_balance(address)

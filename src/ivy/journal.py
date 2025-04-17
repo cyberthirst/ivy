@@ -65,16 +65,16 @@ class Journal:
                 self.apply_rollback(entry)
 
     def apply_rollback(self, entry: JournalEntry):
-        if False:
-            pass
         # if entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
         #    del entry.obj[entry.key]
         # elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
         #    entry.obj[entry.key] = entry.old_value
-        # elif entry.entry_type == JournalEntryType.BALANCE:
-        #    entry.obj.balance = entry.old_value
-        else:
+        if entry.entry_type == JournalEntryType.BALANCE:
+            entry.obj.balance = entry.old_value
+        elif entry.entry_type == JournalEntryType.STORAGE:
             entry.obj[entry.key] = entry.old_value
+        else:
+            assert False, f"unreachable: {entry.entry_type}"
 
     def reset(self):
         self.initialize()
