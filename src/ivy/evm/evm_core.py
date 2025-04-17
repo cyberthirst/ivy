@@ -70,11 +70,15 @@ class EVMCore:
             chain_id=0,
         )
 
+        assert len(self.journal.recorded_entries) == 0
+
         output = (
             self.process_create_message(message)
             if is_deploy
             else self.process_message(message)
         )
+
+        assert len(self.journal.recorded_entries) == 0
 
         self.state.clear_transient_storage()
 
@@ -86,7 +90,7 @@ class EVMCore:
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
     ) -> ExecutionOutput:
-        self.journal.begin_call()
+        self.journal.begin_call(message.is_static)
 
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
@@ -137,7 +141,7 @@ class EVMCore:
         self.state.current_output.output = PRECOMPILE_REGISTRY[to](data)
 
     def process_message(self, message: Message) -> ExecutionOutput:
-        self.journal.begin_call()
+        self.journal.begin_call(is_static=message.is_static)
         account = self.state[message.to]
         self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(account, message)
@@ -181,6 +185,8 @@ class EVMCore:
             assert value == 0
             value = self.state.current_context.msg.value
             caller = self.state.current_context.msg.caller
+
+        is_static = is_static if is_static else self.state.current_context.msg.is_static
 
         msg = Message(
             caller=caller,
@@ -241,7 +247,7 @@ class EVMCore:
             code_address=b"",
             code=code,
             depth=self.state.current_context.msg.depth + 1,
-            is_static=False,
+            is_static=self.state.current_context.msg.is_static,
         )
 
         child_output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)

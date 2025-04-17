@@ -1,5 +1,4 @@
 from typing import Optional, Type, Any
-from contextlib import contextmanager
 
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability, Modifiability
@@ -35,7 +34,6 @@ from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.exceptions import (
-    StaticCallViolation,
     AccessViolation,
     GasReference,
     FunctionNotFound,
@@ -206,8 +204,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             else:
                 entry_point = entry_points[selector]
 
-
-
             self._min_calldata_size_check(entry_point.calldata_min_size)
 
             func_t = entry_point.function
@@ -264,15 +260,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             return self.current_context.contract
         return ret
 
-    @contextmanager
-    def modifiable_context(self, target):
-        if self.msg.is_static:
-            raise StaticCallViolation(f"Cannot modify {target} in a static context")
-        try:
-            yield
-        finally:
-            pass
-
     def _is_global_var(self, varinfo: Optional[VarInfo]):
         if varinfo is None:
             return False
@@ -301,9 +288,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
         varinfo, is_global = self._resolve_variable_info(node)
         if is_global:
-            with self.modifiable_context(varinfo):
-                var = self.globals[varinfo]
-                var.value = value
+            var = self.globals[varinfo]
+            var.value = value
         else:
             self.memory[name] = value
 
