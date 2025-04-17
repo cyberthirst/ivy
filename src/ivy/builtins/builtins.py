@@ -75,18 +75,14 @@ def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
         return abi_decode(typ, data)
 
 
-def builtin__abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
-    return builtin_abi_decode(data, typ, unwrap_tuple)
-
-
 # we don't follow the api of vyper's abi_encode - this is because we also need the
 # types of the arguments which in the case of the compiler are available as metadata
 # of the arguments
-# however, in ivy, we represent values as python objects, and we don't associate them
+# however, in ivy, we represent values as primitive python objects, and we don't associate them
 # with the corresponding vyper type. thus, we have to retrieve the types from
 # the ast nodes and pass them through
 def builtin_abi_encode(
-    typs: tuple[VyperType], values: tuple[Any], ensure_tuple=True, method_id=None
+    typs: tuple[VyperType], *values: tuple[Any], ensure_tuple=True, method_id=None
 ):
     assert len(typs) == len(values)
     assert isinstance(values, tuple) and isinstance(typs, tuple)
@@ -106,12 +102,6 @@ def builtin_abi_encode(
         ret = method_id + ret
 
     return ret
-
-
-def builtin__abi_encode(
-    typs: tuple[VyperType], values: tuple[Any], ensure_tuple=True, method_id=None
-):
-    return builtin_abi_encode(typs, values, ensure_tuple, method_id)
 
 
 def builtin_empty(typ):
