@@ -14,7 +14,7 @@ def foo():
 
     revert_bytes = method_id("NoFives()")
 
-    with tx_failed(exc_text=revert_bytes.hex()):
+    with tx_failed(text=revert_bytes.hex()):
         get_contract(reverty_code).foo()
 
 
@@ -33,7 +33,7 @@ def foo():
         method_id("NoFives(uint256)").hex() + abi_encode(encode_typ, (5,)).hex()
     )
 
-    with tx_failed(exc_text=revert_bytes):
+    with tx_failed(text=revert_bytes):
         get_contract(reverty_code).foo()
 
 
@@ -50,5 +50,5 @@ def foo():
         method_id("NoFives(uint256)").hex() + abi_encode(encode_typ, (5,)).hex()
     )
 
-    with tx_failed(exc_text=revert_bytes):
+    with tx_failed(text=revert_bytes):
         get_contract(reverty_code).foo()

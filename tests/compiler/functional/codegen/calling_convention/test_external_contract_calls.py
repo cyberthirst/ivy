@@ -140,7 +140,7 @@ def run(raiser: address):
     """
     c1 = get_contract(raiser)
     c2 = get_contract(caller)
-    with tx_failed(exc_text=revert_string):
+    with tx_failed(text=revert_string):
         c2.run(c1.address)
 
 

@@ -41,6 +41,10 @@ class Invalid(VyperException):
     pass
 
 
+class PayabilityViolation(VyperException):
+    pass
+
+
 class AccessViolation(Revert):
     pass
 

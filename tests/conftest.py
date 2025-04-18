@@ -36,13 +36,13 @@ def get_contract(clear_env):
 def tx_failed():
     @contextmanager
     # TODO make ivy-specific general exception
-    def fn(exception=Exception, exc_text=None):
+    def fn(exception=Exception, text=None):
         with pytest.raises(exception) as excinfo:
             yield
 
-        if exc_text:
+        if text:
             # TODO test equality
-            assert exc_text in str(excinfo.value), (exc_text, excinfo.value)
+            assert text in str(excinfo.value), (text, excinfo.value)
 
     return fn
 
