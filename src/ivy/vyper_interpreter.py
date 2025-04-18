@@ -501,7 +501,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             assert target is not None and isinstance(func_t, ContractFunctionT)
             return self.external_function_call(func_t, args, kws, is_static, target)
 
-        assert func_t.is_internal
+        assert func_t.is_internal or func_t.is_deploy
         return self._execute_function(func_t, args)
 
     def external_function_call(
