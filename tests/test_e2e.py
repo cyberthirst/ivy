@@ -2482,3 +2482,14 @@ def test_unsafe_div(get_contract):
     assert c.foo(1, 0) == 0
 
     assert c.bar(-128, -1) == -128
+
+
+def test_boolop():
+    src = """
+@external
+def foo(a: bool, b: bool, c: bool) -> bool:
+	return a or b and c
+    """
+
+    c = loads(src)
+    assert c.foo(False, True, True) == True

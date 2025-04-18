@@ -129,8 +129,21 @@ class ExprVisitor(BaseVisitor):
         return self.evaluator.eval_compare(node, left, right)
 
     def visit_BoolOp(self, node: ast.BoolOp):
-        values = [self.visit(value) for value in node.values]
-        return self.evaluator.eval_boolop(node, values)
+        if isinstance(node.op, ast.Or):
+            short_circuit_value = True
+        else:
+            assert isinstance(node.op, ast.And)
+            short_circuit_value = False
+
+        evaluated_values = []
+        for val in node.values:
+            result = self.visit(val)
+            evaluated_values.append(result)
+
+            if result == short_circuit_value:
+                return result
+
+        return self.evaluator.eval_boolop(node, evaluated_values)
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
         operand = self.visit(node.operand)
