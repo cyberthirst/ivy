@@ -372,3 +372,8 @@ def builtin_unsafe_mul(typs, x, y):
 def builtin_unsafe_div(typs, x, y):
     bits, signed = unsafe_math.validate_typs(typs)
     return unsafe_math.wrap_value(unsafe_math.evm_div(x, y), bits, signed)
+
+
+def builtin_floor(x):
+    assert isinstance(x, VyperDecimal)
+    return x.value // x.SCALING_FACTOR
