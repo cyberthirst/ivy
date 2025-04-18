@@ -123,34 +123,36 @@ class VyperDecimal:
             raise ValueError("Decimal value out of bounds")
 
     def __add__(self, other: "VyperDecimal") -> "VyperDecimal":
-        result = VyperDecimal(0)
-        result.value = self.value + other.value
-        return result
+        scaled_result_value = self.value + other.value
+        return VyperDecimal(scaled_result_value, scaled=True)
 
     def __sub__(self, other: "VyperDecimal") -> "VyperDecimal":
-        result = VyperDecimal(0)
-        result.value = self.value - other.value
-        return result
+        scaled_result_value = self.value - other.value
+        return VyperDecimal(scaled_result_value, scaled=True)
 
     def __mul__(self, other: "VyperDecimal") -> "VyperDecimal":
-        result = VyperDecimal(0)
-        result.value = self.value * other.value // self.SCALING_FACTOR
-        return result
+        scaled_result_value = self.value * other.value // self.SCALING_FACTOR
+        return VyperDecimal(scaled_result_value, scaled=True)
 
     def __truediv__(self, other: "VyperDecimal") -> "VyperDecimal":
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
-        result = VyperDecimal("0")
-        result.value = (self.value * self.SCALING_FACTOR) // other.value
+
+        scaled_result_value = (self.value * self.SCALING_FACTOR) // other.value
+
+        result = VyperDecimal(scaled_result_value, scaled=True)
         return result
 
     def __floordiv__(self, other: "VyperDecimal") -> "VyperDecimal":
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
-        result = VyperDecimal(0)
-        result.value = (self.value * self.SCALING_FACTOR) // other.value
-        result.value = (result.value // self.SCALING_FACTOR) * self.SCALING_FACTOR
-        return result
+
+        intermediate_scaled_value = (self.value * self.SCALING_FACTOR) // other.value
+        final_scaled_value = (
+            intermediate_scaled_value // self.SCALING_FACTOR
+        ) * self.SCALING_FACTOR
+
+        return VyperDecimal(final_scaled_value, scaled=True)
 
     def __lt__(self, other: "VyperDecimal") -> bool:
         return self.value < other.value
