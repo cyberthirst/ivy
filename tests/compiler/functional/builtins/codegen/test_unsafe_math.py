@@ -27,7 +27,12 @@ def foo(x: {typ}) -> {typ}:
     return unsafe_{op}(x, {literal})
     """
 
-    fns = {"add": operator.add, "sub": operator.sub, "mul": operator.mul, "div": evm_div}
+    fns = {
+        "add": operator.add,
+        "sub": operator.sub,
+        "mul": operator.mul,
+        "div": evm_div,
+    }
     fn = fns[op]
 
     c1 = get_contract(contract_1)
