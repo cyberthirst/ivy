@@ -37,6 +37,7 @@ from ivy.exceptions import (
     AccessViolation,
     GasReference,
     FunctionNotFound,
+    PayabilityViolation,
 )
 from ivy.types import Address, Struct, StaticArray, DynamicArray, Map
 from ivy.allocator import Allocator
@@ -220,7 +221,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if not func_t.is_payable:
             if self.msg.value != 0:
-                raise RuntimeError(f"Function {func_t.name} is not payable")
+                raise PayabilityViolation(f"Function {func_t.name} is not payable")
 
         self._execute_external_function(func_t, args)
 
@@ -484,6 +485,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 return Struct(typedef, kws)
 
         if isinstance(func_t, MemberFunctionT):
+            if func_t.name == "__at__":
+                assert len(args) == 1
+                return args[0]
             # the function is an attribute of the array
             darray = self.visit(call.func.value)
             assert isinstance(darray, DynamicArray)
