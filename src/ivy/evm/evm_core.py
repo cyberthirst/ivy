@@ -228,6 +228,9 @@ class EVMCore:
             )
 
         current_address = self.state.current_context.msg.to
+        # we're in a constructor
+        if current_address == b"":
+            current_address = self.state.current_context.msg.create_address
         create_address = self.generate_create_address(current_address)
 
         if self.account_has_code_or_nonce(create_address):
