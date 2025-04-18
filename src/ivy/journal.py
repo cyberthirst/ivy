@@ -1,5 +1,5 @@
-from typing import Any
-from enum import Enum
+from typing import Any, NamedTuple, Optional
+from enum import Enum, auto
 
 from vyper.semantics.data_locations import DataLocation
 
@@ -7,14 +7,25 @@ from ivy.exceptions import StaticCallViolation
 
 
 class JournalEntryType(Enum):
-    STORAGE = 1
-    BALANCE = 2
-    ACCOUNT_CREATION = 3
-    ACCOUNT_DESTRUCTION = 4
-    # Add more types as needed
+    """Types of state changes that can be recorded in the journal."""
+
+    STORAGE = auto()
+    BALANCE = auto()
+    ACCOUNT_CREATION = auto()
+    ACCOUNT_DESTRUCTION = auto()
 
 
 class JournalEntry:
+    """
+    Represents a single state change in the EVM that may need to be reverted.
+
+    Attributes:
+        entry_type: The type of state change (storage, balance, etc.)
+        obj: The object being modified
+        key: The key or identifier for the specific value being changed
+        old_value: The original value before modification
+    """
+
     def __init__(
         self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any
     ):
@@ -24,9 +35,25 @@ class JournalEntry:
         self.old_value = old_value
 
 
+JournalKey = tuple[int, Any, int]  # (obj_id, key, entry_type_val)
+
+
+class JournalFrame(NamedTuple):
+    entries: dict[JournalKey, JournalEntry]
+    is_static: bool
+
+
 class Journal:
+    """
+    Records and manages state changes during EVM execution.
+
+    The journal provides transaction atomicity by tracking all state changes
+    and allowing them to be rolled back if execution fails. It also enforces
+    static call constraints.
+    """
+
     _instance = None
-    _is_static = []
+    _frame_stack: list[JournalFrame] = []
 
     def __new__(cls):
         if cls._instance is None:
@@ -35,68 +62,92 @@ class Journal:
         return cls._instance
 
     @classmethod
-    def journalable_loc(cls, location: DataLocation):
+    def journalable_loc(cls, location: DataLocation) -> bool:
         return location in (DataLocation.STORAGE, DataLocation.TRANSIENT)
 
+    @property
+    def current_frame(self) -> Optional[JournalFrame]:
+        return self._frame_stack[-1] if self._frame_stack else None
+
+    @property
+    def is_active(self) -> bool:
+        return bool(self._frame_stack)
+
+    @property
+    def in_static_context(self) -> bool:
+        return self.current_frame.is_static if self.current_frame else False
+
     def initialize(self):
-        self.recorded_entries: list[dict[tuple[int, Any, Any], JournalEntry]] = []
-        self._is_static = []
+        self._frame_stack = []
 
-    def record(self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any):
-        # this is a hacky way to check whether we're executing a tx
-        # evm state can be set through setters
-        # exposed in the `Env` class (e.g. `set_balance`), we don't want
-        # to journal those
-        if len(self.recorded_entries) == 0:
+    def record(
+        self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any
+    ) -> None:
+        # Skip recording if not in an active transaction
+        # This might happen e.g. when using convenience setters (like `set_balance`) from `Env`
+        if not self.is_active:
             return
-        if self._is_static[-1]:
-            # journal is aware of all state changes
-            # so we check static violation here
-            raise StaticCallViolation()
+
+        # Check for static call violations
+        if self.in_static_context:
+            raise StaticCallViolation("State modification in static context")
+
+        # Only record the first change to each state element
         entry_key = (id(obj), key, entry_type.value)
-        if entry_key not in self.recorded_entries[-1]:
+        if entry_key not in self.current_frame.entries:
             entry = JournalEntry(entry_type, obj, key, old_value)
-            self.recorded_entries[-1][entry_key] = entry
+            self.current_frame.entries[entry_key] = entry
 
-    def begin_call(self, is_static: bool):
-        self.recorded_entries.append({})
-        self._is_static.append(is_static)
+    def begin_call(self, is_static: bool) -> None:
+        # If parent frame is static, child must also be static
+        if self._frame_stack and self.current_frame.is_static:
+            is_static = True
 
-    def finalize_call(self, is_error):
+        self._frame_stack.append(JournalFrame(entries={}, is_static=is_static))
+
+    def finalize_call(self, is_error: bool) -> None:
+        if not self._frame_stack:
+            raise IndexError("finalize_call called with no active journal frames")
+
         if is_error:
             self._rollback()
         else:
             self._commit()
-        self._is_static.pop()
 
-    def _commit(self):
-        if len(self.recorded_entries) > 1:
-            committed_records = self.recorded_entries.pop()
-            self.recorded_entries[-1].update(committed_records)
-        else:
-            assert len(self.recorded_entries) == 1
-            self.recorded_entries.pop()
+    def _commit(self) -> None:
+        """Commit changes from the current frame, merging them with the parent frame if it exists."""
+        if not self._frame_stack:
+            return
 
-    def _rollback(self):
-        assert len(self.recorded_entries) > 0
-        if self.recorded_entries:
-            entries_to_rollback = self.recorded_entries.pop()
-            for entry in reversed(entries_to_rollback.values()):
-                self._apply_rollback(entry)
+        frame = self._frame_stack.pop()
 
-    def _apply_rollback(self, entry: JournalEntry):
-        # if entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
-        #    del entry.obj[entry.key]
-        # elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
-        #    entry.obj[entry.key] = entry.old_value
+        # If this isn't the root frame, merge changes upward
+        if self._frame_stack:
+            self.current_frame.entries.update(frame.entries)
+
+    def _rollback(self) -> None:
+        """Revert all changes in the current frame."""
+        if not self._frame_stack:
+            return
+
+        frame = self._frame_stack.pop()
+
+        for entry in reversed(list(frame.entries.values())):
+            self._apply_rollback(entry)
+
+    def _apply_rollback(self, entry: JournalEntry) -> None:
         if entry.entry_type == JournalEntryType.BALANCE:
             entry.obj.balance = entry.old_value
         elif entry.entry_type == JournalEntryType.STORAGE:
             entry.obj[entry.key] = entry.old_value
+        elif entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
+            pass
+        elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
+            pass
         else:
-            assert False, f"unreachable: {entry.entry_type}"
+            raise ValueError(f"Unknown journal entry type: {entry.entry_type}")
 
-    def reset(self):
+    def reset(self) -> None:
         self.initialize()
 
 

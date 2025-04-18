@@ -70,7 +70,7 @@ class EVMCore:
             chain_id=0,
         )
 
-        assert len(self.journal.recorded_entries) == 0
+        assert not self.journal.is_active
 
         output = (
             self.process_create_message(message)
@@ -78,7 +78,7 @@ class EVMCore:
             else self.process_message(message)
         )
 
-        assert len(self.journal.recorded_entries) == 0
+        assert not self.journal.is_active
 
         self.state.clear_transient_storage()
 
