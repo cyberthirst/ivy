@@ -2309,7 +2309,7 @@ def foo() -> bool:
     with pytest.raises(Revert) as e:
         c.foo()
 
-    assert str(e.value) == f"Account at {"0x" + 20 * "00"} does not have code"
+    assert str(e.value) == f"Account at {'0x' + 20 * '00'} does not have code"
 
 
 # use skip_contract_check and thus don't force
@@ -2397,6 +2397,31 @@ def func_1():
     c.func_1()
     assert c.x_BOOL_0() == True
 
+
+def test_convert(get_contract):
+    src = """
+@external
+def foo() -> Bytes[32]:
+    s: String[32] = ""
+    return convert(s, Bytes[32])
+"""
+
+    c = get_contract(src)
+    assert c.foo() == b""
+
+
+def tst_convert_bytes_to_adddress(get_contract):
+    src = """
+   @external
+   def foo(b: Bytes[32]) -> address:
+       return convert(b, address)
+   """
+
+    c = get_contract(src)
+    i = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x01"
+    assert c.foo(i) == "0x0000000000000000000000000000000000000001"
+
+
 def test_unsafe_add(get_contract):
     src = """
     @external
@@ -2460,7 +2485,6 @@ def test_unsafe_mul(get_contract):
     assert c.bar(-128, -128) == 0
 
     assert c.bar(127, -128) == -128
-
 
 
 def test_unsafe_div(get_contract):
@@ -2538,3 +2562,263 @@ def bar() -> uint256:
     """
     c = get_contract(code)
     assert c.foo() == 4
+
+
+# Nested DynArray pops & appends inside the index expression
+def test_refresh_nested_pop_append(get_contract):
+    code = """
+struct Child:
+    v: DynArray[uint256, 5]
+struct Parent:
+    c: DynArray[Child, 5]
+
+p: Parent
+
+@internal
+def bump() -> uint256:
+    self.p.c.pop()
+    self.p.c.append(Child(v=[7, 8, 9]))
+    return 0              # <-- used as index
+
+@external
+def foo() -> uint256:
+    self.p.c.append(Child(v=[1, 2, 3]))
+    return self.p.c[self.bump()].v[0]
+    """
+    c = get_contract(code)
+    assert c.foo() == 7
+
+
+# Mapping replaced inside the index expression
+def test_refresh_mapping_replaced(get_contract):
+    code = """
+h: HashMap[uint256, DynArray[uint256, 5]]
+
+@internal
+def mutate() -> uint256:
+    self.h[0] = [5, 5, 5]
+    return 0
+
+@external
+def foo() -> uint256:
+    self.h[0] = [1, 2, 3]
+    return self.h[self.mutate()][0]
+    """
+    c = get_contract(code)
+    assert c.foo() == 5
+
+
+# Module‑level DynArray changed by a library function used in slice
+def test_refresh_module_array(get_contract, make_input_bundle):
+    lib1 = """
+d: public(DynArray[uint256, 5])
+
+interface Foo:
+    def touch () -> uint256: nonpayable
+
+@external
+def touch() -> uint256:
+    self.d = [4]
+    return 0
+"""
+    main = """
+import lib1
+initializes: lib1
+
+exports: lib1.touch
+
+@external
+def foo() -> uint256:
+    lib1.d = [1]
+    return lib1.d[extcall lib1.Foo(self).touch()]
+    """
+    c = get_contract(main, input_bundle=make_input_bundle({"lib1.vy": lib1}))
+    assert c.foo() == 4
+
+
+# Entire struct replaced between container & slice evaluation
+def test_refresh_struct_replaced(get_contract):
+    code = """
+struct S:
+    v: DynArray[uint256, 5]
+s: S
+
+def mutate() -> uint256:
+    self.s = S(v=[42])
+    return 0
+
+@external
+def foo() -> uint256:
+    self.s = S(v=[1])
+    return self.s.v[self.mutate()]
+    """
+    c = get_contract(code)
+    assert c.foo() == 42
+
+
+# Attribute‑subscript chain where parent struct mutates in slice
+def test_refresh_attr_then_subscript(get_contract):
+    code = """
+struct Inner:
+    b: DynArray[uint256, 5]
+struct Outer:
+    a: Inner
+o: Outer
+
+@internal
+def tweak() -> uint256:
+    self.o = Outer(a=Inner(b=[9, 8, 7]))
+    return 0
+
+@external
+def foo() -> uint256:
+    self.o = Outer(a=Inner(b=[1, 2, 3]))
+    return self.o.a.b[self.tweak()]
+    """
+    c = get_contract(code)
+    assert c.foo() == 9
+
+
+# Static array completely replaced before subscript
+def test_refresh_static_array_replaced(get_contract):
+    code = """
+a: uint256[3]
+
+@internal
+def poke() -> uint256:
+    self.a = [9, 9, 9]
+    return 1
+
+@external
+def foo() -> uint256:
+    self.a = [1, 2, 3]
+    return self.a[self.poke()]
+    """
+    c = get_contract(code)
+    assert c.foo() == 9
+
+
+# Module variable, base NOT evaluated in visitor but must refresh
+def test_refresh_module_base_lazy(get_contract, make_input_bundle):
+    lib1 = """
+arr: DynArray[uint256, 5]
+
+interface Foo:
+    def swap() -> uint256: nonpayable
+
+@external
+def swap() -> uint256:
+    self.arr = [11]
+    return 0
+"""
+    main = """
+import lib1
+initializes: lib1
+
+exports: lib1.swap
+
+@external
+def foo() -> uint256:
+    lib1.arr = [1]
+    return lib1.arr[extcall lib1.Foo(self).swap()]
+    """
+    c = get_contract(main, input_bundle=make_input_bundle({"lib1.vy": lib1}))
+    assert c.foo() == 11
+
+
+# Deep library hierarchy, mutation in grand‑child module
+def test_refresh_grandchild_module(get_contract, make_input_bundle):
+    lib2 = """
+val: DynArray[uint256, 5]
+"""
+    lib1 = """
+import lib2
+initializes: lib2
+
+def ping() -> uint256:
+    lib2.val = [33]
+    return 0
+"""
+    main = """
+import lib1
+import lib2
+
+initializes: lib1
+uses: lib2
+
+@external
+def foo() -> uint256:
+    lib2.val = [1]
+    return lib2.val[lib1.ping()]
+    """
+    input_bundle = make_input_bundle({"lib1.vy": lib1, "lib2.vy": lib2})
+    c = get_contract(main, input_bundle=input_bundle)
+    assert c.foo() == 33
+
+
+# Pop‑then‑append on outer DynArray while reading inner DynArray
+def test_refresh_pop_append_outer(get_contract):
+    code = """
+d: DynArray[DynArray[uint256, 2], 2]
+
+@internal
+def juggle() -> uint256:
+    self.d.pop()
+    self.d.append([77, 88])
+    return 0
+
+@external
+def foo() -> uint256:
+    self.d = [[11, 22]]
+    return self.d[self.juggle()][1]
+    """
+    c = get_contract(code)
+    assert c.foo() == 88
+
+
+# Mapping‑of‑struct with inner DynArray mutated in slice
+def test_refresh_mapping_struct_inner(get_contract):
+    code = """
+struct S:
+    x: DynArray[uint256, 5]
+m: HashMap[uint256, S]
+
+@internal
+def touch() -> uint256:
+    self.m[0] = S(x=[55])
+    return 0
+
+@external
+def foo() -> uint256:
+    self.m[0] = S(x=[3])
+    return self.m[0].x[self.touch()]
+    """
+    c = get_contract(code)
+    assert c.foo() == 55
+
+
+# ---------------------------------------------------------------------
+# 12. Two‑level subscript, both indices have side effects
+# ---------------------------------------------------------------------
+def test_refresh_double_index_side_effect(get_contract):
+    code = """
+nested: DynArray[DynArray[uint256, 2], 2]
+
+@internal
+def first() -> uint256:
+    self.nested.pop()           # remove outer[1]
+    self.nested.append([9, 9])  # push new outer[1]
+    return 1
+
+@internal
+def second() -> uint256:
+    self.nested[1][0] = 42
+    return 0
+
+@external
+def foo() -> uint256:
+    self.nested = [[1, 1], [2, 2]]
+    return self.nested[self.first()][self.second()]
+    """
+    c = get_contract(code)
+    assert c.foo() == 42
