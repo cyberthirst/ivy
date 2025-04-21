@@ -274,9 +274,7 @@ def test_fail2() -> Bytes[3]:
 
 
 # test data returned from external interface gets clamped
-def test_json_abi_bytes_clampers(
-    get_contract, tx_failed, make_input_bundle
-):
+def test_json_abi_bytes_clampers(get_contract, tx_failed, make_input_bundle):
     external_contract = """
 @external
 def returns_Bytes3() -> Bytes[3]:
