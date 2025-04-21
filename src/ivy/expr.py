@@ -19,7 +19,7 @@ from vyper.semantics.types.utils import type_from_annotation
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal, Struct
+from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -251,6 +251,9 @@ class ExprVisitor(BaseVisitor):
             return self.visit(node.body)
         else:
             return self.visit(node.orelse)
+
+    def visit_HexBytes(self, node: ast.HexBytes):
+        return node.value
 
     def visit_ExtCall(self, node: ast.ExtCall):
         return self._visit_external_call(node, is_static=False)
