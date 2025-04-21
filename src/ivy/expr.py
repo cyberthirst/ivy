@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import Optional
+from typing import Optional, Any, Callable
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -19,7 +19,7 @@ from vyper.semantics.types.utils import type_from_annotation
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
-from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
+from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal, Struct
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -101,29 +101,103 @@ class ExprVisitor(BaseVisitor):
             return ret
         return self.get_variable(node.id, node)
 
-    def visit_Attribute(self, node: ast.Attribute):
-        if node.attr in ADDRESS_VARIABLES:
+    def _resolve_attribute(self, node: ast.Attribute, base_val=None):
+        """
+        Return the value of *node*.
+        `base_val` is an optional *already evaluated* base object.
+        Only the branches that actually need the runtime object will
+        evaluate `self.visit(node.value)` (or use base_val if provided).
+        """
+        attr = node.attr
+
+        # address helpers  (x.address, x.balance ..)
+        if attr in ADDRESS_VARIABLES:
             return self._handle_address_variable(node)
 
+        # environment variables (block.*, msg.* ..)
         if isinstance(node.value, ast.Name) and node.value.id in ENVIRONMENT_VARIABLES:
             return self._handle_env_variable(node)
 
         typ = node.value._metadata["type"]
         if hasattr(typ, "typedef"):
             typ = typ.typedef
-        if isinstance(typ, (SelfT, ModuleT)):
-            return self.get_variable(node.attr, node)
 
+        # self.x   or   MyModule.x
+        if isinstance(typ, (SelfT, ModuleT)):
+            return self.get_variable(attr, node)
+
+        # struct.foo
         if isinstance(typ, StructT):
-            obj = self.visit(node.value)
-            return obj[node.attr]
+            if base_val is None:
+                base_val = self.visit(node.value)  # lazy
+            return base_val[attr]
+
+        # MyFlag.BLUE
         if isinstance(typ, FlagT):
-            return Flag(typ, node.attr)
+            return Flag(typ, attr)
+
+        if base_val is None:
+            base_val = self.visit(node.value)  # lazy
+        return getattr(base_val, attr)
+
+    def visit_Attribute(self, node: ast.Attribute):
+        return self._resolve_attribute(node)
+
+    def _eval_with_refresh(self, node: ast.VyperNode) -> tuple[Any, Callable[[], Any]]:
+        """
+        Evaluate *node* and return a tuple
+            (value, refresh_callable)
+        so that refresh_callable() will give the **current** value again
+        *without* re‑executing any of the side‑effectful code that
+        might have been inside the original expression.
+        """
+
+        if isinstance(node, ast.Attribute):
+            typ = node.value._metadata["type"]
+            if hasattr(typ, "typedef"):
+                typ = typ.typedef
+
+            if isinstance(typ, (SelfT, ModuleT)):
+                result = self._resolve_attribute(node, base_val=None)
+
+                def attribute_refresher_1(n=node, self_obj=self):
+                    return self_obj._resolve_attribute(n, base_val=None)
+
+                refresher = attribute_refresher_1
+                return result, refresher
+
+            base_val, base_refresh = self._eval_with_refresh(node.value)
+            result = self._resolve_attribute(node, base_val)
+
+            def attribute_refresher_2(br=base_refresh, n=node, self_obj=self):
+                return self_obj._resolve_attribute(n, br())
+
+            refresher = attribute_refresher_2
+            return result, refresher
+
+        if isinstance(node, ast.Subscript):
+            base_val, base_refresh = self._eval_with_refresh(node.value)
+
+            idx = self.visit(node.slice)
+
+            def subscript_refresher(br=base_refresh, i=idx):
+                return br()[i]
+
+            return base_val[idx], subscript_refresher
+
+        value = self.visit(node)
+
+        def value_refresher(v=value):
+            return v
+
+        return value, value_refresher
 
     def visit_Subscript(self, node: ast.Subscript):
-        value = self.visit(node.value)
-        slice = self.visit(node.slice)
-        return value[slice]
+        container, refresh = self._eval_with_refresh(node.value)
+        index = self.visit(node.slice)
+
+        container = refresh()
+        return container[index]
 
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)

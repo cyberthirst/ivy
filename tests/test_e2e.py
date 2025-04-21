@@ -2493,3 +2493,48 @@ def foo(a: bool, b: bool, c: bool) -> bool:
 
     c = loads(src)
     assert c.foo(False, True, True) == True
+
+
+def test_array_index_overlap(get_contract):
+    code = """
+struct Foo:
+    d: DynArray[DynArray[uint256, 5], 5]
+    
+a: Foo
+    
+@external
+def foo() -> uint256:
+    self.a.d.append([1, 2, 3])
+    return self.a.d[self.bar()][0]
+
+
+@internal
+def bar() -> uint256:
+    self.a.d.pop()
+    self.a.d.append([4, 5, 6])
+    return 0
+    """
+    c = get_contract(code)
+    assert c.foo() == 4
+
+
+def test_array_index_overlap2(get_contract, tx_failed):
+    code = """
+struct Foo:
+    d: DynArray[DynArray[uint256, 5], 5]
+
+a: Foo
+
+@external
+def foo() -> uint256:
+    self.a.d.append([1, 2, 3])
+    return self.a.d[self.bar()][0]
+
+
+@internal
+def bar() -> uint256:
+    self.a = Foo(d=[[4]])
+    return 0
+    """
+    c = get_contract(code)
+    assert c.foo() == 4
