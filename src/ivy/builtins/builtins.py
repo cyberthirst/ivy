@@ -377,3 +377,8 @@ def builtin_unsafe_div(typs, x, y):
 def builtin_floor(x):
     assert isinstance(x, VyperDecimal)
     return x.value // x.SCALING_FACTOR
+
+
+def builtin_epsilon(typ):
+    assert isinstance(typ, DecimalT)
+    return VyperDecimal(1, scaled=True)

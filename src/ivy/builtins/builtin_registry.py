@@ -26,6 +26,7 @@ from ivy.builtins.builtins import (
     builtin_unsafe_mul,
     builtin_unsafe_div,
     builtin_floor,
+    builtin_epsilon,
 )
 
 
@@ -93,6 +94,7 @@ class BuiltinRegistry:
             "unsafe_mul": BuiltinWrapper(builtin_unsafe_mul, needs_types=True),
             "unsafe_div": BuiltinWrapper(builtin_unsafe_div, needs_types=True),
             "floor": BuiltinWrapper(builtin_floor),
+            "epsilon": BuiltinWrapper(builtin_epsilon),
         }
 
     def get(self, name):
