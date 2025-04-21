@@ -61,13 +61,16 @@ def _encode_static_array(
 ) -> bytes:
     if not isinstance(value, (list, StaticArray)):
         raise EncodeError(f"Expected list, got {type(value)}")
-    if len(value) != abi_t.m_elems:
+    # see __len__ in StaticArray to understand why we can't use it
+    value_len = len(value) if isinstance(value, list) else value.length
+    if value_len != abi_t.m_elems:
         raise EncodeError(
-            f"Static array length mismatch: expected {abi_t.m_elems}, got {len(value)}"
+            f"Static array length mismatch: expected {abi_t.m_elems}, got {value.length}"
         )
 
     tuple_abi_t = ABI_Tuple(subtyps=[abi_t.subtyp for _ in range(abi_t.m_elems)])
-    return _encode_tuple(tuple_abi_t, tuple(value))
+    # see __len__ in StaticArray to understand why we use iter
+    return _encode_tuple(tuple_abi_t, tuple(iter(value)))
 
 
 def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: list) -> bytes:

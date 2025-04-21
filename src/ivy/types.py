@@ -232,7 +232,9 @@ class _Sequence(_Container, Generic[T]):
         self.length = 0
 
     def _raise_index_error(self, idx: int):
-        raise IndexError(f"Sequence index out of range: {idx} not in [0, {len(self)})")
+        raise IndexError(
+            f"Sequence index out of range: {idx} not in [0, {self.length})"
+        )
 
     def __getitem__(self, idx: int) -> T:
         if idx >= self.length or idx < 0:
@@ -257,8 +259,14 @@ class _Sequence(_Container, Generic[T]):
         return self.length
 
     def __iter__(self):
-        for i in range(self.length):
-            yield self[i]
+        index = 0
+        while True:
+            try:
+                value = self[index]
+                yield value
+                index += 1
+            except IndexError:
+                break
 
     def __str__(self):
         values = [str(self[i]) for i in range(self.length)]

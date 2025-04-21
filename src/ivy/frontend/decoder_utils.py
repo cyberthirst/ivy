@@ -5,7 +5,8 @@ from ivy.types import StaticArray, DynamicArray, Map
 
 def decode_ivy_object(v, typ):
     if isinstance(v, (StaticArray, DynamicArray)):
-        v = list(v)
+        # see __len__ in StaticArray to understand why we use iter
+        v = list(iter(v))
         if typ_needs_decode(typ.value_type):
             v = [decode_ivy_object(x, typ.value_type) for x in v]
     if isinstance(v, Map):
