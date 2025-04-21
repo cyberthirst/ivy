@@ -56,6 +56,10 @@ class VyperValidator:
 
     @classmethod
     def validate_sequence_len(cls, value, typ):
+        if isinstance(value, StaticArray):
+            assert isinstance(typ, SArrayT)
+            assert value.length == typ.length
+            return
         if len(value) > typ.length:
             raise ValueError(
                 f"Invalid length for {typ}: expected at most {typ.count}, got {len(value)}"

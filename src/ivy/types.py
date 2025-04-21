@@ -228,13 +228,14 @@ class _Sequence(_Container, Generic[T]):
         assert isinstance(typ, _SequenceT)
         super().__init__(typ)
         self.value_type = typ.value_type
-        self.length = typ.length
+        self.capacity = typ.length
+        self.length = 0
 
     def _raise_index_error(self, idx: int):
         raise IndexError(f"Sequence index out of range: {idx} not in [0, {len(self)})")
 
     def __getitem__(self, idx: int) -> T:
-        if idx >= len(self) or idx < 0:
+        if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
         # TODO: should we journal None or default value?
         # now we journal None, hence we need to check for None
@@ -245,7 +246,7 @@ class _Sequence(_Container, Generic[T]):
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
-        if idx >= len(self) or idx < 0:
+        if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
 
         self._journal(idx, loc)
@@ -256,26 +257,28 @@ class _Sequence(_Container, Generic[T]):
         return self.length
 
     def __iter__(self):
-        for i in range(len(self)):
+        for i in range(self.length):
             yield self[i]
 
     def __str__(self):
-        values = [str(self[i]) for i in range(len(self))]
+        values = [str(self[i]) for i in range(self.length)]
         return f"[{', '.join(values)}]"
 
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
         result.value_type = self.value_type
         result.length = self.length
+        result.capacity = self.capacity
         return result
 
 
 class StaticArray(_Sequence[T]):
     def __init__(self, typ: SArrayT, values: Optional[Dict[int, T]] = None):
         super().__init__(typ)
+        self.length = self.capacity
         if values:
             self._values = values
-            assert len(values) == self.length
+            assert len(values) == self.capacity
 
     def append(self, value: T):
         raise AttributeError("'StaticArray' object has no attribute 'append'")
@@ -283,44 +286,50 @@ class StaticArray(_Sequence[T]):
     def pop(self) -> T:
         raise AttributeError("'StaticArray' object has no attribute 'pop'")
 
+    # Vyper doesn't allow calling `len` on StaticArrays
+    # further, the length can exceed `sys.maxsize` - if that happens
+    # the Python runtime throws
+    def __len__(self) -> int:
+        raise AttributeError("'StaticArray' object has no attribute 'len'")
+
 
 class DynamicArray(_Sequence[T]):
     def __init__(self, typ: DArrayT, values: Optional[Dict[int, T]] = None):
         super().__init__(typ)
-        self._length = 0
+        self.length = 0
         if values:
             self._values = values
-            assert len(values) <= self.length
-            self._length = len(values)
+            assert len(values) <= self.capacity
+            self.length = len(values)
 
     def __len__(self) -> int:
-        return self._length
+        return self.length
 
     def append(self, value: T):
-        if len(self) >= self.length:
-            raise ValueError(f"Cannot exceed maximum length {self.length}")
+        if len(self) >= self.capacity:
+            raise ValueError(f"Cannot exceed maximum length {self.capacity}")
 
         # TODO journal the length change
 
-        idx = self._length
+        idx = self.length
         self._values[idx] = value
-        self._length += 1
+        self.length += 1
 
     def pop(self) -> T:
-        if not self._length:
+        if not self.length:
             raise IndexError("pop from empty array")
 
         # TODO journal the length change
 
-        idx = self._length - 1
-        self._length -= 1
+        idx = self.length - 1
+        self.length -= 1
 
         value = self._values.pop(idx)
         return value
 
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
-        result._length = self._length
+        result.length = self.length
         return result
 
 
