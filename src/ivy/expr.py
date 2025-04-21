@@ -14,6 +14,8 @@ from vyper.semantics.types import (
     BytesM_T,
 )
 from vyper.semantics.types.module import ModuleT
+from vyper.semantics.namespace import Namespace
+from vyper.semantics.types.utils import type_from_annotation
 
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
@@ -28,6 +30,8 @@ ADDRESS_VARIABLES = {
     "codehash",
     "code",
 }
+
+NAMESPACE = Namespace()
 
 
 class ExprVisitor(BaseVisitor):
@@ -92,6 +96,9 @@ class ExprVisitor(BaseVisitor):
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
             return self.current_address
+        if node.id in NAMESPACE:
+            ret = type_from_annotation(node)
+            return ret
         return self.get_variable(node.id, node)
 
     def visit_Attribute(self, node: ast.Attribute):
