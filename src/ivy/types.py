@@ -15,7 +15,7 @@ from vyper.semantics.types import (
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
 
-from ivy.utils import lrudict
+from ivy.utils import lrudict, _trunc_div
 from ivy.journal import Journal, JournalEntryType
 
 
@@ -94,6 +94,10 @@ class Flag:
         return hash(self.value)
 
 
+# NOTE: keep an eye on the truncate vs floor problem when implementing new
+# ops on Decimals
+# q = a // d        # floor division  (Python) - towards -inf for negative
+# t = trunc(a / d)  # truncation      (EVM) - towards zero for negative
 class VyperDecimal:
     PRECISION = 10
     SCALING_FACTOR = 10**PRECISION
@@ -131,28 +135,45 @@ class VyperDecimal:
         return VyperDecimal(scaled_result_value, scaled=True)
 
     def __mul__(self, other: "VyperDecimal") -> "VyperDecimal":
-        scaled_result_value = self.value * other.value // self.SCALING_FACTOR
-        return VyperDecimal(scaled_result_value, scaled=True)
+        product = self.value * other.value
+
+        scaled = abs(product) // self.SCALING_FACTOR
+
+        if product < 0:
+            scaled = -scaled
+
+        # overflow check
+        if scaled > self.MAX_VALUE or scaled < self.MIN_VALUE:
+            raise ValueError("Decimal multiplication overflow")
+
+        return VyperDecimal(scaled, scaled=True)
 
     def __truediv__(self, other: "VyperDecimal") -> "VyperDecimal":
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
-        scaled_result_value = (self.value * self.SCALING_FACTOR) // other.value
+        num = abs(self.value) * self.SCALING_FACTOR
+        den = abs(other.value)
+        scaled = num // den
 
-        result = VyperDecimal(scaled_result_value, scaled=True)
-        return result
+        if (self.value < 0) ^ (other.value < 0):
+            scaled = -scaled
+
+        return VyperDecimal(scaled, scaled=True)
 
     def __floordiv__(self, other: "VyperDecimal") -> "VyperDecimal":
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
-        intermediate_scaled_value = (self.value * self.SCALING_FACTOR) // other.value
-        final_scaled_value = (
-            intermediate_scaled_value // self.SCALING_FACTOR
-        ) * self.SCALING_FACTOR
+        num = abs(self.value) * self.SCALING_FACTOR
+        den = abs(other.value)
+        q = num // den  # truncate toward 0
+        q = (q // self.SCALING_FACTOR) * self.SCALING_FACTOR
 
-        return VyperDecimal(final_scaled_value, scaled=True)
+        if (self.value < 0) ^ (other.value < 0):
+            q = -q
+
+        return VyperDecimal(q, scaled=True)
 
     def __lt__(self, other: "VyperDecimal") -> bool:
         return self.value < other.value
@@ -181,6 +202,15 @@ class VyperDecimal:
         dec_part = str_value[-self.PRECISION :]
 
         return f"{'-' if is_negative else ''}{int_part}.{dec_part}"
+
+    def __mod__(self, other: "VyperDecimal") -> "VyperDecimal":
+        if other.value <= 0:
+            raise ZeroDivisionError("Modulo divisor must be positive")
+
+        a, b = self.value, other.value
+        truncated_quotient = _trunc_div(a, b)
+        remainder = a - truncated_quotient * b
+        return VyperDecimal(remainder, scaled=True)
 
     def __repr__(self) -> str:
         return f"Decimal('{self.__str__()}')"

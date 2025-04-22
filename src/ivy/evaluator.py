@@ -152,6 +152,9 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
 
     @classmethod
     def visit_FloorDiv(cls, _, left, right):
+        if isinstance(left, VyperDecimal):
+            assert isinstance(right, VyperDecimal)
+            return left // right
         if right == 0:
             raise ZeroDivisionError("Cannot divide by zero")
         # python has different rounding semantics than vyper
@@ -162,10 +165,13 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
 
     @classmethod
     def visit_Mod(cls, _, left, right):
-        if right == 0:
-            raise ZeroDivisionError("Cannot modulo by zero")
+        if isinstance(left, VyperDecimal):
+            assert isinstance(right, VyperDecimal)
+            return left % right
+        if not right > 0:
+            raise ValueError("Cannot modulo by non-positive integers")
         sgn = -1 if left < 0 else 1
-        return sgn * (abs(left) % abs(right))
+        return sgn * (abs(left) % right)
 
     @classmethod
     def visit_Pow(cls, _, left, right):
