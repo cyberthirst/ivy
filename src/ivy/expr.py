@@ -20,6 +20,7 @@ from vyper.semantics.types.utils import type_from_annotation
 from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
 from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
+from ivy.operators import get_operator_handler
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -199,15 +200,21 @@ class ExprVisitor(BaseVisitor):
         container = refresh()
         return container[index]
 
+    def _eval_op(self, node, *args):
+        handler = get_operator_handler(node.op)
+        res = handler(*args)
+        self.evaluator.validate_value(node, res)
+        return res
+
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)
         right = self.visit(node.right)
-        return self.evaluator.eval_binop(node, left, right)
+        return self._eval_op(node, left, right)
 
     def visit_Compare(self, node: ast.Compare):
         left = self.visit(node.left)
         right = self.visit(node.right)
-        return self.evaluator.eval_compare(node, left, right)
+        return self._eval_op(node, left, right)
 
     def visit_BoolOp(self, node: ast.BoolOp):
         if isinstance(node.op, ast.Or):
@@ -224,11 +231,12 @@ class ExprVisitor(BaseVisitor):
             if result == short_circuit_value:
                 return result
 
-        return self.evaluator.eval_boolop(node, evaluated_values)
+        assert isinstance(result, bool)
+        return result
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
         operand = self.visit(node.operand)
-        return self.evaluator.eval_unaryop(node, operand)
+        return self._eval_op(node, operand)
 
     def visit_List(self, node: ast.List):
         idx = 0

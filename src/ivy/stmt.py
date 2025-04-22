@@ -9,6 +9,8 @@ from vyper.utils import method_id
 from ivy.abi import abi_encode
 from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
+from ivy.operators import get_operator_handler
+from ivy.evaluator import VyperEvaluator
 
 
 class ReturnException(Exception):
@@ -25,6 +27,8 @@ class BreakException(Exception):
 
 
 class StmtVisitor(BaseVisitor):
+    evaluator: VyperEvaluator
+
     def visit_Expr(self, node: ast.Expr):
         return self.visit(node.value)
 
@@ -113,12 +117,13 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
-        target_value = self.visit(node.target)
-        value = self.visit(node.value)
-        new_value = self.evaluator.eval_binop(
-            node, target_value, value, aug_assign=True
-        )
-        self._assign_target(node.target, new_value)
+        target_val = self.visit(node.target)
+        rhs_val = self.visit(node.value)
+
+        handler = get_operator_handler(node.op)
+        new_val = handler(target_val, rhs_val)
+        self.evaluator.validate_value(node.target, new_val)
+        self._assign_target(node.target, new_val)
         return None
 
     def visit_Continue(self, node: ast.Continue):
