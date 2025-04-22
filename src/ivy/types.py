@@ -163,8 +163,8 @@ class VyperDecimal:
         return VyperDecimal(q, scaled=True)
 
     def __mod__(self, other: "VyperDecimal") -> "VyperDecimal":
-        if other.value <= 0:
-            raise ZeroDivisionError("Modulo divisor must be positive")
+        if other.value == 0:
+            raise ZeroDivisionError("Cannot modulo by zero")
 
         rem = self.value - _trunc_div(self.value, other.value) * other.value
         return VyperDecimal(rem, scaled=True)

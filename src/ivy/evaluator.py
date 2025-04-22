@@ -168,10 +168,10 @@ class VyperEvaluator(BaseClassVisitor, VyperValidator):
         if isinstance(left, VyperDecimal):
             assert isinstance(right, VyperDecimal)
             return left % right
-        if not right > 0:
-            raise ValueError("Cannot modulo by non-positive integers")
+        if right == 0:
+            raise ValueError("Cannot modulo by 0")
         sgn = -1 if left < 0 else 1
-        return sgn * (abs(left) % right)
+        return sgn * (abs(left) % abs(right))
 
     @classmethod
     def visit_Pow(cls, _, left, right):
