@@ -1,4 +1,5 @@
 from typing import Any, Union, Optional
+import math
 
 from vyper.exceptions import UnimplementedException
 from vyper.semantics.types import (
@@ -382,8 +383,29 @@ def builtin_floor(x):
 def builtin_epsilon(typ):
     assert isinstance(typ, DecimalT)
     return VyperDecimal(1, scaled=True)
+
+def builtin_sqrt(x: "VyperDecimal") -> "VyperDecimal":
+    """
+    The underlying value is stored as an integer N = floor(d * 10**10).
+    We want to compute floor(sqrt(d) * 10**10) in one step.
+
+    Let S = 10**10 and N = x.value = floor(d · 10**10).
+
+    Then:
+      N · S = d · 10**10 · 10**10 = d · 10**20
+      sqrt(N · S) = sqrt(d · 10**10) = sqrt(d) · 10**10
+    """
+    assert isinstance(x, VyperDecimal)
+    if x.value < 0:
+        raise ValueError("Square root of negative number")
+    if x.value == 0:
+        return VyperDecimal(0, scaled=True)
+
+    y_scaled: int = math.isqrt(x.value * VyperDecimal.SCALING_FACTOR)
+    return VyperDecimal(y_scaled, scaled=True)
+
+
 def builtin_isqrt(a: int) -> int:
-    """Integer square root with **downward** rounding, using ``math.isqrt``."""
     if a < 0:
         raise ValueError("Square root of negative number")
     return math.isqrt(a)

@@ -27,6 +27,7 @@ from ivy.builtins.builtins import (
     builtin_unsafe_div,
     builtin_floor,
     builtin_epsilon,
+    builtin_sqrt,
     builtin_isqrt,
 )
 
@@ -96,6 +97,7 @@ class BuiltinRegistry:
             "unsafe_div": BuiltinWrapper(builtin_unsafe_div, needs_types=True),
             "floor": BuiltinWrapper(builtin_floor),
             "epsilon": BuiltinWrapper(builtin_epsilon),
+            "sqrt": BuiltinWrapper(builtin_sqrt),
             "isqrt": BuiltinWrapper(builtin_isqrt),
         }
 
