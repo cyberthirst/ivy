@@ -3,7 +3,7 @@ from typing import Any, Optional
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
-from ivy.evaluator import VyperEvaluator
+from ivy.defaults import get_default_value
 from ivy.evm.evm_structures import Account, Message
 from ivy.types import Address
 
@@ -23,7 +23,7 @@ class FunctionContext:
         self.scopes.pop()
 
     def new_variable(self, key, typ: VyperType):
-        value = VyperEvaluator.default_value(typ)
+        value = get_default_value(typ)
         assert key not in self.scopes[-1]
         self.scopes[-1][key] = value
 

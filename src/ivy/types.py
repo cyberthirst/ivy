@@ -248,9 +248,9 @@ class _Sequence(_Container, Generic[T]):
         # TODO: should we journal None or default value?
         # now we journal None, hence we need to check for None
         if idx not in self._values or self._values[idx] is None:
-            from ivy.evaluator import VyperEvaluator
+            from ivy.defaults import get_default_value
 
-            self._values[idx] = VyperEvaluator.default_value(self.value_type)
+            self._values[idx] = get_default_value(self.value_type)
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
@@ -355,9 +355,9 @@ class Map(_Container):
 
     def __getitem__(self, key):
         if key not in self._values or self._values[key] is None:
-            from ivy.evaluator import VyperEvaluator
+            from ivy.defaults import get_default_value
 
-            self._values[key] = VyperEvaluator.default_value(self.value_type)
+            self._values[key] = get_default_value(self.value_type)
         return self._values[key]
 
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):

@@ -1,30 +1,9 @@
-from typing import Any
-
-from vyper.ast import nodes as ast
 from vyper.semantics.types import (
-    BoolT,
-    InterfaceT,
-    FlagT,
-    IntegerT,
-    BytesT,
-    StringT,
-    StructT,
-    AddressT,
-    BytesM_T,
-    TupleT,
-    HashMapT,
-    DArrayT,
     SArrayT,
-    DecimalT,
 )
 
 from ivy.types import (
-    Address,
-    Struct,
-    Flag,
     StaticArray,
-    DynamicArray,
-    Map,
     VyperDecimal,
 )
 from ivy.visitor import BaseClassVisitor
@@ -103,36 +82,3 @@ class VyperValidator:
 # so we better mimic safe math operations
 class VyperEvaluator(BaseClassVisitor, VyperValidator):
     pass
-
-    # TODO: rewrite to smth like dict for const-time dispatch
-    # NOTE: maybe should just lazily fetch the default value for state vars?
-    @classmethod
-    def default_value(cls, typ):
-        if isinstance(typ, IntegerT):
-            return 0
-        if isinstance(typ, DArrayT):
-            return DynamicArray(typ)
-        if isinstance(typ, SArrayT):
-            return StaticArray(typ)
-        if isinstance(typ, BytesT):
-            return b""
-        if isinstance(typ, BytesM_T):
-            return b"\x00" * typ.length
-        if isinstance(typ, StringT):
-            return ""
-        if isinstance(typ, StructT):
-            kws = {k: cls.default_value(v) for k, v in typ.members.items()}
-            return Struct(typ, kws)
-        if isinstance(typ, HashMapT):
-            return Map(typ)
-        if isinstance(typ, BoolT):
-            return False
-        if isinstance(typ, AddressT) or isinstance(typ, InterfaceT):
-            return Address(0)
-        if isinstance(typ, FlagT):
-            return Flag(typ, 0)
-        if isinstance(typ, TupleT):
-            return tuple(cls.default_value(t) for t in typ.member_types)
-        if isinstance(typ, DecimalT):
-            return VyperDecimal(0)
-        raise NotImplementedError(f"Default value for {typ} not implemented")

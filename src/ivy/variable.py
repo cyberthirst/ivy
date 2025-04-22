@@ -4,7 +4,7 @@ from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType, BoolT
 
-from ivy.evaluator import VyperEvaluator
+from ivy.defaults import get_default_value
 from ivy.journal import Journal, JournalEntryType
 
 
@@ -26,7 +26,7 @@ class GlobalVariable:
         self.get_location = get_location
         self.address = address
         if initial_value is None:
-            initial_value = VyperEvaluator.default_value(typ)
+            initial_value = get_default_value(typ)
         self.get_location()[self.address] = initial_value
         self.varinfo = varinfo
 
@@ -34,7 +34,7 @@ class GlobalVariable:
     def value(self):
         location = self.get_location()
         if self.address not in location:
-            location[self.address] = VyperEvaluator.default_value(self.typ)
+            location[self.address] = get_default_value(self.typ)
         return location[self.address]
 
     @value.setter
