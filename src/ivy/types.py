@@ -94,11 +94,9 @@ class Flag:
         return hash(self.value)
 
 
-# NOTE: keep an eye on the truncate vs floor problem when implementing new
-# ops on Decimals
-# q = a // d        # floor division  (Python) - towards -inf for negative
-# t = trunc(a / d)  # truncation      (EVM) - towards zero for negative
 class VyperDecimal:
+    """Fixed‑point decimal matching Vyper/EVM 10‑dec semantics."""
+
     PRECISION = 10
     SCALING_FACTOR = 10**PRECISION
 
@@ -117,33 +115,26 @@ class VyperDecimal:
         result.value = cls.MIN_VALUE
         return result
 
-    def __init__(self, value: Union[str, int, float], scaled: bool = False):
+    def __init__(self, value: Union[str, int, float], *, scaled: bool = False):
         if not scaled:
             self.value = int(value * self.SCALING_FACTOR)
         else:
             self.value = value
 
-        if self.value > self.MAX_VALUE or self.value < self.MIN_VALUE:
+        if not (self.MIN_VALUE <= self.value <= self.MAX_VALUE):
             raise ValueError("Decimal value out of bounds")
 
     def __add__(self, other: "VyperDecimal") -> "VyperDecimal":
-        scaled_result_value = self.value + other.value
-        return VyperDecimal(scaled_result_value, scaled=True)
+        return VyperDecimal(self.value + other.value, scaled=True)
 
     def __sub__(self, other: "VyperDecimal") -> "VyperDecimal":
-        scaled_result_value = self.value - other.value
-        return VyperDecimal(scaled_result_value, scaled=True)
+        return VyperDecimal(self.value - other.value, scaled=True)
 
     def __mul__(self, other: "VyperDecimal") -> "VyperDecimal":
         product = self.value * other.value
+        scaled = _trunc_div(product, self.SCALING_FACTOR)
 
-        scaled = abs(product) // self.SCALING_FACTOR
-
-        if product < 0:
-            scaled = -scaled
-
-        # overflow check
-        if scaled > self.MAX_VALUE or scaled < self.MIN_VALUE:
+        if not (self.MIN_VALUE <= scaled <= self.MAX_VALUE):
             raise ValueError("Decimal multiplication overflow")
 
         return VyperDecimal(scaled, scaled=True)
@@ -152,12 +143,10 @@ class VyperDecimal:
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
-        num = abs(self.value) * self.SCALING_FACTOR
-        den = abs(other.value)
-        scaled = num // den
+        scaled = _trunc_div(self.value * self.SCALING_FACTOR, other.value)
 
-        if (self.value < 0) ^ (other.value < 0):
-            scaled = -scaled
+        if not (self.MIN_VALUE <= scaled <= self.MAX_VALUE):
+            raise ValueError("Decimal division overflow")
 
         return VyperDecimal(scaled, scaled=True)
 
@@ -165,15 +154,20 @@ class VyperDecimal:
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
-        num = abs(self.value) * self.SCALING_FACTOR
-        den = abs(other.value)
-        q = num // den  # truncate toward 0
-        q = (q // self.SCALING_FACTOR) * self.SCALING_FACTOR
+        q = _trunc_div(self.value * self.SCALING_FACTOR, other.value)
+        q = (q // self.SCALING_FACTOR) * self.SCALING_FACTOR  # drop frac part
 
-        if (self.value < 0) ^ (other.value < 0):
-            q = -q
+        if not (self.MIN_VALUE <= q <= self.MAX_VALUE):
+            raise ValueError("Decimal floor‑division overflow")
 
         return VyperDecimal(q, scaled=True)
+
+    def __mod__(self, other: "VyperDecimal") -> "VyperDecimal":
+        if other.value <= 0:
+            raise ZeroDivisionError("Modulo divisor must be positive")
+
+        rem = self.value - _trunc_div(self.value, other.value) * other.value
+        return VyperDecimal(rem, scaled=True)
 
     def __lt__(self, other: "VyperDecimal") -> bool:
         return self.value < other.value
@@ -181,11 +175,11 @@ class VyperDecimal:
     def __le__(self, other: "VyperDecimal") -> bool:
         return self.value <= other.value
 
-    def __eq__(self, other: "VyperDecimal") -> bool:
-        return self.value == other.value
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, VyperDecimal) and self.value == other.value
 
-    def __ne__(self, other: "VyperDecimal") -> bool:
-        return self.value != other.value
+    def __ne__(self, other: object) -> bool:
+        return not self == other
 
     def __ge__(self, other: "VyperDecimal") -> bool:
         return self.value >= other.value
@@ -193,38 +187,20 @@ class VyperDecimal:
     def __gt__(self, other: "VyperDecimal") -> bool:
         return self.value > other.value
 
+    def truncate(self) -> "VyperDecimal":
+        truncated_int = (
+            _trunc_div(self.value, self.SCALING_FACTOR) * self.SCALING_FACTOR
+        )
+        return VyperDecimal(truncated_int, scaled=True)
+
     def __str__(self) -> str:
-        is_negative = self.value < 0
-        abs_value = abs(self.value)
-
-        str_value = str(abs_value).zfill(self.PRECISION + 1)
-        int_part = str_value[: -self.PRECISION] or "0"
-        dec_part = str_value[-self.PRECISION :]
-
-        return f"{'-' if is_negative else ''}{int_part}.{dec_part}"
-
-    def __mod__(self, other: "VyperDecimal") -> "VyperDecimal":
-        if other.value <= 0:
-            raise ZeroDivisionError("Modulo divisor must be positive")
-
-        a, b = self.value, other.value
-        truncated_quotient = _trunc_div(a, b)
-        remainder = a - truncated_quotient * b
-        return VyperDecimal(remainder, scaled=True)
+        neg = self.value < 0
+        s = f"{abs(self.value):0{self.PRECISION + 1}d}"
+        int_part, dec_part = s[: -self.PRECISION] or "0", s[-self.PRECISION :]
+        return f"{'-' if neg else ''}{int_part}.{dec_part}"
 
     def __repr__(self) -> str:
-        return f"Decimal('{self.__str__()}')"
-
-    def truncate(self) -> "VyperDecimal":
-        result = VyperDecimal(0)
-        # Divide by scaling factor first (removes decimal places)
-        # Then multiply back to maintain the internal representation
-        if self.value >= 0:
-            result.value = (self.value // self.SCALING_FACTOR) * self.SCALING_FACTOR
-        else:
-            # For negative numbers, we need to handle truncation towards zero
-            result.value = -((-self.value // self.SCALING_FACTOR) * self.SCALING_FACTOR)
-        return result
+        return f"Decimal('{self}')"
 
 
 T = TypeVar("T")

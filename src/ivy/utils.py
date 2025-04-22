@@ -62,3 +62,12 @@ def compute_contract_address(address, nonce):
     computed_address = keccak(rlp.encode([address, nonce]))
     canonical_address = computed_address[-20:]
     return canonical_address
+
+
+def _trunc_div(n: int, d: int) -> int:
+    """
+    Integer division rounded **toward 0** for all sign combinations.
+    Caller must ensure d != 0.
+    """
+    q = abs(n) // abs(d)  # non‑negative → already truncated
+    return -q if (n < 0) ^ (d < 0) else q
