@@ -141,7 +141,9 @@ def test_sqrt_bounds(sqrt_contract, value):
 @pytest.mark.fuzzing
 @hypothesis.given(
     value=hypothesis.strategies.decimals(
-        min_value=Decimal(0), max_value=Decimal(SizeLimits.MAX_INT128), places=DECIMAL_PLACES
+        min_value=Decimal(0),
+        max_value=Decimal(SizeLimits.MAX_INT128),
+        places=DECIMAL_PLACES,
     )
 )
 @hypothesis.example(value=Decimal(SizeLimits.MAX_INT128))
@@ -159,7 +161,9 @@ def test_sqrt_valid_range(sqrt_contract, value):
 @pytest.mark.fuzzing
 @hypothesis.given(
     value=hypothesis.strategies.decimals(
-        min_value=Decimal(SizeLimits.MIN_INT128), max_value=Decimal("-1E10"), places=DECIMAL_PLACES
+        min_value=Decimal(SizeLimits.MIN_INT128),
+        max_value=Decimal("-1E10"),
+        places=DECIMAL_PLACES,
     )
 )
 @hypothesis.example(value=Decimal(SizeLimits.MIN_INT128))

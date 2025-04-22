@@ -384,6 +384,7 @@ def builtin_epsilon(typ):
     assert isinstance(typ, DecimalT)
     return VyperDecimal(1, scaled=True)
 
+
 def builtin_sqrt(x: "VyperDecimal") -> "VyperDecimal":
     """
     The underlying value is stored as an integer N = floor(d * 10**10).
