@@ -4,7 +4,7 @@ from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import VyperType, BoolT
 
-from ivy.defaults import get_default_value
+from ivy.expr.default_values import get_default_value
 from ivy.journal import Journal, JournalEntryType
 
 

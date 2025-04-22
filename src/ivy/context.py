@@ -3,7 +3,7 @@ from typing import Any, Optional
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
-from ivy.defaults import get_default_value
+from ivy.expr.default_values import get_default_value
 from ivy.evm.evm_structures import Account, Message
 from ivy.types import Address
 

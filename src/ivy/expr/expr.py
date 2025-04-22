@@ -19,8 +19,8 @@ from vyper.semantics.types.utils import type_from_annotation
 
 from ivy.visitor import BaseVisitor
 from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
-from ivy.operators import get_operator_handler
-from ivy.type_validator import validate_value
+from ivy.expr.operators import get_operator_handler
+from ivy.expr.clamper import validate_value
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {

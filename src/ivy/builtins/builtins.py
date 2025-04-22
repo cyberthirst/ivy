@@ -21,7 +21,7 @@ from vyper.utils import method_id
 from ivy.abi import abi_decode, abi_encode
 import ivy.builtins.create_utils as create_utils
 from ivy.context import ExecutionOutput
-from ivy.defaults import get_default_value
+from ivy.expr.default_values import get_default_value
 from ivy.exceptions import GasReference, Revert
 from ivy.types import Address, VyperDecimal
 import ivy.builtins.convert_utils as convert_utils

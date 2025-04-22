@@ -248,7 +248,7 @@ class _Sequence(_Container, Generic[T]):
         # TODO: should we journal None or default value?
         # now we journal None, hence we need to check for None
         if idx not in self._values or self._values[idx] is None:
-            from ivy.defaults import get_default_value
+            from ivy.expr.default_values import get_default_value
 
             self._values[idx] = get_default_value(self.value_type)
         return self._values[idx]
@@ -355,7 +355,7 @@ class Map(_Container):
 
     def __getitem__(self, key):
         if key not in self._values or self._values[key] is None:
-            from ivy.defaults import get_default_value
+            from ivy.expr.default_values import get_default_value
 
             self._values[key] = get_default_value(self.value_type)
         return self._values[key]

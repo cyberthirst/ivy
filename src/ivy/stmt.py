@@ -9,8 +9,8 @@ from vyper.utils import method_id
 from ivy.abi import abi_encode
 from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
-from ivy.operators import get_operator_handler
-from ivy.type_validator import validate_value
+from ivy.expr.operators import get_operator_handler
+from ivy.expr.clamper import validate_value
 
 
 class ReturnException(Exception):

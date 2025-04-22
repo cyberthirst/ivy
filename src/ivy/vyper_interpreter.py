@@ -27,7 +27,7 @@ from vyper.exceptions import TypeMismatch
 from vyper.semantics.types.shortcuts import UINT256_T
 from vyper.utils import keccak256
 
-from ivy.expr import ExprVisitor
+from ivy.expr.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
