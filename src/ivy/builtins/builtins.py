@@ -382,3 +382,8 @@ def builtin_floor(x):
 def builtin_epsilon(typ):
     assert isinstance(typ, DecimalT)
     return VyperDecimal(1, scaled=True)
+def builtin_isqrt(a: int) -> int:
+    """Integer square root with **downward** rounding, using ``math.isqrt``."""
+    if a < 0:
+        raise ValueError("Square root of negative number")
+    return math.isqrt(a)
