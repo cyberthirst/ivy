@@ -1,4 +1,4 @@
-from typing import Optional, Type, Any
+from typing import Optional, Any
 
 import vyper.ast.nodes as ast
 from vyper.semantics.analysis.base import StateMutability, Modifiability
@@ -29,7 +29,6 @@ from vyper.utils import keccak256
 
 from ivy.expr import ExprVisitor
 from ivy.stmt import ReturnException, StmtVisitor
-from ivy.evaluator import VyperEvaluator
 from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
@@ -49,10 +48,7 @@ from ivy.exceptions import Revert
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
-    evaluator: Type[VyperEvaluator]
-
     def __init__(self):
-        self.evaluator = VyperEvaluator
         self.evm = EVMCore(callbacks=self)
         self.state: StateAccess = self.evm.state
         self.builtins = BuiltinRegistry(self.evm, self.state)

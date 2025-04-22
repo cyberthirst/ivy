@@ -17,10 +17,10 @@ from vyper.semantics.types.module import ModuleT
 from vyper.semantics.namespace import Namespace
 from vyper.semantics.types.utils import type_from_annotation
 
-from ivy.evaluator import VyperEvaluator
 from ivy.visitor import BaseVisitor
 from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
 from ivy.operators import get_operator_handler
+from ivy.type_validator import validate_value
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -36,8 +36,6 @@ NAMESPACE = Namespace()
 
 
 class ExprVisitor(BaseVisitor):
-    evaluator: VyperEvaluator
-
     @abstractmethod
     def generic_call_handler(
         self,
@@ -203,7 +201,7 @@ class ExprVisitor(BaseVisitor):
     def _eval_op(self, node, *args):
         handler = get_operator_handler(node.op)
         res = handler(*args)
-        self.evaluator.validate_value(node, res)
+        validate_value(node, res)
         return res
 
     def visit_BinOp(self, node: ast.BinOp):
