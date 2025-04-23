@@ -19,6 +19,7 @@ from ivy.types import Address
 from ivy.frontend.event import Event, RawEvent
 from ivy.frontend.decoder_utils import decode_ivy_object, typ_needs_decode
 from ivy.evm.evm_structures import Log
+from tests.contract_dumper import dump_contract
 
 
 class BaseDeployer(ABC):
@@ -202,8 +203,10 @@ class VyperContract:
 
     def _run_init(self, *args, value=0):
         encoded_args = b""
+        self.ctor_encoded_args = ""
         if self._ctor:
             encoded_args = self._ctor.prepare_calldata(*args)
+            self.ctor_encoded_args = encoded_args.hex()
 
         module = self.compiler_data.annotated_vyper_module
 
@@ -287,7 +290,11 @@ class VyperFunction:
 
     def __call__(self, *args, value=0, sender=None, **kwargs):
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
-
+        dump_contract(
+            self.contract.compiler_data,
+            self.contract.ctor_encoded_args,
+            calldata_bytes.hex(),
+        )
         res = self.env.execute_code(
             to_address=self.contract._address,
             sender=sender,
