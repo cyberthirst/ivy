@@ -3,7 +3,7 @@ from decimal import ROUND_FLOOR, Decimal
 import hypothesis
 import pytest
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 from vyper.utils import SizeLimits
 
 DECIMAL_PLACES = 10

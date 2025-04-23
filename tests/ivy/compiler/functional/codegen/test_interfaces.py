@@ -3,14 +3,8 @@ import json
 import pytest
 from eth_utils import to_wei
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 from vyper.compiler import compile_code
-from vyper.exceptions import (
-    ArgumentException,
-    DuplicateImport,
-    InterfaceViolation,
-    NamespaceCollision,
-)
 
 
 def test_external_call_to_interface(env, get_contract, make_input_bundle):

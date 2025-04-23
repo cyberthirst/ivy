@@ -3,15 +3,9 @@ from decimal import getcontext
 
 import pytest
 
-import vyper.compiler.settings as compiler_settings
-from tests.utils import decimal_to_int
-from vyper import compile_code
+from tests.ivy.utils import decimal_to_int
 from vyper.exceptions import (
     DecimalOverrideException,
-    FeatureException,
-    InvalidOperation,
-    OverflowException,
-    TypeMismatch,
 )
 from vyper.utils import DECIMAL_EPSILON, SizeLimits, quantize
 

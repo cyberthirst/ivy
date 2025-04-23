@@ -3,7 +3,7 @@ import pytest
 from dataclasses import dataclass
 from typing import Any
 
-from tests.conftest import get_contract
+from tests.ivy.conftest import get_contract
 
 
 @pytest.mark.parametrize("reverts", [True, False])

@@ -362,6 +362,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # x.code: codecopy/extcodecopy of address x
         elif node.attr == "code":
             raise NotImplementedError("code")
+        else:
+            assert False, "unreachable"
 
     def _handle_env_variable(self, node: ast.Attribute):
         key = f"{node.value.id}.{node.attr}"
@@ -399,6 +401,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise GasReference()
         elif key == "chain.id":
             return self.env.chain_id
+        else:
+            assert False, "unreachable"
 
     def _inside_minimal_proxy(self):
         decl_node = self.current_context.contract.module_t.decl_node

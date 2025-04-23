@@ -1,7 +1,4 @@
-import pytest
-
-from tests.utils import decimal_to_int
-from vyper.exceptions import ZeroDivisionException
+from tests.ivy.utils import decimal_to_int
 
 
 def test_modulo(get_contract):

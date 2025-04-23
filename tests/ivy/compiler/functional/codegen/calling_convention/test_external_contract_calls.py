@@ -1,10 +1,8 @@
 import pytest
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 from vyper import compile_code
 from vyper.exceptions import (
-    ArgumentException,
-    InvalidType,
     StateAccessViolation,
     StructureException,
     UndeclaredDefinition,

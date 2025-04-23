@@ -1,4 +1,4 @@
-from tests.utils import ZERO_ADDRESS, decimal_to_int
+from tests.ivy.utils import ZERO_ADDRESS, decimal_to_int
 
 
 def search_for_sublist(ir, sublist):

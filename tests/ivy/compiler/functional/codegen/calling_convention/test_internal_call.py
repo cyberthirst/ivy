@@ -4,7 +4,7 @@ import hypothesis.strategies as st
 import pytest
 from hypothesis import given, settings
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 
 
 def test_selfcall_code(get_contract):

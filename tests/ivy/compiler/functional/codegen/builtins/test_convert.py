@@ -7,7 +7,7 @@ from decimal import Decimal
 
 import pytest
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 from vyper.compiler import compile_code
 from vyper.exceptions import InvalidLiteral, InvalidType, TypeMismatch
 from vyper.semantics.types import (

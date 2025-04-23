@@ -4,7 +4,7 @@ from eth_utils import to_text
 
 from vyper.utils import keccak256
 
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 
 
 def test_empty_event_logging(get_logs, get_contract):

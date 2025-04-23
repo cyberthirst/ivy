@@ -1,14 +1,4 @@
-import pytest
-
-from tests.utils import ZERO_ADDRESS
-from vyper.compiler import compile_code
-from vyper.exceptions import (
-    InvalidLiteral,
-    NonPayableViolation,
-    StateAccessViolation,
-    TypeMismatch,
-    UndeclaredDefinition,
-)
+from tests.ivy.utils import ZERO_ADDRESS
 from vyper.utils import method_id
 
 

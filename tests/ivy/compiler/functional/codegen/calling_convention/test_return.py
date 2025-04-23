@@ -1,6 +1,6 @@
 import pytest
 
-from tests.utils import ZERO_ADDRESS
+from tests.ivy.utils import ZERO_ADDRESS
 from vyper import compile_code
 from vyper.exceptions import TypeMismatch
 

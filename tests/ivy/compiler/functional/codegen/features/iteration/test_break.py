@@ -1,4 +1,4 @@
-from tests.utils import decimal_to_int
+from tests.ivy.utils import decimal_to_int
 
 
 def test_break_test(get_contract):
