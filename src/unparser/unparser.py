@@ -144,10 +144,8 @@ class Unparser(VyperNodeVisitorBase):
 
         self.w(signature + ":")
 
-
         with self.block():
             self._process_body(node.body)
-
 
     def _process_body(self, body):
         prev_was_def = False
@@ -236,10 +234,11 @@ class Unparser(VyperNodeVisitorBase):
 
     def visit_For(self, node):
         assert isinstance(node.target, ast.AnnAssign)
-        self.w(f"for {self.visit_AnnAssign(node.target, as_expr=True)} in {self._expr(node.iter)}:")
+        self.w(
+            f"for {self.visit_AnnAssign(node.target, as_expr=True)} in {self._expr(node.iter)}:"
+        )
         with self.block():
             self._process_body(node.body)
-
 
     def visit_Break(self, node):
         self.w("break")
@@ -275,6 +274,12 @@ class Unparser(VyperNodeVisitorBase):
         self.w(f"exports {self._expr(node.annotation)}")
 
     # Expressions ----------------------------------------------------------
+    def visit_Expr(self, node):
+        self.w(self._expr(node.value))
+
+    def visit_NameConstant(self, node):
+        return str(node.value)
+
     def visit_Name(self, node):
         return node.id
 

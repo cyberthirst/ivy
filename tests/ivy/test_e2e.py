@@ -700,7 +700,7 @@ def bar() -> uint256:
 
 @external
 def foo() -> uint256:
-    b: Bytes[32] = raw_call(self, abi_encode(method_id=method_id("bar()")), max_outsize=32)
+    b: Bytes[32] = raw_call(self, abi_encode(b'', method_id=method_id("bar()")), max_outsize=32)
     return abi_decode(b, uint256)
     """
 

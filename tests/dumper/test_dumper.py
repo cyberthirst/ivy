@@ -1,6 +1,6 @@
-import json
-
 import dumper.contract_dumper as contract_dumper
+
+from vyper.compiler import compile_code
 
 
 def test_replay_all_calldatas(get_contract, env):
@@ -16,7 +16,7 @@ def test_replay_all_calldatas(get_contract, env):
         _ = rec.get("ctor_args", "")
         _ = rec.get("calldatas", [])
 
-        _ = get_contract(source)
+        _ = compile_code(source)
 
         # the calls can fail as we log also failing calls
         # until we store the result, we can't easily test this
