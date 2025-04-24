@@ -5,7 +5,8 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "vyper @ git+https://github.com/vyperlang/vyper.git@v0.4.1b2",
+    "vyper @ git+https://github.com/vyperlang/vyper.git@v0.4.1",
+    "titanoboa @ git+https://github.com/cyberthirst/titanoboa.git@vyzzer-fuzzing",
     "ruff>=0.6.4",
     "pre-commit>=3.8.0",
     "pytest==7.4.3",
