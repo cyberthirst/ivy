@@ -8,8 +8,7 @@ def test_replay_all_calldatas(get_contract, env):
     Load every recorded contract and re-invoke it using each saved calldata payload.
     This ensures that all previously captured calls remain valid at runtime.
     """
-    with open(contract_dumper.JSON_DB_PATH, "r", encoding="utf-8") as f:
-        records = json.load(f)
+    records = contract_dumper.load_records()
 
     # Replay each calldata for its corresponding contract
     for rec in records:

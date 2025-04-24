@@ -1,11 +1,9 @@
-import json
 import logging
-from pathlib import Path
 
+from dumper import contract_dumper
 from ivy.frontend.loader import loads as ivy_loads
 from boa import loads as boa_loads
 
-DB_PATH = Path(__file__).parent.parent.parent / "tests" / "contract_db.json"
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -109,8 +107,7 @@ def compare_runs(source, calldatas):
 
 
 def main():
-    with open(DB_PATH, "r", encoding="utf-8") as f:
-        records = json.load(f)
+    records = contract_dumper.load_records()
 
     for rec in records:
         source = rec.get("source")
