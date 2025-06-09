@@ -68,6 +68,7 @@ def loads(
     filename=None,
     compiler_args=None,
     input_bundle=None,
+    encoded_constructor_args=None,
     **kwargs,
 ):
     d = loads_partial(
@@ -80,6 +81,8 @@ def loads(
     if as_blueprint:
         return d.deploy_as_blueprint(**kwargs)
     else:
+        if encoded_constructor_args is not None:
+            kwargs["encoded_constructor_args"] = encoded_constructor_args
         return d.deploy(*args, **kwargs)
 
 

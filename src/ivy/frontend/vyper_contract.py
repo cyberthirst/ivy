@@ -20,6 +20,7 @@ from ivy.frontend.event import Event, RawEvent
 from ivy.frontend.decoder_utils import decode_ivy_object, typ_needs_decode
 from ivy.evm.evm_structures import Log
 
+
 class BaseDeployer(ABC):
     def __init__(self, compiler_data, filename=None):
         self.compiler_data = compiler_data
@@ -58,11 +59,18 @@ class VyperContract:
         value=0,
         env: Env = None,
         filename: str = None,
+        encoded_constructor_args: bytes | str = None,
     ):
         self.compiler_data = compiler_data
         self.env = env or Env.get_singleton()
         self.filename = filename
         self._execution_output = None
+
+        if args and encoded_constructor_args is not None:
+            raise ValueError(
+                "Cannot provide both constructor arguments and encoded constructor arguments. "
+                "Use either *args or encoded_constructor_args, not both."
+            )
 
         # TODO collect all the exposed funcs in ivy to avoid introducing
         # a potential Vyper bug
@@ -78,7 +86,9 @@ class VyperContract:
                 compiler_data.global_ctx.init_function.decl_node, self
             )
 
-        addr = self._run_init(*args, value=value)
+        addr = self._run_init(
+            *args, value=value, encoded_constructor_args=encoded_constructor_args
+        )
 
         self._address = addr
 
@@ -199,10 +209,21 @@ class VyperContract:
 
         return ret
 
-    def _run_init(self, *args, value=0):
+    def _run_init(self, *args, value=0, encoded_constructor_args=None):
         encoded_args = b""
         self.ctor_encoded_args = ""
-        if self._ctor:
+
+        if encoded_constructor_args is not None:
+            if isinstance(encoded_constructor_args, str):
+                encoded_args = bytes.fromhex(encoded_constructor_args.replace("0x", ""))
+            elif isinstance(encoded_constructor_args, bytes):
+                encoded_args = encoded_constructor_args
+            else:
+                raise TypeError(
+                    f"encoded_constructor_args must be bytes or str, got {type(encoded_constructor_args)}"
+                )
+            self.ctor_encoded_args = encoded_args.hex()
+        elif self._ctor:
             encoded_args = self._ctor.prepare_calldata(*args)
             self.ctor_encoded_args = encoded_args.hex()
 
