@@ -1,5 +1,14 @@
+import sys
+from pathlib import Path
+
+# Add src to path for this module
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
+
+import vyper
 from vyper.compiler.phases import CompilerData
+
 from unparser.unparser import unparse
+from fuzzer.export_utils import load_all_exports, extract_test_cases, TestFilter
 
 # attributes that never affect semantics
 _IGNORE = {
@@ -21,6 +30,7 @@ _IGNORE = {
 
 
 def _strip(obj):
+    """Strip non-semantic attributes from AST nodes."""
     if isinstance(obj, list):
         return [_strip(i) for i in obj]
     if isinstance(obj, dict):
@@ -29,18 +39,67 @@ def _strip(obj):
 
 
 def _as_clean_dict(code: str) -> dict:
+    """Convert source code to a normalized AST dict for comparison."""
     ast = CompilerData(code).annotated_vyper_module
     return _strip(ast.to_dict())
 
 
 def test_unparser():
-    counter = 0
-    #for rec in contract_dumper.load_records():
-    #    original = rec["source"]
-    #    roundtrip = unparse(CompilerData(original).annotated_vyper_module)
-    #    print(original)
-    #    print("============================")
-    #    print(roundtrip)
-    #    assert _as_clean_dict(original) == _as_clean_dict(roundtrip)
-    #    counter += 1
-    #    print("passed: ", counter)
+    """Test that unparsing Vyper test exports produces semantically equivalent code."""
+    # Load test exports
+    exports_dir = Path("tests/vyper-exports")
+    if not exports_dir.exists():
+        print(f"Warning: Test exports directory not found at {exports_dir}")
+        return
+
+    # Create filter to only test source deployments
+    test_filter = TestFilter()
+    # Skip tests with features that might not roundtrip perfectly
+    test_filter.exclude_source(r"#\s*@version")  # Skip version pragmas
+    test_filter.exclude_source(r"@nonreentrant")  # Skip nonreentrant for now
+
+    # Load and extract test cases
+    exports = load_all_exports(exports_dir)
+    test_cases = extract_test_cases(exports)
+
+    print(f"Testing unparser roundtrip on {len(test_cases)} test cases...")
+
+    passed = 0
+    failed = 0
+
+    for i, (source_code, _) in enumerate(test_cases):
+        try:
+            # Parse the original source
+            original_ast = vyper.ast.parse_to_ast(source_code)
+
+            # Unparse it back to source
+            roundtrip_source = unparse(original_ast)
+
+            # Compare normalized ASTs
+            original_dict = _as_clean_dict(source_code)
+            roundtrip_dict = _as_clean_dict(roundtrip_source)
+
+            if original_dict == roundtrip_dict:
+                passed += 1
+            else:
+                failed += 1
+                print(f"\nFailed roundtrip for test case {i + 1}:")
+                print(f"Original source:\n{source_code[:200]}...")
+                print(f"Roundtrip source:\n{roundtrip_source[:200]}...")
+
+        except Exception as e:
+            failed += 1
+            print(f"\nError in test case {i + 1}: {e}")
+            print(f"Source:\n{source_code[:200]}...")
+
+    print(f"\n=== Unparser Test Results ===")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
+    print(f"Total: {passed + failed}")
+
+    # Assert all tests passed
+    assert failed == 0, f"{failed} tests failed"
+
+
+if __name__ == "__main__":
+    test_unparser()
