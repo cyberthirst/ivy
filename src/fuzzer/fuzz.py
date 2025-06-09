@@ -1,6 +1,5 @@
 import logging
 
-from dumper import contract_dumper
 from ivy.frontend.loader import loads as ivy_loads
 from boa import loads as boa_loads
 
@@ -107,14 +106,15 @@ def compare_runs(source, calldatas):
 
 
 def main():
-    records = contract_dumper.load_records()
+    #records = contract_dumper.load_records()
 
-    for rec in records:
-        source = rec.get("source")
-        calldatas = rec.get("calldatas", [])
-        if not calldatas:
-            continue
-        compare_runs(source, calldatas)
+    #for rec in records:
+    #    source = rec.get("source")
+    #    calldatas = rec.get("calldatas", [])
+    #    if not calldatas:
+    #        continue
+    #    compare_runs(source, calldatas)
+    pass
 
 
 if __name__ == "__main__":

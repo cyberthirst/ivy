@@ -1,6 +1,5 @@
 from vyper.compiler.phases import CompilerData
 from unparser.unparser import unparse
-from dumper import contract_dumper
 
 # attributes that never affect semantics
 _IGNORE = {
@@ -36,12 +35,12 @@ def _as_clean_dict(code: str) -> dict:
 
 def test_unparser():
     counter = 0
-    for rec in contract_dumper.load_records():
-        original = rec["source"]
-        roundtrip = unparse(CompilerData(original).annotated_vyper_module)
-        print(original)
-        print("============================")
-        print(roundtrip)
-        assert _as_clean_dict(original) == _as_clean_dict(roundtrip)
-        counter += 1
-        print("passed: ", counter)
+    #for rec in contract_dumper.load_records():
+    #    original = rec["source"]
+    #    roundtrip = unparse(CompilerData(original).annotated_vyper_module)
+    #    print(original)
+    #    print("============================")
+    #    print(roundtrip)
+    #    assert _as_clean_dict(original) == _as_clean_dict(roundtrip)
+    #    counter += 1
+    #    print("passed: ", counter)

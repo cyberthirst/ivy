@@ -19,8 +19,6 @@ from ivy.types import Address
 from ivy.frontend.event import Event, RawEvent
 from ivy.frontend.decoder_utils import decode_ivy_object, typ_needs_decode
 from ivy.evm.evm_structures import Log
-from dumper.contract_dumper import dump_contract
-
 
 class BaseDeployer(ABC):
     def __init__(self, compiler_data, filename=None):
@@ -291,11 +289,7 @@ class VyperFunction:
     def __call__(self, *args, value=0, sender=None, **kwargs):
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
         # TODO it's slowing the runtime by a bit
-        dump_contract(
-            self.contract.compiler_data,
-            self.contract.ctor_encoded_args,
-            calldata_bytes.hex(),
-        )
+
         res = self.env.execute_code(
             to_address=self.contract._address,
             sender=sender,
