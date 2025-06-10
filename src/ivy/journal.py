@@ -13,6 +13,9 @@ class JournalEntryType(Enum):
     BALANCE = auto()
     ACCOUNT_CREATION = auto()
     ACCOUNT_DESTRUCTION = auto()
+    NONCE = auto()
+    CODE = auto()
+    TRANSIENT_STORAGE = auto()
 
 
 class JournalEntry:
@@ -137,13 +140,24 @@ class Journal:
 
     def _apply_rollback(self, entry: JournalEntry) -> None:
         if entry.entry_type == JournalEntryType.BALANCE:
-            entry.obj.balance = entry.old_value
+            entry.obj._balance = entry.old_value
         elif entry.entry_type == JournalEntryType.STORAGE:
             entry.obj[entry.key] = entry.old_value
+        elif entry.entry_type == JournalEntryType.TRANSIENT_STORAGE:
+            if entry.old_value is None:
+                # Key didn't exist before, remove it
+                entry.obj.pop(entry.key, None)
+            else:
+                entry.obj[entry.key] = entry.old_value
+        elif entry.entry_type == JournalEntryType.NONCE:
+            entry.obj.nonce = entry.old_value
+        elif entry.entry_type == JournalEntryType.CODE:
+            entry.obj.contract_data = entry.old_value
         elif entry.entry_type == JournalEntryType.ACCOUNT_CREATION:
-            pass
+            if entry.key in entry.obj:
+                del entry.obj[entry.key]
         elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
-            pass
+            entry.obj[entry.key] = entry.old_value
         else:
             raise ValueError(f"Unknown journal entry type: {entry.entry_type}")
 

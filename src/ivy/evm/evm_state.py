@@ -4,20 +4,53 @@ from typing import Optional, Protocol
 from ivy.evm.evm_structures import Account, ContractData, Environment
 from ivy.types import Address
 from ivy.context import ExecutionContext, ExecutionOutput
+from ivy.journal import Journal, JournalEntryType
 
 
 class EVMState:
     def __init__(self):
-        self.state = defaultdict(lambda: Account(0, 0, {}, {}, None))
+        self.state = defaultdict(lambda: self._create_account(None))
         self.execution_contexts: list[ExecutionContext] = []
         self.accessed_accounts = set()
         self._env = None
+        self._journal = Journal()
+
+    def _create_account(self, address):
+        """Create a new account and journal it if we're in an active transaction."""
+        account = Account(0, 0, {}, {}, None)
+        if address is not None and self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.ACCOUNT_CREATION,
+                self.state,  # obj is the state dict
+                address,     # key is the address
+                None         # old value is None for new accounts
+            )
+        return account
 
     def __getitem__(self, key):
-        return self.state[key]
+        # Check if this is a new account creation
+        is_new = key not in self.state
+        account = self.state[key]
+        if is_new and self._journal.is_active:
+            # Record the account creation
+            self._journal.record(
+                JournalEntryType.ACCOUNT_CREATION,
+                self.state,
+                key,
+                None
+            )
+        return account
 
     def __delitem__(self, key: Address):
         if key in self.state:
+            # Journal the account destruction
+            if self._journal.is_active:
+                self._journal.record(
+                    JournalEntryType.ACCOUNT_DESTRUCTION,
+                    self.state,
+                    key,
+                    self.state[key]  # Save the account for potential rollback
+                )
             # TODO do we care about accessed accounts?
             # account = self.state[key]
             # if account in self.accessed_accounts:
@@ -32,7 +65,15 @@ class EVMState:
         return self.state[address].nonce
 
     def increment_nonce(self, address: Address):
-        self.state[address].nonce += 1
+        account = self.state[address]
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.NONCE,
+                account,
+                "nonce",
+                account.nonce
+            )
+        account.nonce += 1
 
     def get_balance(self, address: Address) -> int:
         return self.state[address].balance
@@ -44,7 +85,15 @@ class EVMState:
         return self.state[address].contract_data
 
     def set_code(self, address: Address, code: ContractData):
-        self.state[address].contract_data = code
+        account = self.state[address]
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.CODE,
+                account,
+                "contract_data",
+                account.contract_data
+            )
+        account.contract_data = code
 
     def get_storage(self, address: Address) -> dict:
         return self.state[address].storage
