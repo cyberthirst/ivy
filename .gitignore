@@ -45,3 +45,5 @@ Thumbs.db
 # PyCharm files
 ivy/.idea/*.xml
 .idea/
+
+tests/vyper-exports
