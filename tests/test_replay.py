@@ -2,9 +2,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-# Add src to path for this module
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads
 from ivy.types import Address

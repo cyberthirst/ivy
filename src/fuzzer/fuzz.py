@@ -20,7 +20,7 @@ from .export_utils import (
     extract_test_cases,
     TestFilter,
 )
-from ..unparser.unparser import unparse
+from unparser.unparser import unparse
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
