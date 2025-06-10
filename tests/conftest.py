@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Generator
 
 import pytest
 from contextlib import contextmanager
@@ -100,3 +100,15 @@ def get_logs():
 @pytest.fixture
 def keccak():
     return keccak256
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item) -> Generator:
+    """Isolate tests by reverting the state of the environment after each test.
+    """
+    env = item.funcargs.get("env")
+    if env:
+        with env.anchor():
+            yield
+    else:
+        yield

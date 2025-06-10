@@ -1,11 +1,14 @@
 import random
 from typing import Any, Optional, TypeAlias, Union
+from contextlib import contextmanager
+import copy
 
 from vyper import ast as vy_ast
 
 from ivy.vyper_interpreter import VyperInterpreter
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
+from ivy.evm.evm_structures import Account
 from ivy.context import ExecutionOutput
 
 # make mypy happy
@@ -173,3 +176,41 @@ class Env:
         )
 
         return execution_output
+
+    @contextmanager
+    def anchor(self):
+        """Create a snapshot of the current state and revert to it on exit.
+        
+        The Journal still tracks changes within transactions for proper rollback
+        on revert, but test isolation is handled at a higher level.
+        """
+        saved_state = {}
+        for addr, account in self.interpreter.state._state.state.items():
+            saved_state[addr] = Account(
+                nonce=account.nonce,
+                _balance=account._balance,
+                storage=copy.deepcopy(account.storage),
+                transient=copy.deepcopy(account.transient),
+                contract_data=account.contract_data
+            )
+        
+        # Save Env-specific state
+        saved_aliases = copy.deepcopy(self._aliases)
+        saved_contracts = copy.deepcopy(self._contracts)
+        saved_accounts = copy.deepcopy(self._accounts)
+        saved_eoa = self.eoa
+        saved_accessed_accounts = copy.deepcopy(self.interpreter.state._state.accessed_accounts)
+        
+        try:
+            yield
+        finally:
+            self.interpreter.state._state.state.clear()
+            
+            for addr, account in saved_state.items():
+                self.interpreter.state._state.state[addr] = account
+            
+            self._aliases = saved_aliases
+            self._contracts = saved_contracts
+            self._accounts = saved_accounts
+            self.eoa = saved_eoa
+            self.interpreter.state._state.accessed_accounts = saved_accessed_accounts
