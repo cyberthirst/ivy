@@ -13,7 +13,7 @@ class Scope:
         self.locals: dict[str, VyperType] = {}
 
 
-class AstMutator():
+class AstMutator:
     PROB = {
         ast.Int: 0.4,
         ast.BinOp: 0.3,
@@ -73,15 +73,11 @@ class AstMutator():
         vars_pool = []
 
         for name, typ in self.current_scope.params.items():
-            if (
-                want_type is None or typ == want_type
-            ):
+            if want_type is None or typ == want_type:
                 vars_pool.append(name)
 
         for name, typ in self.current_scope.locals.items():
-            if (
-                want_type is None or typ == want_type
-            ):
+            if want_type is None or typ == want_type:
                 vars_pool.append(name)
 
         if not vars_pool:
