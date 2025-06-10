@@ -38,6 +38,7 @@ class CallTrace:
 
     output: Optional[str]
     call_args: Dict[str, Any]
+    call_succeeded: Optional[bool] = None
 
 
 @dataclass
@@ -66,6 +67,8 @@ class TestFilter:
         self.path_excludes: List[Union[str, re.Pattern]] = []
         self.source_excludes: List[Union[str, re.Pattern]] = []
         self.source_includes: List[Union[str, re.Pattern]] = []
+        self.name_includes: List[Union[str, re.Pattern]] = []
+        self.name_excludes: List[Union[str, re.Pattern]] = []
 
     def include_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
         """Only include tests from paths matching the pattern."""
@@ -95,6 +98,20 @@ class TestFilter:
         self.source_includes.append(pattern)
         return self
 
+    def include_name(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+        """Only include tests with names matching the pattern."""
+        if isinstance(pattern, str):
+            pattern = re.compile(pattern)
+        self.name_includes.append(pattern)
+        return self
+
+    def exclude_name(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+        """Exclude tests with names matching the pattern."""
+        if isinstance(pattern, str):
+            pattern = re.compile(pattern)
+        self.name_excludes.append(pattern)
+        return self
+
     def should_skip_path(self, path: Path) -> bool:
         """Check if a path should be skipped."""
         path_str = str(path)
@@ -122,23 +139,48 @@ class TestFilter:
         if self.should_skip_path(export_path):
             return True
 
-        # Check source code filters
-        for trace in item.traces:
-            if isinstance(trace, DeploymentTrace) and trace.source_code:
-                # Check excludes
-                for pattern in self.source_excludes:
-                    if pattern.search(trace.source_code):
-                        return True
+        # Check name filters
+        # If includes are specified, name must match at least one
+        if self.name_includes:
+            matched = False
+            for pattern in self.name_includes:
+                if pattern.search(item.name):
+                    matched = True
+                    break
+            if not matched:
+                return True
 
-                # Check includes (if any specified, must match at least one)
-                if self.source_includes:
-                    matched = False
-                    for pattern in self.source_includes:
-                        if pattern.search(trace.source_code):
-                            matched = True
-                            break
-                    if not matched:
+        # Check excludes (these override includes)
+        for pattern in self.name_excludes:
+            if pattern.search(item.name):
+                return True
+
+        # Check source code filters and multi-module contracts
+        for trace in item.traces:
+            if isinstance(trace, DeploymentTrace):
+                # Skip multi-module contracts
+                if trace.solc_json and "sources" in trace.solc_json:
+                    sources = trace.solc_json["sources"]
+                    if len(sources) > 1:
+                        # This contract has multiple modules/imports
                         return True
+                
+                # Check source code filters
+                if trace.source_code:
+                    # Check excludes
+                    for pattern in self.source_excludes:
+                        if pattern.search(trace.source_code):
+                            return True
+
+                    # Check includes (if any specified, must match at least one)
+                    if self.source_includes:
+                        matched = False
+                        for pattern in self.source_includes:
+                            if pattern.search(trace.source_code):
+                                matched = True
+                                break
+                        if not matched:
+                            return True
 
         return False
 
@@ -177,6 +219,7 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                 trace = CallTrace(
                     output=trace_data.get("output"),
                     call_args=trace_data["call_args"],
+                    call_succeeded=trace_data.get("call_succeeded"),
                 )
             else:
                 raise ValueError(f"Unknown trace type: {trace_data['trace_type']}")
