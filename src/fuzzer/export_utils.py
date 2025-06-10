@@ -29,7 +29,7 @@ class DeploymentTrace:
     blueprint_initcode_prefix: Optional[str]
     deployed_address: str
     runtime_bytecode: str
-    deployment_succeeded: bool
+    deployment_succeeded: Optional[bool] = None
 
 
 @dataclass
@@ -62,9 +62,17 @@ class TestFilter:
     """Filters for selecting which tests to use."""
 
     def __init__(self):
+        self.path_includes: List[Union[str, re.Pattern]] = []
         self.path_excludes: List[Union[str, re.Pattern]] = []
         self.source_excludes: List[Union[str, re.Pattern]] = []
         self.source_includes: List[Union[str, re.Pattern]] = []
+
+    def include_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+        """Only include tests from paths matching the pattern."""
+        if isinstance(pattern, str):
+            pattern = re.compile(pattern)
+        self.path_includes.append(pattern)
+        return self
 
     def exclude_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
         """Exclude tests from paths matching the pattern."""
@@ -90,9 +98,22 @@ class TestFilter:
     def should_skip_path(self, path: Path) -> bool:
         """Check if a path should be skipped."""
         path_str = str(path)
+
+        # If includes are specified, path must match at least one
+        if self.path_includes:
+            matched = False
+            for pattern in self.path_includes:
+                if pattern.search(path_str):
+                    matched = True
+                    break
+            if not matched:
+                return True
+
+        # Check excludes (these override includes)
         for pattern in self.path_excludes:
             if pattern.search(path_str):
                 return True
+
         return False
 
     def should_skip_item(self, item: TestItem, export_path: Path) -> bool:
@@ -150,7 +171,7 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     ),
                     deployed_address=trace_data["deployed_address"],
                     runtime_bytecode=trace_data["runtime_bytecode"],
-                    deployment_succeeded=trace_data["deployment_succeeded"],
+                    deployment_succeeded=trace_data.get("deployment_succeeded"),
                 )
             elif trace_data["trace_type"] == "call":
                 trace = CallTrace(
@@ -178,6 +199,10 @@ def load_all_exports(
 ) -> Dict[Path, TestExport]:
     """Load all test exports from a directory."""
     exports_dir = Path(exports_dir)
+
+    if not exports_dir.is_absolute():
+        exports_dir = exports_dir.absolute()
+
     exports = {}
 
     for json_file in exports_dir.rglob("*.json"):
