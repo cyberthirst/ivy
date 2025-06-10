@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional, Union
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads
 from ivy.types import Address
-from fuzzer.export_utils import (
+from src.fuzzer.export_utils import (
     DeploymentTrace,
     CallTrace,
     TestExport,
@@ -100,6 +100,9 @@ class TestReplay:
         if trace.calldata:
             constructor_args = bytes.fromhex(trace.calldata)
 
+        deployment_succeeded = True
+        contract = None
+        
         try:
             contract = loads(
                 trace.source_code,
@@ -111,21 +114,35 @@ class TestReplay:
                 if trace.solc_json
                 else None,
             )
+        except Exception as e:
+            deployment_succeeded = False
+            if trace.deployment_succeeded is True:
+                # Deployment was expected to succeed but failed
+                raise Exception(f"Deployment failed unexpectedly: {e}") from e
+            # else: deployment was expected to fail, which it did
         finally:
             # Restore original eoa
             self.env.eoa = original_eoa
 
-        # Store deployed contract by both expected and actual addresses
-        self.deployed_contracts[trace.deployed_address] = contract
-
-        # Warn about address mismatch but continue
-        if contract.address != Address(trace.deployed_address):
-            print(
-                f"Warning: deployment address mismatch - "
-                f"expected {trace.deployed_address}, got {contract.address}"
+        # Check if deployment success matches expected
+        if trace.deployment_succeeded is not None and trace.deployment_succeeded != deployment_succeeded:
+            raise AssertionError(
+                f"Deployment success mismatch: expected {trace.deployment_succeeded}, got {deployment_succeeded}"
             )
-            # Also store by actual address for cross-references
-            self.deployed_contracts[str(contract.address)] = contract
+
+        # Only store contract if deployment succeeded
+        if deployment_succeeded and contract:
+            # Store deployed contract by both expected and actual addresses
+            self.deployed_contracts[trace.deployed_address] = contract
+
+            # Warn about address mismatch but continue
+            if contract.address != Address(trace.deployed_address):
+                print(
+                    f"Warning: deployment address mismatch - "
+                    f"expected {trace.deployed_address}, got {contract.address}"
+                )
+                # Also store by actual address for cross-references
+                self.deployed_contracts[str(contract.address)] = contract
 
     def _create_input_bundle(self, trace: DeploymentTrace):
         """Create an input bundle from solc_json for module imports."""
@@ -158,16 +175,31 @@ class TestReplay:
                 Address(call_args["sender"]), call_args["value"] + 10**18
             )
 
+        call_succeeded = True
+        output = b""
+        
         try:
             output = contract.message_call(
                 data=calldata,
                 value=call_args["value"],
             )
+        except Exception as e:
+            call_succeeded = False
+            if trace.call_succeeded is True:
+                # Call was expected to succeed but failed
+                raise Exception(f"Call failed unexpectedly: {e}") from e
+            # else: call was expected to fail, which it did
         finally:
             self.env.eoa = original_eoa
 
-        # Verify output matches expected
-        if trace.output is not None:
+        # Check if call success matches expected
+        if trace.call_succeeded is not None and trace.call_succeeded != call_succeeded:
+            raise AssertionError(
+                f"Call success mismatch: expected {trace.call_succeeded}, got {call_succeeded}"
+            )
+
+        # Only verify output if call succeeded and output is expected
+        if call_succeeded and trace.output is not None:
             expected_output = bytes.fromhex(trace.output)
             if output != expected_output:
                 raise AssertionError(
@@ -197,14 +229,24 @@ def validate_exports(
     results = {}
 
     for path, export in exports.items():
-        # Create one environment per export file to maintain state between fixtures and tests
-        env = Env()
-        replay = TestReplay(env)
-
+        # Process each test independently with its own environment
         for item_name, item in export.items.items():
             test_key = f"{path}::{item_name}"
+            
+            # Skip fixtures when processing top-level items (they'll be executed as dependencies)
+            if item.item_type == "fixture":
+                continue
+                
             try:
-                replay.execute_item(export, item_name)
+                # Create fresh environment for each test
+                env = Env()
+                replay = TestReplay(env)
+                
+                # Execute the test and all its dependencies in an anchored context
+                # This ensures complete isolation between tests
+                with env.anchor():
+                    replay.execute_item(export, item_name)
+                    
                 results[test_key] = True
             except Exception as e:
                 results[test_key] = False
@@ -221,7 +263,9 @@ def validate_exports(
 
 def test_replay_exports():
     test_filter = TestFilter()
-    test_filter.include_path(r"test_erc20")
+    test_filter.include_path(r"functional/codegen/")
+    test_filter.exclude_source(r"pragma nonreentrancy")
+    test_filter.exclude_source(r"import math")
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     # Report summary
