@@ -22,8 +22,8 @@ class EVMState:
             self._journal.record(
                 JournalEntryType.ACCOUNT_CREATION,
                 self.state,  # obj is the state dict
-                address,     # key is the address
-                None         # old value is None for new accounts
+                address,  # key is the address
+                None,  # old value is None for new accounts
             )
         return account
 
@@ -34,10 +34,7 @@ class EVMState:
         if is_new and self._journal.is_active:
             # Record the account creation
             self._journal.record(
-                JournalEntryType.ACCOUNT_CREATION,
-                self.state,
-                key,
-                None
+                JournalEntryType.ACCOUNT_CREATION, self.state, key, None
             )
         return account
 
@@ -49,7 +46,7 @@ class EVMState:
                     JournalEntryType.ACCOUNT_DESTRUCTION,
                     self.state,
                     key,
-                    self.state[key]  # Save the account for potential rollback
+                    self.state[key],  # Save the account for potential rollback
                 )
             # TODO do we care about accessed accounts?
             # account = self.state[key]
@@ -68,10 +65,7 @@ class EVMState:
         account = self.state[address]
         if self._journal.is_active:
             self._journal.record(
-                JournalEntryType.NONCE,
-                account,
-                "nonce",
-                account.nonce
+                JournalEntryType.NONCE, account, "nonce", account.nonce
             )
         account.nonce += 1
 
@@ -88,10 +82,7 @@ class EVMState:
         account = self.state[address]
         if self._journal.is_active:
             self._journal.record(
-                JournalEntryType.CODE,
-                account,
-                "contract_data",
-                account.contract_data
+                JournalEntryType.CODE, account, "contract_data", account.contract_data
             )
         account.contract_data = code
 

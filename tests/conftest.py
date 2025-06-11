@@ -104,8 +104,7 @@ def keccak():
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_call(item) -> Generator:
-    """Isolate tests by reverting the state of the environment after each test.
-    """
+    """Isolate tests by reverting the state of the environment after each test."""
     env = item.funcargs.get("env")
     if env:
         with env.anchor():

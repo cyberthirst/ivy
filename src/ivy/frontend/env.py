@@ -98,7 +98,7 @@ class Env:
     def message_call(
         self,
         to_address: _AddressType,
-        data: bytes,
+        data: bytes = b'',
         value: int = 0,
         get_execution_output: bool = False,
     ) -> Any:
@@ -180,7 +180,7 @@ class Env:
     @contextmanager
     def anchor(self):
         """Create a snapshot of the current state and revert to it on exit.
-        
+
         The Journal still tracks changes within transactions for proper rollback
         on revert, but test isolation is handled at a higher level.
         """
@@ -191,24 +191,26 @@ class Env:
                 _balance=account._balance,
                 storage=copy.deepcopy(account.storage),
                 transient=copy.deepcopy(account.transient),
-                contract_data=account.contract_data
+                contract_data=account.contract_data,
             )
-        
+
         # Save Env-specific state
         saved_aliases = copy.deepcopy(self._aliases)
         saved_contracts = copy.deepcopy(self._contracts)
         saved_accounts = copy.deepcopy(self._accounts)
         saved_eoa = self.eoa
-        saved_accessed_accounts = copy.deepcopy(self.interpreter.state._state.accessed_accounts)
-        
+        saved_accessed_accounts = copy.deepcopy(
+            self.interpreter.state._state.accessed_accounts
+        )
+
         try:
             yield
         finally:
             self.interpreter.state._state.state.clear()
-            
+
             for addr, account in saved_state.items():
                 self.interpreter.state._state.state[addr] = account
-            
+
             self._aliases = saved_aliases
             self._contracts = saved_contracts
             self._accounts = saved_accounts
