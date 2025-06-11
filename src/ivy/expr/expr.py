@@ -249,7 +249,7 @@ class ExprVisitor(BaseVisitor):
         return DynamicArray(typ, values)
 
     def visit_Tuple(self, node: ast.Tuple):
-        return tuple(self.visit(elem) for elem in node.elements)
+        return tuple(self.deep_copy_visit(elem) for elem in node.elements)
 
     def visit_IfExp(self, node: ast.IfExp):
         test = self.visit(node.test)

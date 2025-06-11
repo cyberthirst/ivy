@@ -2822,3 +2822,66 @@ def foo() -> uint256:
     """
     c = get_contract(code)
     assert c.foo() == 42
+
+
+def test_modify_array_in_struct_constructor(get_contract):
+    code = """
+
+d: DynArray[uint256, 10]
+
+struct Foo:
+    a: DynArray[uint256, 10]
+    b: uint256
+
+@external
+def foo() -> Foo:
+    self.d = [1, 2]
+    return Foo(a=self.d, b=self.d.pop())
+    """
+    c = get_contract(code)
+
+    assert c.foo() == ([1, 2], 2)
+
+
+def test_modify_array_in_struct_constructor2(get_contract):
+    code = """
+
+d: DynArray[uint256, 10]
+
+struct Foo:
+  a: DynArray[uint256, 10]
+  b: uint256
+  c: DynArray[uint256, 10]
+
+
+@external
+def foo() -> Foo:
+    self.d = [1, 2]
+    return Foo(
+          a=self.d,
+          b=self.d.pop(),
+          c=self.d
+      )
+
+    """
+    c = get_contract(code)
+
+    assert c.foo() == ([1, 2], 2, [1])
+
+
+def test_modify_array_in_func_call(get_contract):
+    code = """
+
+d: DynArray[uint256, 10]
+
+def process(a: DynArray[uint256, 10], b: uint256, c: DynArray[uint256, 10]) -> uint256:
+  return len(a) + b + len(c)
+
+@external
+def foo() -> uint256:
+    self.d = [1, 2]
+    return self.process(self.d, self.d.pop(), self.d)
+    """
+    c = get_contract(code)
+
+    assert c.foo() == 5

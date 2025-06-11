@@ -1025,7 +1025,6 @@ def foo() -> DynArray[{subtyp}, 3]:
 
 
 # see the test_append_pop test
-@pytest.mark.xfail
 def test_append_pop_debug(get_contract):
     """
     Debugging test for DynArray append/pop behavior
@@ -1055,7 +1054,6 @@ def foo(xs: DynArray[uint256, 5]) -> (DynArray[uint256, 5], uint256):
 # TODO see the test_append_pop_debug test - we pop within the same
 # expression and the pop propagates - we should probably fix
 # this within the overlap analysis
-@pytest.mark.xfail
 @pytest.mark.parametrize("code,check_result", append_pop_tests)
 # TODO change this to fuzz random data
 @pytest.mark.parametrize("test_data", [[1, 2, 3, 4, 5][:i] for i in range(6)])
