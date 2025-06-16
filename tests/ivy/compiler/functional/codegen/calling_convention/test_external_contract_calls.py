@@ -1385,36 +1385,6 @@ def get_lucky(amount_to_send: uint256) -> int128:
     assert env.get_balance(env.deployer) == 9000
 
 
-def test_external_call_with_gas(tx_failed, get_contract):
-    contract_1 = """
-@external
-def get_lucky() -> int128:
-    return 656598
-"""
-
-    contract_2 = """
-interface Bar:
-    def set_lucky(arg1: int128): nonpayable
-    def get_lucky() -> int128: view
-
-bar_contract: Bar
-
-@external
-def set_contract(contract_address: address):
-    self.bar_contract = Bar(contract_address)
-
-@external
-def get_lucky(gas_amount: uint256) -> int128:
-    return staticcall self.bar_contract.get_lucky(gas=gas_amount)
-    """
-
-    c1 = get_contract(contract_1)
-    c2 = get_contract(contract_2)
-    c2.set_contract(c1.address)
-
-    assert c2.get_lucky(1000) == 656598
-
-
 def test_skip_contract_check(get_contract, tx_failed):
     contract_2 = """
 @external

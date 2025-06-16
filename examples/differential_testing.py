@@ -5,8 +5,7 @@ Example script demonstrating differential testing between Ivy and Vyper compiler
 This shows how to:
 1. Load Vyper test exports
 2. Apply filters to select specific tests
-3. Run tests with and without mutations
-4. Compare outputs between Ivy and the compiler
+3. Execute test traces within Ivy interpreter
 """
 
 import sys
@@ -15,14 +14,13 @@ from pathlib import Path
 # Add parent directory to path so we can import from src
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from src.fuzzer.fuzz import DifferentialFuzzer
-from src.fuzzer.export_utils import (
+from fuzzer.fuzz import DifferentialFuzzer
+from fuzzer.export_utils import (
     TestFilter,
     CallTrace,
     filter_exports,
     extract_test_cases,
 )
-from tests.test_replay import validate_exports
 
 
 def example_basic_fuzzing():
@@ -69,9 +67,16 @@ def example_validate_exports():
     """Example: Validate that exports can be replayed correctly."""
     print("\n=== Export Validation Example ===")
 
-    # First validate without any filters
-    print("Validating all exports...")
-    results = validate_exports("tests/vyper-exports")
+    # Import here to avoid circular imports
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from tests.test_replay import validate_exports
+
+    # Create a filter for specific tests
+    test_filter = TestFilter()
+    test_filter.include_path(r"tokens/test_erc20")  # Only ERC20 tests
+
+    print("Validating ERC20 test exports...")
+    results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     total = len(results)
     successful = sum(1 for success in results.values() if success)

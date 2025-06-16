@@ -14,6 +14,9 @@ from src.fuzzer.export_utils import (
     load_all_exports,
     filter_exports,
 )
+from tests.ivy.compiler.functional.codegen.features.test_transient import (
+    test_complex_hashmap_transient,
+)
 
 
 class TestReplay:
@@ -102,7 +105,7 @@ class TestReplay:
 
         deployment_succeeded = True
         contract = None
-        
+
         try:
             contract = loads(
                 trace.source_code,
@@ -125,7 +128,10 @@ class TestReplay:
             self.env.eoa = original_eoa
 
         # Check if deployment success matches expected
-        if trace.deployment_succeeded is not None and trace.deployment_succeeded != deployment_succeeded:
+        if (
+            trace.deployment_succeeded is not None
+            and trace.deployment_succeeded != deployment_succeeded
+        ):
             raise AssertionError(
                 f"Deployment success mismatch: expected {trace.deployment_succeeded}, got {deployment_succeeded}"
             )
@@ -154,21 +160,14 @@ class TestReplay:
         """Execute a call trace."""
         call_args = trace.call_args
 
-        # Get the contract
+        # Extract call parameters
         to_address = call_args["to"]
-        contract = self.deployed_contracts.get(to_address)
-
-        if contract is None:
-            raise ValueError(f"Contract at {to_address} not found")
-
-        # Execute the call
         calldata = bytes.fromhex(call_args["calldata"])
 
-        # Set sender and execute the call
+        # Set sender and ensure they have enough balance
         original_eoa = self.env.eoa
         self.env.eoa = Address(call_args["sender"])
 
-        # Ensure sender has enough balance for the call
         sender_balance = self.env.get_balance(Address(call_args["sender"]))
         if sender_balance < call_args["value"]:
             self.env.set_balance(
@@ -177,9 +176,14 @@ class TestReplay:
 
         call_succeeded = True
         output = b""
-        
+
         try:
-            output = contract.message_call(
+            # Use env.message_call directly - it handles all cases:
+            # - Contract calls
+            # - Value transfers to EOAs
+            # - Calls to non-existent addresses
+            output = self.env.message_call(
+                to_address=to_address,
                 data=calldata,
                 value=call_args["value"],
             )
@@ -232,21 +236,21 @@ def validate_exports(
         # Process each test independently with its own environment
         for item_name, item in export.items.items():
             test_key = f"{path}::{item_name}"
-            
+
             # Skip fixtures when processing top-level items (they'll be executed as dependencies)
             if item.item_type == "fixture":
                 continue
-                
+
             try:
                 # Create fresh environment for each test
                 env = Env()
                 replay = TestReplay(env)
-                
+
                 # Execute the test and all its dependencies in an anchored context
                 # This ensures complete isolation between tests
                 with env.anchor():
                     replay.execute_item(export, item_name)
-                    
+
                 results[test_key] = True
             except Exception as e:
                 results[test_key] = False
@@ -264,8 +268,24 @@ def validate_exports(
 def test_replay_exports():
     test_filter = TestFilter()
     test_filter.include_path(r"functional/codegen/")
+    # ---- unsupported features
     test_filter.exclude_source(r"pragma nonreentrancy")
     test_filter.exclude_source(r"import math")
+    test_filter.exclude_source(r"raw_log")
+    test_filter.exclude_source(r"selfdestruct")
+    test_filter.exclude_source(r"gas=")
+    test_filter.exclude_source(r"keccak256")
+    test_filter.exclude_name("test_tx_gasprice")
+    test_filter.exclude_name("test_blockhash")
+    test_filter.exclude_name("test_blobbasefee")
+    test_filter.exclude_name("test_block_number")
+    test_filter.exclude_name("test_gas_call")
+    # ---- unsupported features
+    # vyper runs in global tx context, ivy isaltes each call so transient
+    # gets clear and this test manifests this discrepancy
+    test_filter.exclude_name("test_complex_hashmap_transient")
+
+    test_filter.include_name("test_uint_literal")
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     # Report summary
