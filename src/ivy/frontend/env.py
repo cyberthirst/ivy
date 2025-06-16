@@ -104,12 +104,13 @@ class Env:
         self,
         to_address: _AddressType,
         data: bytes = b"",
+        sender: Optional[_AddressType] = None,
         value: int = 0,
         get_execution_output: bool = False,
     ) -> Any:
         # Use execute_message for Vyper test suite compatibility
         # This doesn't increment nonce or clear transient storage
-        sender = self._get_sender()
+        sender = self._get_sender(sender)
         to = Address(to_address)
         calldata = self._convert_calldata(data)
 

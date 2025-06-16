@@ -511,7 +511,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def _external_function_call(
         self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address
     ):
-        if 'gas' in kwargs:
+        if "gas" in kwargs:
             raise GasReference()
 
         skip_contract_check = kwargs.get("skip_contract_check", False)

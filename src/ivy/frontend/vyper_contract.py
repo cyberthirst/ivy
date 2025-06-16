@@ -327,6 +327,7 @@ class VyperFunction:
                 data=calldata_bytes,
                 value=value,
                 get_execution_output=True,
+                sender=sender,
             )
 
         typ = self.func_t.return_type
