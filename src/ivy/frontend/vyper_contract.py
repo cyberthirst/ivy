@@ -307,17 +307,27 @@ class VyperFunction:
 
         return method_id + encoded_args
 
-    def __call__(self, *args, value=0, sender=None, **kwargs):
+    def __call__(self, *args, value=0, sender=None, transact=False, **kwargs):
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
-        # TODO it's slowing the runtime by a bit
 
-        res = self.env.execute_code(
-            to_address=self.contract._address,
-            sender=sender,
-            calldata=calldata_bytes,
-            value=value,
-            is_modifying=self.func_t.is_mutable,
-        )
+        if transact:
+            # Use execute_code which creates a new transaction context
+            res = self.env.execute_code(
+                to_address=self.contract._address,
+                sender=sender,
+                calldata=calldata_bytes,
+                value=value,
+                is_modifying=self.func_t.is_mutable,
+            )
+        else:
+            # Use message_call for Vyper test suite compatibility
+            # This keeps the same transaction context across multiple calls
+            res = self.env.message_call(
+                to_address=self.contract._address,
+                data=calldata_bytes,
+                value=value,
+                get_execution_output=True,
+            )
 
         typ = self.func_t.return_type
         return self.contract.marshal_to_python(res, typ)

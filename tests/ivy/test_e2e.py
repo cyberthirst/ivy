@@ -260,7 +260,7 @@ def bar() -> uint256:
 
     c = loads(src)
     for i in range(3):
-        assert c.foo() == 2
+        assert c.foo(transact=True) == 2
 
 
 def test_tstorage_variables0():
@@ -1100,9 +1100,9 @@ def bar() -> uint256:
     """
 
     c = loads(src)
-    assert c.foo() == 42
-    assert c.bar() == 0
-    assert c.foo() == 42
+    assert c.foo(transact=True) == 42
+    assert c.bar(transact=True) == 0
+    assert c.foo(transact=True) == 42
 
 
 def test_tstorage_clearing2():
@@ -1137,9 +1137,9 @@ def bar():
     """
 
     c = loads(src)
-    c.foo()
-    c.bar()
-    c.foo()
+    c.foo(transact=True)
+    c.bar(transact=True)
+    c.foo(transact=True)
 
 
 def test_abi_encode_struct(get_contract):

@@ -90,6 +90,55 @@ class EVMCore:
 
         return output
 
+    def execute_message(
+        self,
+        sender: Address,
+        to: Address,
+        value: int,
+        calldata: bytes = b"",
+        is_static: bool = False,
+    ) -> ExecutionOutput:
+        """Execute a message call in the current transaction context.
+
+        This is for Vyper test suite compatibility where multiple calls
+        happen within the same transaction context. Unlike execute_tx:
+        - Does not increment sender's nonce
+        - Does not clear transient storage
+        - Reuses existing environment if set
+        """
+        if to == b"":
+            raise ValueError("Message calls cannot deploy contracts")
+
+        code = self.state.get_code(to)
+
+        # Set up environment if not already set (first call in test)
+        if self.state.env is None:
+            self.state.env = Environment(
+                caller=sender,
+                block_hashes=[],
+                origin=sender,  # For message calls, origin is the sender
+                coinbase=sender,
+                number=0,
+                time=0,
+                prev_randao=b"",
+                chain_id=0,
+            )
+
+        message = Message(
+            caller=sender,
+            to=to,
+            create_address=None,
+            value=value,
+            data=calldata,
+            code_address=to,
+            code=code,
+            depth=0,  # Top-level call
+            is_static=is_static,
+        )
+
+        # Process the message (this handles journal, context, etc.)
+        return self.process_message(message)
+
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
     ) -> ExecutionOutput:
@@ -168,6 +217,7 @@ class EVMCore:
             ret = self.state.current_output
             self.state.pop_context()
 
+        # TODO shouldn't this be in the finally block
         self.journal.finalize_call(ret.is_error)
         return ret
 

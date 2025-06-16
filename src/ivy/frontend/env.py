@@ -71,6 +71,13 @@ class Env:
             return None
         return self._contracts.get(Address(address).canonical_address)
 
+    def _convert_calldata(self, calldata):
+        if isinstance(calldata, str):
+            assert calldata.startswith("0x")
+            calldata = bytes.fromhex(calldata[2:])
+
+        return calldata
+
     def raw_call(
         self,
         to_address: _AddressType = Address(0),
@@ -80,9 +87,7 @@ class Env:
         is_modifying: bool = True,
         get_execution_output: bool = False,
     ) -> Any:
-        if isinstance(calldata, str):
-            assert calldata.startswith("0x")
-            calldata = bytes.fromhex(calldata[2:])
+        calldata = self._convert_calldata(calldata)
 
         ret = self.execute_code(to_address, sender, value, calldata, is_modifying)
 
@@ -98,16 +103,31 @@ class Env:
     def message_call(
         self,
         to_address: _AddressType,
-        data: bytes = b'',
+        data: bytes = b"",
         value: int = 0,
         get_execution_output: bool = False,
     ) -> Any:
-        return self.raw_call(
-            to_address,
-            calldata=data,
+        # Use execute_message for Vyper test suite compatibility
+        # This doesn't increment nonce or clear transient storage
+        sender = self._get_sender()
+        to = Address(to_address)
+        calldata = self._convert_calldata(data)
+
+        execution_output = self.interpreter.evm.execute_message(
+            sender=sender,
+            to=to,
             value=value,
-            get_execution_output=get_execution_output,
+            calldata=calldata,
+            is_static=False,
         )
+
+        if execution_output.is_error:
+            raise execution_output.error
+
+        if get_execution_output:
+            return execution_output
+
+        return execution_output.output
 
     def get_balance(self, address: _AddressType) -> int:
         return self.state.get_balance(address)
@@ -176,6 +196,9 @@ class Env:
         )
 
         return execution_output
+
+    def clear_transient_storage(self):
+        self.state.clear_transient_storage()
 
     @contextmanager
     def anchor(self):

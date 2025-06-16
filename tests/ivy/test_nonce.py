@@ -135,13 +135,13 @@ def get_sender() -> address:
     assert alice_nonce_after_deploy == 1
     assert env.state.get_nonce(bob) == 0  # Bob hasn't done anything yet
 
-    # Alice calls the contract
-    assert c.get_sender() == alice
+    # Alice calls the contract (with transact=True to increment nonce)
+    assert c.get_sender(transact=True) == alice
     assert env.state.get_nonce(alice) == 2
 
-    # Bob calls the contract
+    # Bob calls the contract (with transact=True to increment nonce)
     env.eoa = bob
-    assert c.get_sender() == bob
+    assert c.get_sender(transact=True) == bob
     assert env.state.get_nonce(bob) == 1
     assert env.state.get_nonce(alice) == 2  # Alice's nonce unchanged
 
