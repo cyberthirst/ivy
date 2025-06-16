@@ -42,10 +42,13 @@ class EVMCore:
         if is_deploy:
             module_t = module._metadata["type"]
             assert isinstance(module_t, ModuleT)
+            # Compute address with current nonce (before incrementing)
             create_address = self.generate_create_address(sender)
             code = ContractData(module_t)
         else:
             code = self.state.get_code(to)
+
+        self.state.increment_nonce(sender)
 
         message = Message(
             caller=sender,
@@ -231,15 +234,18 @@ class EVMCore:
         # we're in a constructor
         if current_address == b"":
             current_address = self.state.current_context.msg.create_address
+
+        # First compute address with current nonce
         create_address = self.generate_create_address(current_address)
 
-        if self.account_has_code_or_nonce(create_address):
-            self.state.increment_nonce(current_address)
-            # TODO handle the return (probably return address(0)
-            return
-
-        # TODO should we move nonce_inc to process_create_message?
+        # Then increment nonce
         self.state.increment_nonce(current_address)
+
+        if self.account_has_code_or_nonce(create_address):
+            # Return empty output and address(0) if account already exists
+            empty_output = ExecutionOutput()
+            empty_output.error = EVMException("Address collision")
+            return empty_output, Address(0)
 
         msg = Message(
             caller=self.state.current_context.msg.to,
@@ -277,9 +283,10 @@ class EVMCore:
             self.state[message.to].balance += message.value
 
     def generate_create_address(self, sender):
-        nonce = self.state.get_nonce(sender.canonical_address)
-        self.state.increment_nonce(sender.canonical_address)
-        return Address(compute_contract_address(sender.canonical_address, nonce))
+        # Make sure we're using the sender as an Address object
+        sender_addr = sender if isinstance(sender, Address) else Address(sender)
+        nonce = self.state.get_nonce(sender_addr)
+        return Address(compute_contract_address(sender_addr.canonical_address, nonce))
 
     def account_has_code_or_nonce(self, address: Address) -> bool:
         code = self.state.get_code(address)
