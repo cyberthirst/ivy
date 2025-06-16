@@ -105,6 +105,7 @@ class EVMCore:
         - Does not increment sender's nonce
         - Does not clear transient storage
         - Reuses existing environment if set
+        - Maintains a single journal context across calls
         """
         if to == b"":
             raise ValueError("Message calls cannot deploy contracts")
@@ -124,6 +125,8 @@ class EVMCore:
                 chain_id=0,
             )
 
+        self.journal.begin_call(is_static=False)
+
         message = Message(
             caller=sender,
             to=to,
@@ -136,8 +139,14 @@ class EVMCore:
             is_static=is_static,
         )
 
-        # Process the message (this handles journal, context, etc.)
-        return self.process_message(message)
+        # Process the message without additional journal management
+        output = self.process_message(message, manage_journal=False)
+
+        # Finalize this message call's journal frame
+        # If there was an error, this will rollback all changes
+        self.journal.finalize_call(output.is_error)
+
+        return output
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
@@ -192,8 +201,11 @@ class EVMCore:
         data = message.data
         self.state.current_output.output = PRECOMPILE_REGISTRY[to](data)
 
-    def process_message(self, message: Message) -> ExecutionOutput:
-        self.journal.begin_call(is_static=message.is_static)
+    def process_message(
+        self, message: Message, manage_journal: bool = True
+    ) -> ExecutionOutput:
+        if manage_journal:
+            self.journal.begin_call(is_static=message.is_static)
         account = self.state[message.to]
         self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(account, message)
@@ -218,7 +230,8 @@ class EVMCore:
             self.state.pop_context()
 
         # TODO shouldn't this be in the finally block
-        self.journal.finalize_call(ret.is_error)
+        if manage_journal:
+            self.journal.finalize_call(ret.is_error)
         return ret
 
     def do_message_call(
@@ -356,3 +369,12 @@ class EVMCore:
         # ):
         #    evm.touched_accounts.add(child_output.message.current_target)
         output.accessed_addresses.update(child_output.accessed_addresses)
+
+    def finalize_transaction(self, is_error: bool = False) -> None:
+        """Finalize the current transaction's journal.
+
+        This should be called by the test framework after all message calls
+        in a transaction context are complete.
+        """
+        if self.journal.is_active:
+            self.journal.finalize_call(is_error)

@@ -200,6 +200,15 @@ class Env:
     def clear_transient_storage(self):
         self.state.clear_transient_storage()
 
+    def finalize_transaction(self, is_error: bool = False):
+        """Finalize the current transaction's journal.
+
+        This should be called after all message calls in a Vyper test
+        suite context are complete. It commits or rolls back all state
+        changes made during the transaction.
+        """
+        self.interpreter.evm.finalize_transaction(is_error)
+
     @contextmanager
     def anchor(self):
         """Create a snapshot of the current state and revert to it on exit.
