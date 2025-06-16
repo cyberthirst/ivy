@@ -170,9 +170,13 @@ class VyperContract:
 
         return ret
 
-    def message_call(self, data: bytes, value: int = 0):
+    def message_call(self, data: bytes, value: int = 0, sender=None):
         ret = self.env.message_call(
-            self.address, data, value, get_execution_output=True
+            to_address=self.address, 
+            data=data, 
+            sender=sender, 
+            value=value, 
+            get_execution_output=True
         )
         self._execution_output = ret
         return ret.output

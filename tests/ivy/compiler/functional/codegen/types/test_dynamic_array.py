@@ -1123,7 +1123,6 @@ def foo(x: {typ}) -> {typ}:
 
 
 # see the test_append_pop test
-@pytest.mark.xfail
 @pytest.mark.parametrize("code_template,check_result", append_pop_complex_tests)
 @pytest.mark.parametrize(
     "subtype",

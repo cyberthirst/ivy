@@ -580,7 +580,6 @@ def foo(cs: String[64]) -> uint256:
 
 
 # to fix in future release
-@pytest.mark.xfail(raises=CompilerPanic, reason="risky overlap")
 def test_slice_order_of_eval(get_contract):
     slice_code = """
 var:DynArray[Bytes[96], 1]
@@ -605,7 +604,6 @@ def foo() -> Bytes[96]:
 
 
 # to fix in future release
-@pytest.mark.xfail(raises=CompilerPanic, reason="risky overlap")
 def test_slice_order_of_eval2(get_contract):
     slice_code = """
 var:DynArray[Bytes[96], 1]
