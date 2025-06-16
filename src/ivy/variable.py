@@ -42,9 +42,12 @@ class GlobalVariable:
         location = self.get_location()
         if self.varinfo and Journal.journalable_loc(self.varinfo.location):
             old_value = location.get(self.address, None)
-            Journal().record(
-                JournalEntryType.STORAGE, location, self.address, old_value
+            entry_type = (
+                JournalEntryType.TRANSIENT_STORAGE
+                if self.varinfo.location == DataLocation.TRANSIENT
+                else JournalEntryType.STORAGE
             )
+            Journal().record(entry_type, location, self.address, old_value)
 
         location[self.address] = new_value
 
@@ -89,7 +92,20 @@ class GlobalVariables:
         address = (position, DataLocation.TRANSIENT)
         self.reentrant_key_address = address
         assert address not in self.variables
-        self.variables[address] = GlobalVariable(position, BoolT(), get_location)
+        # Create a VarInfo for the reentrant key so it gets journaled properly
+        from vyper.semantics.analysis.base import Modifiability
+
+        varinfo = VarInfo(
+            typ=BoolT(),
+            location=DataLocation.TRANSIENT,
+            modifiability=Modifiability.MODIFIABLE,
+            is_public=False,
+            decl_node=None,
+        )
+        varinfo.position = position
+        self.variables[address] = GlobalVariable(
+            position, BoolT(), get_location, varinfo
+        )
 
     def set_reentrant_key(self, value: bool):
         address = self.reentrant_key_address
