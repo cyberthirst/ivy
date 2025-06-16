@@ -42,13 +42,30 @@ class CallTrace:
 
 
 @dataclass
+class SetBalanceTrace:
+    """Represents a set_balance trace."""
+
+    address: str
+    value: int
+
+
+@dataclass
+class ClearTransientStorageTrace:
+    """Represents a clear_transient_storage trace."""
+
+    # No fields needed for this trace type
+
+
+@dataclass
 class TestItem:
     """Represents a test or fixture with its traces."""
 
     name: str
     item_type: str  # "test" or "fixture"
     deps: List[str]
-    traces: List[Union[DeploymentTrace, CallTrace]]
+    traces: List[
+        Union[DeploymentTrace, CallTrace, SetBalanceTrace, ClearTransientStorageTrace]
+    ]
 
 
 @dataclass
@@ -267,6 +284,13 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     call_args=trace_data["call_args"],
                     call_succeeded=trace_data.get("call_succeeded"),
                 )
+            elif trace_data["trace_type"] == "set_balance":
+                trace = SetBalanceTrace(
+                    address=trace_data["address"],
+                    value=trace_data["value"],
+                )
+            elif trace_data["trace_type"] == "clear_transient_storage":
+                trace = ClearTransientStorageTrace()
             else:
                 raise ValueError(f"Unknown trace type: {trace_data['trace_type']}")
 

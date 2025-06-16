@@ -7,15 +7,14 @@ from ivy.types import Address
 from src.fuzzer.export_utils import (
     DeploymentTrace,
     CallTrace,
+    SetBalanceTrace,
+    ClearTransientStorageTrace,
     TestExport,
     TestItem,
     TestFilter,
     load_export,
     load_all_exports,
     filter_exports,
-)
-from tests.ivy.compiler.functional.codegen.features.test_transient import (
-    test_complex_hashmap_transient,
 )
 
 
@@ -67,6 +66,10 @@ class TestReplay:
                     self._execute_deployment(trace)
                 elif isinstance(trace, CallTrace):
                     self._execute_call(trace)
+                elif isinstance(trace, SetBalanceTrace):
+                    self._execute_set_balance(trace)
+                elif isinstance(trace, ClearTransientStorageTrace):
+                    self._execute_clear_transient_storage(trace)
             except Exception as e:
                 raise Exception(
                     f"Failed to execute trace {i} of {item_name}: {e}"
@@ -210,6 +213,15 @@ class TestReplay:
                     f"Call output mismatch: expected {trace.output}, got {output.hex()}"
                 )
 
+    def _execute_set_balance(self, trace: SetBalanceTrace) -> None:
+        """Execute a set_balance trace."""
+        address = Address(trace.address)
+        self.env.set_balance(address, trace.value)
+
+    def _execute_clear_transient_storage(self, _: ClearTransientStorageTrace) -> None:
+        """Execute a clear_transient_storage trace."""
+        self.env.clear_transient_storage()
+
 
 def replay_test(
     export_path: Union[str, Path], test_name: str, env: Optional[Env] = None
@@ -267,7 +279,7 @@ def validate_exports(
 
 def test_replay_exports():
     test_filter = TestFilter()
-    test_filter.include_path(r"functional/codegen/")
+    test_filter.include_path(r"functional/codegen")
     # ---- unsupported features
     test_filter.exclude_source(r"pragma nonreentrancy")
     test_filter.exclude_source(r"import math")
@@ -281,11 +293,7 @@ def test_replay_exports():
     test_filter.exclude_name("test_block_number")
     test_filter.exclude_name("test_gas_call")
     # ---- unsupported features
-    # vyper runs in global tx context, ivy isaltes each call so transient
-    # gets clear and this test manifests this discrepancy
-    test_filter.exclude_name("test_complex_hashmap_transient")
 
-    test_filter.include_name("test_uint_literal")
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     # Report summary
