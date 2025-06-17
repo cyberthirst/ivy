@@ -41,18 +41,37 @@ class DecodeError(Exception):
     pass
 
 
-def _strict_slice(payload, start, length):
+def _strict_slice(payload, start, length, from_calldata=False):
     if start < 0:
         raise DecodeError(f"OOB {start}")
 
     end = start + length
-    if end > len(payload):
-        raise DecodeError(f"OOB {start} + {length} (=={end}) > {len(payload)}")
-    return payload[start:end]
+    payload_len = len(payload)
+
+    if from_calldata:
+        # For calldata, zero-extend if reading beyond the payload
+        if start >= payload_len:
+            # Entirely out of bounds - return zeros
+            return b"\x00" * length
+        elif end > payload_len:
+            # Partially out of bounds - return available data + zeros
+            available = payload[start:payload_len]
+            padding = b"\x00" * (end - payload_len)
+            return available + padding
+        else:
+            # Within bounds
+            return payload[start:end]
+    else:
+        # For regular payloads, enforce strict bounds
+        if end > payload_len:
+            raise DecodeError(f"OOB {start} + {length} (=={end}) > {payload_len}")
+        return payload[start:end]
 
 
-def _read_int(payload, ofst):
-    return int.from_bytes(_strict_slice(payload, ofst, 32), byteorder="big")
+def _read_int(payload, ofst, from_calldata=False):
+    return int.from_bytes(
+        _strict_slice(payload, ofst, 32, from_calldata), byteorder="big"
+    )
 
 
 # TODO maybe split into 2 decoders - one which will decode into ivy
@@ -73,7 +92,7 @@ def abi_decode(
         if not (lo <= payload_len <= hi):
             raise DecodeError(f"bad payload size {lo}, {payload_len}, {hi}")
 
-    return _decode_r(abi_t, typ, 0, payload, ivy_compat)
+    return _decode_r(abi_t, typ, 0, payload, ivy_compat, from_calldata)
 
 
 def _decode_r(
@@ -82,13 +101,19 @@ def _decode_r(
     current_offset: int,
     payload: bytes,
     ivy_compat: bool,
+    from_calldata: bool,
 ):
     if isinstance(abi_t, ABI_Tuple):
         assert isinstance(typ, StructT) or isinstance(typ, TupleT)
         member_typs = typ.tuple_members()
         res = tuple(
             _decode_multi_r(
-                abi_t.subtyps, member_typs, current_offset, payload, ivy_compat
+                abi_t.subtyps,
+                member_typs,
+                current_offset,
+                payload,
+                ivy_compat,
+                from_calldata,
             )
         )
         if not ivy_compat:
@@ -103,7 +128,9 @@ def _decode_r(
         n = abi_t.m_elems
         abi_subtyps = [abi_t.subtyp] * n
         subtyps = [typ.subtype] * n
-        res = _decode_multi_r(abi_subtyps, subtyps, current_offset, payload, ivy_compat)
+        res = _decode_multi_r(
+            abi_subtyps, subtyps, current_offset, payload, ivy_compat, from_calldata
+        )
         if not ivy_compat:
             return res
         # TODO construct the dict in callee
@@ -113,7 +140,7 @@ def _decode_r(
         assert isinstance(typ, DArrayT)
         bound = abi_t.elems_bound
 
-        n = _read_int(payload, current_offset)
+        n = _read_int(payload, current_offset, from_calldata)
         if n > bound:
             raise DecodeError("Dynarray too large")
 
@@ -121,7 +148,9 @@ def _decode_r(
         current_offset += 32
         abi_subtyps = [abi_t.subtyp] * n
         subtyps = [typ.subtype] * n
-        res = _decode_multi_r(abi_subtyps, subtyps, current_offset, payload, ivy_compat)
+        res = _decode_multi_r(
+            abi_subtyps, subtyps, current_offset, payload, ivy_compat, from_calldata
+        )
         if not ivy_compat:
             return res
         # TODO construct the dict in callee
@@ -132,12 +161,12 @@ def _decode_r(
 
     if isinstance(abi_t, ABI_Bytes):
         bound = abi_t.bytes_bound
-        length = _read_int(payload, current_offset)
+        length = _read_int(payload, current_offset, from_calldata)
         if length > bound:
             raise DecodeError("bytes too large")
 
         current_offset += 32  # size of length word
-        ret = _strict_slice(payload, current_offset, length)
+        ret = _strict_slice(payload, current_offset, length, from_calldata)
 
         # abi string doesn't actually define string decoder, so we
         # just bytecast the output
@@ -151,7 +180,7 @@ def _decode_r(
     assert not abi_t.is_dynamic()
 
     if isinstance(abi_t, ABI_GIntM):
-        ret = _read_int(payload, current_offset)
+        ret = _read_int(payload, current_offset, from_calldata)
 
         # handle signedness
         if abi_t.signed:
@@ -189,7 +218,7 @@ def _decode_r(
         return ret
 
     if isinstance(abi_t, ABI_BytesM):
-        ret = _strict_slice(payload, current_offset, 32)
+        ret = _strict_slice(payload, current_offset, 32, from_calldata)
         m = abi_t.m_bytes
         assert 1 <= m <= 32  # internal sanity check
         # BytesM is right-padded with zeroes
@@ -206,6 +235,7 @@ def _decode_multi_r(
     outer_offset: int,
     payload: bytes,
     ivy_compat: bool,
+    from_calldata: bool,
 ) -> list:
     ret = []
     static_ofst = outer_offset
@@ -215,12 +245,12 @@ def _decode_multi_r(
     for abi_sub_t, sub_t in zip(abi_typs, typs):
         if abi_sub_t.is_dynamic():
             # "head" terminology from abi spec
-            head = _read_int(payload, static_ofst)
+            head = _read_int(payload, static_ofst, from_calldata)
             ofst = outer_offset + head
         else:
             ofst = static_ofst
 
-        item = _decode_r(abi_sub_t, sub_t, ofst, payload, ivy_compat)
+        item = _decode_r(abi_sub_t, sub_t, ofst, payload, ivy_compat, from_calldata)
 
         ret.append(item)
         static_ofst += abi_sub_t.embedded_static_size()
