@@ -193,8 +193,8 @@ def _decode_r(
             raise DecodeError(f"invalid {u}int{abi_t.m_bits}")
 
         if isinstance(abi_t, ABI_Address):
-            # TODO should we return here an Address() object?
-            return to_checksum_address(ret.to_bytes(20, "big"))
+            from ivy.types import Address
+            return Address(to_checksum_address(ret.to_bytes(20, "big")))
 
         if isinstance(abi_t, ABI_Bool):
             if ret not in (0, 1):

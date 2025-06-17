@@ -2396,9 +2396,6 @@ def foo(a: {typ}):
 
 
 @pytest.mark.parametrize("typ,val", [("address", ([TEST_ADDR] * 3, "vyper"))])
-@pytest.mark.xfail(
-    raises=DecodeError, reason="ivy uses strict decoder even for calldata"
-)
 def test_dynamic_calldata_clamp(env, get_contract, tx_failed, typ, val):
     code = f"""
 @external

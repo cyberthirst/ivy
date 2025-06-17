@@ -68,7 +68,7 @@ class EVMCore:
             origin=to,
             coinbase=sender,
             number=0,
-            time=0,
+            time=1750080732,
             prev_randao=b"",
             chain_id=0,
         )
@@ -120,7 +120,7 @@ class EVMCore:
                 origin=sender,  # For message calls, origin is the sender
                 coinbase=sender,
                 number=0,
-                time=0,
+                time=1750080732,
                 prev_randao=b"",
                 chain_id=0,
             )
