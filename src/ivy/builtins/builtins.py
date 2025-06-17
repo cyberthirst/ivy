@@ -2,6 +2,7 @@ from typing import Any, Union, Optional
 import math
 
 from vyper.exceptions import UnimplementedException
+from eth_utils import keccak
 from vyper.semantics.types import (
     VyperType,
     TupleT,
@@ -410,3 +411,13 @@ def builtin_isqrt(a: int) -> int:
     if a < 0:
         raise ValueError("Square root of negative number")
     return math.isqrt(a)
+
+
+def builtin_keccak256(value: Union[str, bytes]) -> bytes:
+    if isinstance(value, str):
+        # Convert string to bytes using UTF-8 encoding
+        value = value.encode("utf-8")
+    elif not isinstance(value, bytes):
+        raise TypeError(f"keccak256 expects bytes or string, got {type(value)}")
+
+    return keccak(value)

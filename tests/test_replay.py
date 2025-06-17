@@ -279,19 +279,19 @@ def validate_exports(
 
 def test_replay_exports():
     test_filter = TestFilter()
-    test_filter.include_path(r"functional/codegen")
+    test_filter.include_path(r"functional/codegen/")
     # ---- unsupported features
     test_filter.exclude_source(r"pragma nonreentrancy")
     test_filter.exclude_source(r"import math")
     test_filter.exclude_source(r"raw_log")
     test_filter.exclude_source(r"selfdestruct")
     test_filter.exclude_source(r"gas=")
-    test_filter.exclude_source(r"keccak256")
     test_filter.exclude_name("test_tx_gasprice")
     test_filter.exclude_name("test_blockhash")
     test_filter.exclude_name("test_blobbasefee")
     test_filter.exclude_name("test_block_number")
     test_filter.exclude_name("test_gas_call")
+    test_filter.exclude_name("test_mana")
     # ---- unsupported features
 
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)

@@ -29,6 +29,7 @@ from ivy.builtins.builtins import (
     builtin_epsilon,
     builtin_sqrt,
     builtin_isqrt,
+    builtin_keccak256,
 )
 
 
@@ -99,6 +100,7 @@ class BuiltinRegistry:
             "epsilon": BuiltinWrapper(builtin_epsilon),
             "sqrt": BuiltinWrapper(builtin_sqrt),
             "isqrt": BuiltinWrapper(builtin_isqrt),
+            "keccak256": BuiltinWrapper(builtin_keccak256),
         }
 
     def get(self, name):
