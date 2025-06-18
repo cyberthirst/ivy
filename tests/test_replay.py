@@ -270,8 +270,9 @@ def validate_exports(
 
 
 def test_replay_exports():
-    test_filter = TestFilter()
-    test_filter.include_path(r"functional/codegen/modules/")
+    test_filter = TestFilter(exclude_multi_module=False)
+    test_filter.include_path(r"functional/codegen/")
+
     # ---- unsupported features
     test_filter.exclude_source(r"pragma nonreentrancy")
     test_filter.exclude_source(r"import math")
@@ -286,7 +287,6 @@ def test_replay_exports():
     test_filter.exclude_name("test_mana")
     # ---- unsupported features
 
-    test_filter.include_name("test_simple_import")
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     # Report summary

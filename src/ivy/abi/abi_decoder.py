@@ -194,6 +194,7 @@ def _decode_r(
 
         if isinstance(abi_t, ABI_Address):
             from ivy.types import Address
+
             return Address(to_checksum_address(ret.to_bytes(20, "big")))
 
         if isinstance(abi_t, ABI_Bool):
