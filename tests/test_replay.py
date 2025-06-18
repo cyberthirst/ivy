@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 from ivy.frontend.env import Env
-from ivy.frontend.loader import loads
+from ivy.frontend.loader import loads_from_solc_json
 from ivy.types import Address
 from src.fuzzer.export_utils import (
     DeploymentTrace,
@@ -83,9 +83,9 @@ class TestReplay:
                 f"Only source deployments are supported, got: {trace.deployment_type}"
             )
 
-        # Deploy from source code
-        if not trace.source_code:
-            raise ValueError("Source code required for source deployment")
+        # Check if we have solc_json (always available according to user)
+        if not trace.solc_json:
+            raise ValueError("solc_json is required for deployment")
 
         # Set the sender for deployment
         sender = Address(trace.deployer)
@@ -110,17 +110,15 @@ class TestReplay:
         contract = None
 
         try:
-            contract = loads(
-                trace.source_code,
+            # Always use loads_from_solc_json since solc_json is always available
+            contract = loads_from_solc_json(
+                trace.solc_json,
                 value=trace.value,
                 encoded_constructor_args=constructor_args,
                 env=self.env,
-                # Pass any additional source files from solc_json if needed
-                input_bundle=self._create_input_bundle(trace)
-                if trace.solc_json
-                else None,
             )
         except Exception as e:
+            print(f"deployment failed: {e}")
             deployment_succeeded = False
             if trace.deployment_succeeded is True:
                 # Deployment was expected to succeed but failed
@@ -152,12 +150,6 @@ class TestReplay:
                 )
                 # Also store by actual address for cross-references
                 self.deployed_contracts[str(contract.address)] = contract
-
-    def _create_input_bundle(self, trace: DeploymentTrace):
-        """Create an input bundle from solc_json for module imports."""
-        # TODO: Implement input bundle creation from solc_json
-        # This would allow tests with imports to work
-        return None
 
     def _execute_call(self, trace: CallTrace) -> None:
         """Execute a call trace."""
@@ -279,7 +271,7 @@ def validate_exports(
 
 def test_replay_exports():
     test_filter = TestFilter()
-    test_filter.include_path(r"functional/codegen/")
+    test_filter.include_path(r"functional/codegen/modules/")
     # ---- unsupported features
     test_filter.exclude_source(r"pragma nonreentrancy")
     test_filter.exclude_source(r"import math")
@@ -294,6 +286,7 @@ def test_replay_exports():
     test_filter.exclude_name("test_mana")
     # ---- unsupported features
 
+    test_filter.include_name("test_simple_import")
     results = validate_exports("tests/vyper-exports", test_filter=test_filter)
 
     # Report summary

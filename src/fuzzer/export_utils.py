@@ -79,13 +79,14 @@ class TestExport:
 class TestFilter:
     """Filters for selecting which tests to use."""
 
-    def __init__(self):
+    def __init__(self, exclude_multi_module: bool = False):
         self.path_includes: List[Union[str, re.Pattern]] = []
         self.path_excludes: List[Union[str, re.Pattern]] = []
         self.source_excludes: List[Union[str, re.Pattern]] = []
         self.source_includes: List[Union[str, re.Pattern]] = []
         self.name_includes: List[Union[str, re.Pattern]] = []
         self.name_excludes: List[Union[str, re.Pattern]] = []
+        self.exclude_multi_module = exclude_multi_module
 
     def include_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
         """Only include tests from paths matching the pattern."""
@@ -187,11 +188,15 @@ class TestFilter:
             if pattern.search(item.name):
                 return True
 
-        # Check source code filters and multi-module contracts
+        # Check source code filters
         for trace in item.traces:
             if isinstance(trace, DeploymentTrace):
-                # Skip multi-module contracts
-                if trace.solc_json and "sources" in trace.solc_json:
+                # Check if multi-module contracts should be excluded
+                if (
+                    self.exclude_multi_module
+                    and trace.solc_json
+                    and "sources" in trace.solc_json
+                ):
                     sources = trace.solc_json["sources"]
                     if len(sources) > 1:
                         # This contract has multiple modules/imports
