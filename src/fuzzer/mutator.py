@@ -40,8 +40,12 @@ class AstMutator:
         return visitor(node)
 
     def generic_visit(self, node):
-        for child in node.children:
-            self.visit(child)
+        if hasattr(node, "body"):
+            for child in node.body:
+                self.visit(child)
+        elif hasattr(node, "children"):
+            for child in node.children:
+                self.visit(child)
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0

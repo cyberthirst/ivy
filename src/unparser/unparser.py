@@ -262,16 +262,16 @@ class Unparser(VyperNodeVisitorBase):
         self.w(f"from {module_path} import {node.name}{alias_part}")
 
     def visit_ImplementsDecl(self, node):
-        self.w(f"implements {self._expr(node.annotation)}")
+        self.w(f"implements: {self._expr(node.annotation)}")
 
     def visit_UsesDecl(self, node):
-        self.w(f"uses {self._expr(node.annotation)}")
+        self.w(f"uses: {self._expr(node.annotation)}")
 
     def visit_InitializesDecl(self, node):
-        self.w(f"initializes {self._expr(node.annotation)}")
+        self.w(f"initializes: {self._expr(node.annotation)}")
 
     def visit_ExportsDecl(self, node):
-        self.w(f"exports {self._expr(node.annotation)}")
+        self.w(f"exports: {self._expr(node.annotation)}")
 
     # Expressions ----------------------------------------------------------
     def visit_Expr(self, node):

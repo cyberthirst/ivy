@@ -8,22 +8,41 @@ execution between Ivy and the Vyper compiler (via Boa).
 import logging
 import random
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 
-from ivy.frontend.loader import loads as ivy_loads
+from ivy.frontend.loader import loads as ivy_loads, loads_from_solc_json
+from ivy.frontend.env import Env
+from ivy.types import Address
 from boa import loads as boa_loads
+import boa
 
 from .mutator import AstMutator
 from .export_utils import (
     load_all_exports,
     filter_exports,
-    extract_test_cases,
     TestFilter,
+    DeploymentTrace,
+    CallTrace,
+    TestExport,
+    TestItem,
 )
-from unparser.unparser import unparse
+from src.unparser.unparser import unparse
+from tests.test_replay import TestReplay
 
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+@dataclass
+class MutatedScenario:
+    """Test scenario with mutated source code"""
+
+    export: TestExport
+    item_name: str
+    original_source: str
+    mutated_source: str
+    deployment_trace: DeploymentTrace
 
 
 class DifferentialFuzzer:
@@ -36,7 +55,7 @@ class DifferentialFuzzer:
     ):
         self.exports_dir = exports_dir
         self.rng = random.Random(seed)
-        self.mutator = AstMutator(self.rng)
+        self.mutator = AstMutator(self.rng, mutate_prob=0.5, max_mutations=5)
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -54,126 +73,153 @@ class DifferentialFuzzer:
             import vyper
 
             ast = vyper.ast.parse_to_ast(source)
+            logging.debug(f"Parsed AST successfully")
 
             # Mutate the AST
             mutated_ast = self.mutator.mutate(ast)
+            logging.debug(f"Mutation completed")
 
             # Unparse back to source
-            return unparse(mutated_ast)
+            result = unparse(mutated_ast)
+
+            # Preserve pragma version if present in original source
+            if source.lstrip().startswith("#pragma"):
+                pragma_line = source.split("\n")[0]
+                result = pragma_line + "\n\n" + result
+
+            logging.debug(f"Unparsed successfully, result differs: {result != source}")
+            return result
         except Exception as e:
-            logging.debug(f"Failed to mutate source: {e}")
+            logging.info(f"Failed to mutate source: {e}")
+            import traceback
+
+            logging.debug(traceback.format_exc())
             return None
 
-    def run_ivy_calls(self, source: str, calldatas: List[str]) -> dict:
+    def get_source_deployments(self, exports: Dict[Path, Any]) -> List[tuple]:
+        """Extract test items that have source deployments."""
+        deployments = []
+
+        for path, export in exports.items():
+            for item_name, item in export.items.items():
+                # Find source deployment traces
+                for trace in item.traces:
+                    if (
+                        isinstance(trace, DeploymentTrace)
+                        and trace.deployment_type == "source"
+                        and trace.source_code
+                    ):
+                        deployments.append((export, item_name, trace))
+                        break  # Only take first deployment per item
+
+        return deployments
+
+    def run_ivy_with_mutated_source(self, scenario: MutatedScenario) -> dict:
         """
-        Compile and execute each calldata against the Ivy interpreter.
-        Returns either a load-time exception or a list of per-call results.
+        Execute test with mutated source code using Ivy.
+        Returns deployment status and execution results.
+        """
+        env = Env()
+
+        # Create a modified export with mutated source
+        modified_export = TestExport(path=scenario.export.path, items={})
+
+        # Deep copy the test item
+        import copy
+
+        item = copy.deepcopy(scenario.export.items[scenario.item_name])
+
+        # Replace the source code in deployment trace
+        for i, trace in enumerate(item.traces):
+            if trace == scenario.deployment_trace:
+                # Create new deployment trace with mutated source
+                new_trace = DeploymentTrace(
+                    deployment_type=trace.deployment_type,
+                    deployer=trace.deployer,
+                    deployed_address=trace.deployed_address,
+                    value=trace.value,
+                    calldata=trace.calldata,
+                    source_code=scenario.mutated_source,
+                    solc_json=trace.solc_json,
+                    deployment_succeeded=trace.deployment_succeeded,
+                    contract_abi=trace.contract_abi,
+                    initcode=trace.initcode,
+                    annotated_ast=trace.annotated_ast,
+                    raw_ir=trace.raw_ir,
+                    blueprint_initcode_prefix=trace.blueprint_initcode_prefix,
+                    runtime_bytecode=trace.runtime_bytecode,
+                    python_args=trace.python_args,
+                )
+                item.traces[i] = new_trace
+                break
+
+        modified_export.items[scenario.item_name] = item
+
+        # Use TestReplay to execute with python_args
+        replay = TestReplay(env, use_python_args=True)
+
+        try:
+            with env.anchor():
+                replay.execute_item(modified_export, scenario.item_name)
+            return {"success": True, "env": env}
+        except Exception as e:
+            return {"error": e, "env": env}
+
+    def run_boa_with_source(
+        self,
+        source_code: str,
+        python_args: Optional[Dict[str, Any]],
+        deployment_value: int,
+    ) -> dict:
+        """
+        Compile and deploy source code with Boa.
+        Returns deployment status.
         """
         try:
-            contract = ivy_loads(source)
+            # Deploy with Boa using python args
+            if python_args:
+                args = python_args.get("args", [])
+                kwargs = python_args.get("kwargs", {})
+                kwargs["value"] = deployment_value
+                contract = boa_loads(source_code, *args, **kwargs)
+            else:
+                contract = boa_loads(source_code, value=deployment_value)
+
+            return {"success": True, "contract": contract}
         except Exception as e:
-            return {"load_error": e}
+            return {"error": e}
 
-        results = []
-        for hexstr in calldatas:
-            data = bytes.fromhex(hexstr)
-            try:
-                output = contract.message_call(data=data)
-                storage = contract.storage_dump()
-                results.append({"data": hexstr, "output": output, "storage": storage})
-            except Exception as e:
-                results.append({"data": hexstr, "runtime_error": e})
-        return {"results": results}
+    def compare_deployment(self, scenario: MutatedScenario):
+        """Compare deployment between Ivy and Boa with mutated source."""
+        # Run Ivy
+        ivy_res = self.run_ivy_with_mutated_source(scenario)
 
-    def run_boa_calls(self, source: str, calldatas: List[str]) -> dict:
-        """
-        Compile and execute each calldata against the Boa interpreter.
-        Returns either a load-time exception or a list of per-call results.
-        """
-        try:
-            contract = boa_loads(source)
-        except Exception as e:
-            return {"load_error": e}
+        # Run Boa with just the mutated source
+        deployment_trace = scenario.deployment_trace
+        boa_res = self.run_boa_with_source(
+            scenario.mutated_source,
+            deployment_trace.python_args,
+            deployment_trace.value,
+        )
 
-        results = []
-        for hexstr in calldatas:
-            data = bytes.fromhex(hexstr)
-            try:
-                output = contract.env.raw_call(to_address=contract.address, data=data)
-                storage = contract._storage.to_dict()
-                results.append({"data": hexstr, "output": output, "storage": storage})
-            except Exception as e:
-                results.append({"data": hexstr, "runtime_error": e})
-        return {"results": results}
+        # Compare results
+        ivy_err = ivy_res.get("error")
+        boa_err = boa_res.get("error")
 
-    def compare_runs(
-        self, source: str, calldatas: List[str], original_source: Optional[str] = None
-    ):
-        """Compare execution between Ivy and Boa."""
-        ivy_res = self.run_ivy_calls(source, calldatas)
-        boa_res = self.run_boa_calls(source, calldatas)
+        if (ivy_err is None) != (boa_err is None):
+            # Skip known risky overlap errors
+            if (
+                boa_err
+                and hasattr(boa_err, "message")
+                and "risky overlap" in str(boa_err)
+            ):
+                return
 
-        # Compare load-time behavior first
-        ivy_load_err = ivy_res.get("load_error")
-        boa_load_err = boa_res.get("load_error")
-        if ivy_load_err or boa_load_err:
-            if (ivy_load_err is None) != (boa_load_err is None):
-                # Skip known risky overlap errors
-                if (
-                    boa_load_err
-                    and hasattr(boa_load_err, "message")
-                    and boa_load_err.message == "risky overlap"
-                ):
-                    return
-
-                logging.error("Load-time mismatch for contract:")
-                if original_source:
-                    logging.error("Original source:\n%s", original_source)
-                logging.error("Mutated source:\n%s", source)
-                logging.error("  Ivy error: %r", ivy_load_err)
-                logging.error("  Boa error: %r", boa_load_err)
-            return
-
-        # Both loaded OK, compare per-call results
-        ivy_results = ivy_res["results"]
-        boa_results = boa_res["results"]
-
-        for iv, bv in zip(ivy_results, boa_results):
-            data = iv["data"]
-            ivy_err = iv.get("runtime_error")
-            boa_err = bv.get("runtime_error")
-
-            # Exception divergence
-            if (ivy_err is None) != (boa_err is None):
-                logging.error("Runtime error mismatch for payload %s", data)
-                if original_source:
-                    logging.error("Original source:\n%s", original_source)
-                logging.error("Mutated source:\n%s", source)
-                logging.error("  Ivy error: %r", ivy_err)
-                logging.error("  Boa error: %r", boa_err)
-                continue
-
-            # If both errored, consider them matching
-            if ivy_err:
-                continue
-
-            # Compare outputs
-            if iv["output"] != bv["output"]:
-                logging.error("Output mismatch for payload %s", data)
-                if original_source:
-                    logging.error("Original source:\n%s", original_source)
-                logging.error("Mutated source:\n%s", source)
-                logging.error("  Ivy output: %r", iv["output"])
-                logging.error("  Boa output: %r", bv["output"])
-
-            # Compare storage
-            if iv["storage"] != bv["storage"]:
-                logging.error("Storage mismatch for payload %s", data)
-                if original_source:
-                    logging.error("Original source:\n%s", original_source)
-                logging.error("Mutated source:\n%s", source)
-                logging.error("  Ivy storage: %r", iv["storage"])
-                logging.error("  Boa storage: %r", bv["storage"])
+            logging.error("Deployment mismatch:")
+            logging.error("Original source:\n%s", scenario.original_source)
+            logging.error("Mutated source:\n%s", scenario.mutated_source)
+            logging.error("  Ivy error: %r", ivy_err)
+            logging.error("  Boa error: %r", boa_err)
 
     def fuzz_exports(
         self,
@@ -188,42 +234,59 @@ class DifferentialFuzzer:
             f"Loaded {sum(len(e.items) for e in exports.values())} test items from {len(exports)} files"
         )
 
-        # Extract test cases
-        test_cases = extract_test_cases(exports)
-        logging.info(f"Extracted {len(test_cases)} test cases")
+        # Get source deployments
+        deployments = self.get_source_deployments(exports)
+        logging.info(f"Found {len(deployments)} test items with source deployments")
 
         # Run differential testing
-        for i, (source, calldatas) in enumerate(test_cases):
-            if not calldatas:
-                continue
-
-            logging.debug(
-                f"Testing case {i + 1}/{len(test_cases)} with {len(calldatas)} calls"
-            )
+        for i, (export, item_name, deployment_trace) in enumerate(deployments):
+            logging.info(f"Testing {item_name} ({i + 1}/{len(deployments)})")
 
             # First, test without mutations to ensure baseline correctness
-            logging.debug("Testing original source")
-            self.compare_runs(source, calldatas)
+            baseline_scenario = MutatedScenario(
+                export=export,
+                item_name=item_name,
+                original_source=deployment_trace.source_code,
+                mutated_source=deployment_trace.source_code,
+                deployment_trace=deployment_trace,
+            )
+            self.compare_deployment(baseline_scenario)
 
             # Then test with mutations if enabled
             if enable_mutations:
                 for mutation_round in range(max_mutations_per_test):
-                    mutated_source = self.mutate_source(source)
-                    if mutated_source and mutated_source != source:
-                        logging.debug(f"Testing mutation {mutation_round + 1}")
-                        self.compare_runs(
-                            mutated_source, calldatas, original_source=source
+                    mutated_source = self.mutate_source(deployment_trace.source_code)
+                    if (
+                        mutated_source
+                        and mutated_source != deployment_trace.source_code
+                    ):
+                        logging.info(f"Testing mutation {mutation_round + 1}")
+                        # Log first line of mutation to see what changed
+                        first_change = None
+                        orig_lines = deployment_trace.source_code.split("\n")
+                        mut_lines = mutated_source.split("\n")
+                        for i, (orig, mut) in enumerate(zip(orig_lines, mut_lines)):
+                            if orig != mut:
+                                first_change = f"Line {i + 1}: '{orig}' -> '{mut}'"
+                                break
+                        if first_change:
+                            logging.info(f"  Mutation: {first_change}")
+                        mutated_scenario = MutatedScenario(
+                            export=export,
+                            item_name=item_name,
+                            original_source=deployment_trace.source_code,
+                            mutated_source=mutated_source,
+                            deployment_trace=deployment_trace,
                         )
+                        self.compare_deployment(mutated_scenario)
 
 
 def main():
     """Run differential fuzzing with test exports."""
-    # Create test filter
-    test_filter = TestFilter()
+    # Create test filter - exclude multi-module contracts for now
+    test_filter = TestFilter(exclude_multi_module=True)
     # Exclude tests with certain patterns
-    test_filter.exclude_path(r"test_raw_call")  # Skip raw call tests
-    test_filter.exclude_source(r"@nonreentrant")  # Skip nonreentrant tests
-    test_filter.exclude_source(r"raw_log\(")  # Skip raw log tests
+    test_filter.include_path("functional/examples/tokens/test_erc20")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
