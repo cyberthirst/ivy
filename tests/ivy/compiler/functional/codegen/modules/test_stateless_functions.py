@@ -15,7 +15,6 @@ from vyper.exceptions import (
 # test modules which have no variables - "libraries"
 
 
-@pytest.mark.xfail(raises=AttributeError, reason="block number not implemented")
 def test_simple_library(get_contract, make_input_bundle, env):
     library_source = """
 @internal

@@ -155,6 +155,10 @@ class Env:
     def timestamp(self):
         return self.state.env.time
 
+    @property
+    def block_number(self):
+        return self.state.env.block_number
+
     def deploy(
         self,
         module: vy_ast.Module,

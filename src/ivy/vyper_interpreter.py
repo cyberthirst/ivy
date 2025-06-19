@@ -386,7 +386,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         elif key == "block.coinbase":
             return self.env.coinbase
         elif key == "block.number":
-            return self.env.number
+            return self.env.block_number
         elif key == "block.gaslimit":
             raise GasReference()
         elif key == "block.basefee":

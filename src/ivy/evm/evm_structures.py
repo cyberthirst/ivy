@@ -129,7 +129,7 @@ class Environment:
     block_hashes: Any  # List[Hash32]
     origin: Any  # Address
     coinbase: Any  # Address
-    number: Any  # Uint
+    block_number: Any  # Uint
     time: Any  # U256
     prev_randao: Any  # Bytes32
     chain_id: Any  # U64
