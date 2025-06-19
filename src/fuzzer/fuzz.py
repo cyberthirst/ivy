@@ -69,7 +69,6 @@ class MutatedScenario:
 
     export: TestExport
     item_name: str
-    original_source: str
     mutated_source: str
     deployment_trace: DeploymentTrace
 
@@ -415,9 +414,7 @@ class DifferentialFuzzer:
 
         return True
 
-    def run_scenario(
-        self, scenario: Scenario, original_source: str
-    ) -> Optional[Dict[str, Any]]:
+    def run_scenario(self, scenario: Scenario) -> Optional[Dict[str, Any]]:
         """Run a complete scenario and check for divergences."""
         # Deploy in both Ivy and Boa
         ivy_env = Env()
@@ -425,27 +422,26 @@ class DifferentialFuzzer:
         # Deploy with Ivy - ivy_loads already deploys the contract
         try:
             # Set up environment
-            with ivy_env.anchor():
-                deployer_addr = Address("0x0000000000000000000000000000000000000001")
-                ivy_env.set_balance(deployer_addr, 10**21)  # Give deployer some ETH
-                # Set deployer as tx origin if available
-                if hasattr(ivy_env, "evm") and hasattr(ivy_env.evm, "set_tx_origin"):
-                    ivy_env.evm.set_tx_origin(deployer_addr)
+            deployer_addr = Address("0x0000000000000000000000000000000000000001")
+            ivy_env.set_balance(deployer_addr, 10**21)  # Give deployer some ETH
+            # Set deployer as tx origin if available
+            if hasattr(ivy_env, "evm") and hasattr(ivy_env.evm, "set_tx_origin"):
+                ivy_env.evm.set_tx_origin(deployer_addr)
 
-                # ivy_loads compiles and deploys the contract with constructor args
-                if scenario.deploy_args:
-                    ivy_address = ivy_loads(
-                        scenario.mutated_source,
-                        env=ivy_env,
-                        *scenario.deploy_args,
-                        value=scenario.deploy_kwargs.get("value", 0),
-                    )
-                else:
-                    ivy_address = ivy_loads(
-                        scenario.mutated_source,
-                        env=ivy_env,
-                        value=scenario.deploy_kwargs.get("value", 0),
-                    )
+            # ivy_loads compiles and deploys the contract with constructor args
+            if scenario.deploy_args:
+                ivy_address = ivy_loads(
+                    scenario.mutated_source,
+                    env=ivy_env,
+                    *scenario.deploy_args,
+                    value=scenario.deploy_kwargs.get("value", 0),
+                )
+            else:
+                ivy_address = ivy_loads(
+                    scenario.mutated_source,
+                    env=ivy_env,
+                    value=scenario.deploy_kwargs.get("value", 0),
+                )
 
             ivy_deployed = True
             ivy_deploy_error = None
@@ -475,7 +471,6 @@ class DifferentialFuzzer:
             return {
                 "type": "deployment",
                 "step": 0,
-                "original_source": original_source,
                 "mutated_source": scenario.mutated_source,
                 "deploy_args": scenario.deploy_args,
                 "deploy_kwargs": scenario.deploy_kwargs,
@@ -491,17 +486,16 @@ class DifferentialFuzzer:
         for step, call in enumerate(scenario.call_schedule):
             # Execute in Ivy
             try:
-                with ivy_env.anchor():
-                    if call.msg_sender:
-                        ivy_env.set_balance(
-                            Address(call.msg_sender), 10**20
-                        )  # Give sender some ETH
+                if call.msg_sender:
+                    ivy_env.set_balance(
+                        Address(call.msg_sender), 10**20
+                    )  # Give sender some ETH
 
-                    ivy_result = getattr(ivy_address, call.fn_name)(
-                        *call.args,
-                        value=call.kwargs.get("value", 0),
-                        sender=Address(call.msg_sender) if call.msg_sender else None,
-                    )
+                ivy_result = getattr(ivy_address, call.fn_name)(
+                    *call.args,
+                    value=call.kwargs.get("value", 0),
+                    sender=Address(call.msg_sender) if call.msg_sender else None,
+                )
                 ivy_error = None
             except Exception as e:
                 ivy_result = None
@@ -533,7 +527,6 @@ class DifferentialFuzzer:
                     "type": "execution",
                     "step": step + 1,  # +1 because step 0 is deployment
                     "function": call.fn_name,
-                    "original_source": original_source,
                     "mutated_source": scenario.mutated_source,
                     "deploy_args": scenario.deploy_args,
                     "deploy_kwargs": scenario.deploy_kwargs,
@@ -622,9 +615,7 @@ class DifferentialFuzzer:
                 call_schedule=[],  # No calls for baseline
             )
 
-            baseline_divergence = self.run_scenario(
-                baseline_scenario, deployment_trace.source_code
-            )
+            baseline_divergence = self.run_scenario(baseline_scenario)
             if baseline_divergence:
                 logging.error(f"Baseline failure for {item_name} - skipping")
                 logging.error(f"  Divergence type: {baseline_divergence.get('type')}")
@@ -669,7 +660,7 @@ class DifferentialFuzzer:
                 )
 
                 # Step 4 & 5: Run in Ivy/Boa and compare
-                divergence = self.run_scenario(scenario, deployment_trace.source_code)
+                divergence = self.run_scenario(scenario)
 
                 if divergence:
                     divergence_count += 1
