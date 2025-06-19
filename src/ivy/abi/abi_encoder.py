@@ -103,7 +103,6 @@ def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
         if isinstance(value, str):
             value = bytes.fromhex(value)
 
-
     length = len(value).to_bytes(32, "big")
     padded_value = value.ljust((len(value) + 31) // 32 * 32, b"\x00")
     return length + padded_value

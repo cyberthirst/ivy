@@ -376,6 +376,12 @@ class Map(_Container):
     def items(self):
         return self._values.items()
 
+    def __deepcopy__(self, _):
+        result = super().__deepcopy__(_)
+        result.value_type = self.value_type
+        result.key_type = self.key_type
+        return result
+
 
 class Struct(_Container):
     def __init__(
