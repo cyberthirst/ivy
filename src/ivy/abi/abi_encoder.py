@@ -96,10 +96,11 @@ def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
                 value = bytes.fromhex(value[2:])
             except ValueError:
                 raise EncodeError(f"Invalid hex string: {value}")
-        else:
-            if not isinstance(value, (bytes, str)):
-                raise EncodeError(f"Expected bytes or str, got {type(value)}")
+    else:
+        if not isinstance(value, (bytes, str)):
+            raise EncodeError(f"Expected bytes or str, got {type(value)}")
 
+        if isinstance(value, str):
             value = bytes.fromhex(value)
 
 
