@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional, Union
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads_from_solc_json
 from ivy.types import Address
-from src.fuzzer.export_utils import (
+from fuzzer.export_utils import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,
@@ -21,10 +21,11 @@ from src.fuzzer.export_utils import (
 class TestReplay:
     """Executes test traces from Vyper test exports."""
 
-    def __init__(self, env: Optional[Env] = None):
+    def __init__(self, env: Optional[Env] = None, use_python_args: bool = False):
         self.env = env or Env.get_singleton()
         self.deployed_contracts: Dict[str, Any] = {}  # address -> contract instance
         self.executed_fixtures: Dict[str, TestItem] = {}  # fixture path -> TestItem
+        self.use_python_args = use_python_args  # Flag to use python_args instead of calldata
 
     def load_export(self, export_path: Union[str, Path]) -> TestExport:
         """Load test export from JSON file."""
@@ -101,10 +102,18 @@ class TestReplay:
         original_eoa = self.env.eoa
         self.env.eoa = sender
 
-        # Extract constructor args if provided
-        constructor_args = None
-        if trace.calldata:
-            constructor_args = bytes.fromhex(trace.calldata)
+        # Extract constructor args based on use_python_args flag
+        deployment_kwargs = {
+            "value": trace.value,
+            "env": self.env,
+        }
+        
+        if self.use_python_args and trace.python_args is not None:
+            # Use python_args for constructor
+            deployment_kwargs["constructor_args"] = trace.python_args
+        elif trace.calldata:
+            # Use encoded calldata
+            deployment_kwargs["encoded_constructor_args"] = bytes.fromhex(trace.calldata)
 
         deployment_succeeded = True
         contract = None
@@ -113,9 +122,7 @@ class TestReplay:
             # Always use loads_from_solc_json since solc_json is always available
             contract = loads_from_solc_json(
                 trace.solc_json,
-                value=trace.value,
-                encoded_constructor_args=constructor_args,
-                env=self.env,
+                **deployment_kwargs
             )
         except Exception as e:
             print(f"deployment failed: {e}")
@@ -157,7 +164,6 @@ class TestReplay:
 
         # Extract call parameters
         to_address = call_args["to"]
-        calldata = bytes.fromhex(call_args["calldata"])
 
         # Set sender and ensure they have enough balance
         original_eoa = self.env.eoa
@@ -173,23 +179,35 @@ class TestReplay:
         output = b""
 
         try:
-            # Use env.message_call directly - it handles all cases:
-            # - Contract calls
-            # - Value transfers to EOAs
-            # - Calls to non-existent addresses
-            output = self.env.message_call(
-                to_address=to_address,
-                data=calldata,
-                value=call_args["value"],
-            )
+            if self.use_python_args and trace.python_args is not None and trace.function_name is not None:
+                # Use python_args - call contract method directly
+                if to_address in self.deployed_contracts:
+                    contract = self.deployed_contracts[to_address]
+                    method = getattr(contract, trace.function_name)
+                    # Call the method with python args
+                    args = trace.python_args.get("args", [])
+                    kwargs = trace.python_args.get("kwargs", {})
+                    kwargs["value"] = call_args["value"]
+                    method(*args, **kwargs)
+                    # For python_args calls, we don't compare output yet
+                else:
+                    raise Exception(f"Contract at {to_address} not found for python_args call")
+            else:
+                # Use calldata
+                calldata = bytes.fromhex(call_args["calldata"])
+                output = self.env.message_call(
+                    to_address=to_address,
+                    data=calldata,
+                    value=call_args["value"],
+                )
         except Exception as e:
             call_succeeded = False
             if trace.call_succeeded is True:
                 # Call was expected to succeed but failed
                 raise Exception(f"Call failed unexpectedly: {e}") from e
             # else: call was expected to fail, which it did
-        finally:
-            self.env.eoa = original_eoa
+        
+        self.env.eoa = original_eoa
 
         # Check if call success matches expected
         if trace.call_succeeded is not None and trace.call_succeeded != call_succeeded:
@@ -197,8 +215,8 @@ class TestReplay:
                 f"Call success mismatch: expected {trace.call_succeeded}, got {call_succeeded}"
             )
 
-        # Only verify output if call succeeded and output is expected
-        if call_succeeded and trace.output is not None:
+        # Only verify output if not using python_args
+        if not self.use_python_args and call_succeeded and trace.output is not None:
             expected_output = bytes.fromhex(trace.output)
             if output != expected_output:
                 raise AssertionError(
@@ -228,43 +246,56 @@ def replay_test(
 def validate_exports(
     exports_dir: Union[str, Path] = "tests/vyper-exports",
     test_filter: Optional[TestFilter] = None,
+    test_modes: Optional[list] = None,
 ) -> Dict[str, bool]:
+    """Validate test exports.
+    Args:
+        exports_dir: Directory containing test exports
+        test_filter: Optional filter to select tests
+        test_modes: Optional list of (mode_name, use_python_args) tuples.
+                   Defaults to [("calldata", False), ("python_args", True)]
+    """
     exports = load_all_exports(exports_dir)
 
     if test_filter:
         exports = filter_exports(exports, test_filter=test_filter)
 
     results = {}
+    
+    # Default to running both modes
+    if test_modes is None:
+        test_modes = [("calldata", False), ("python_args", True)]
 
     for path, export in exports.items():
         # Process each test independently with its own environment
         for item_name, item in export.items.items():
-            test_key = f"{path}::{item_name}"
-
             # Skip fixtures when processing top-level items (they'll be executed as dependencies)
             if item.item_type == "fixture":
                 continue
 
-            try:
-                # Create fresh environment for each test
-                env = Env()
-                replay = TestReplay(env)
+            for mode_name, use_python_args_flag in test_modes:
+                test_key = f"{path}::{item_name}::{mode_name}"
 
-                # Execute the test and all its dependencies in an anchored context
-                # This ensures complete isolation between tests
-                with env.anchor():
-                    replay.execute_item(export, item_name)
+                try:
+                    # Create fresh environment for each test
+                    env = Env()
+                    replay = TestReplay(env, use_python_args=use_python_args_flag)
 
-                results[test_key] = True
-            except Exception as e:
-                results[test_key] = False
-                print(f"Failed to replay {test_key}: {e}")
-                # Add more debugging for specific error
-                if "encoded_constructor_args" in str(e):
-                    print(f"  Item type: {item.item_type}")
-                    print(f"  Deps: {item.deps}")
-                    if item.traces and hasattr(item.traces[0], "deployment_type"):
-                        print(f"  Deployment type: {item.traces[0].deployment_type}")
+                    # Execute the test and all its dependencies in an anchored context
+                    # This ensures complete isolation between tests
+                    with env.anchor():
+                        replay.execute_item(export, item_name)
+
+                    results[test_key] = True
+                except Exception as e:
+                    results[test_key] = False
+                    print(f"Failed to replay {test_key}: {e}")
+                    # Add more debugging for specific error
+                    if "encoded_constructor_args" in str(e):
+                        print(f"  Item type: {item.item_type}")
+                        print(f"  Deps: {item.deps}")
+                        if item.traces and hasattr(item.traces[0], "deployment_type"):
+                            print(f"  Deployment type: {item.traces[0].deployment_type}")
 
     return results
 
@@ -294,5 +325,4 @@ def test_replay_exports():
     failed = sum(1 for v in results.values() if not v)
     print(f"\nSummary: {passed} passed, {failed} failed out of {len(results)} tests")
 
-    # Assert all tests passed
     assert all(results.values()), f"{failed} tests failed"
