@@ -137,6 +137,7 @@ def loads_from_solc_json(
     *args,
     as_blueprint=False,
     encoded_constructor_args=None,
+    constructor_args=None,
     **kwargs,
 ):
     """
@@ -187,4 +188,7 @@ def loads_from_solc_json(
     else:
         if encoded_constructor_args is not None:
             kwargs["encoded_constructor_args"] = encoded_constructor_args
+        elif constructor_args is not None:
+            args = list(args) + constructor_args.get("args", [])
+            kwargs.update(constructor_args.get("kwargs", {}))
         return d.deploy(*args, **kwargs)

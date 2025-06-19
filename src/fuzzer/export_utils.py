@@ -30,6 +30,7 @@ class DeploymentTrace:
     deployed_address: str
     runtime_bytecode: str
     deployment_succeeded: Optional[bool] = None
+    python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
 
 
 @dataclass
@@ -39,6 +40,8 @@ class CallTrace:
     output: Optional[str]
     call_args: Dict[str, Any]
     call_succeeded: Optional[bool] = None
+    python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
+    function_name: Optional[str] = None
 
 
 @dataclass
@@ -282,12 +285,15 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     deployed_address=trace_data["deployed_address"],
                     runtime_bytecode=trace_data["runtime_bytecode"],
                     deployment_succeeded=trace_data.get("deployment_succeeded"),
+                    python_args=trace_data.get("python_args"),
                 )
             elif trace_data["trace_type"] == "call":
                 trace = CallTrace(
                     output=trace_data.get("output"),
                     call_args=trace_data["call_args"],
                     call_succeeded=trace_data.get("call_succeeded"),
+                    python_args=trace_data.get("python_args"),
+                    function_name=trace_data.get("function_name"),
                 )
             elif trace_data["trace_type"] == "set_balance":
                 trace = SetBalanceTrace(
