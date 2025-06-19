@@ -29,10 +29,13 @@ def abi_encode(typ: VyperType, value: Any) -> bytes:
     return _encode_r(abi_t, value)
 
 
-def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, Struct]) -> bytes:
+def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, list, Struct]) -> bytes:
     # TODO rethink whether not to represent structs as tuples
     if isinstance(value, Struct):
         value = tuple(value.values())
+    elif isinstance(value, list):
+        # Convert list to tuple for struct types
+        value = tuple(value)
     if not isinstance(value, tuple):
         raise EncodeError(f"Expected tuple, got {type(value)}")
     if len(value) != len(abi_t.subtyps):
@@ -86,9 +89,19 @@ def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: list) -> bytes:
     return length + encoded_items
 
 
-def _encode_bytes(_: ABI_Bytes, value: bytes) -> bytes:
-    if not isinstance(value, bytes):
-        raise EncodeError(f"Expected bytes, got {type(value)}")
+def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
+    if isinstance(value, str):
+        if value.startswith("0x"):
+            try:
+                value = bytes.fromhex(value[2:])
+            except ValueError:
+                raise EncodeError(f"Invalid hex string: {value}")
+        else:
+            if not isinstance(value, (bytes, str)):
+                raise EncodeError(f"Expected bytes or str, got {type(value)}")
+
+            value = bytes.fromhex(value)
+
 
     length = len(value).to_bytes(32, "big")
     padded_value = value.ljust((len(value) + 31) // 32 * 32, b"\x00")
