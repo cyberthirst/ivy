@@ -1,10 +1,24 @@
 import copy
 import random
-from typing import Optional, Type
+from typing import Optional, Type, Set
 
 from vyper.ast import nodes as ast
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
 from vyper.semantics.types import VyperType
+
+
+class FreshNameGenerator:
+    """Generates unique variable names with a consistent prefix."""
+    
+    def __init__(self, prefix: str = "ivy_internal"):
+        self.prefix = prefix
+        self.counter = 0
+
+    def generate(self) -> str:
+        name = f"{self.prefix}{self.counter}"
+        self.counter += 1
+        return name
+
 
 
 class Scope:
@@ -45,6 +59,7 @@ class AstMutator:
         self.mutations_done = 0
         self.current_scope = None
         self.scope_stack = []
+        self.name_generator = FreshNameGenerator()
 
     def visit(self, node):
         method_name = f"visit_{type(node).__name__}"
@@ -270,7 +285,7 @@ class AstMutator:
             # For this example, we just skip this part as we don't have the actual fold helper
             pass
 
-        self.mutations_done += 1
+        #self.mutations_done += 1
 
     def visit_Assign(self, node: ast.Assign):
         self.visit(node.target)
@@ -289,8 +304,7 @@ class AstMutator:
                 node.value = other_var
 
         elif mutation_type == "insert_new_local" and isinstance(node.target, ast.Name):
-            # TODO use self.fresh_name()
-            new_name = f"x{self.rng.randint(100, 999)}"
+            new_name = self.name_generator.generate()
 
             # For simplicity, we're assuming uint256 type with value 0
             if rhs_type:
@@ -395,7 +409,7 @@ class AstMutator:
 
         # Could swap loop bounds or modify iteration
         # This is a simplified implementation
-        self.mutations_done += 1
+        #self.mutations_done += 1
 
     def visit_Compare(self, node: ast.Compare):
         """Mutate comparison operations"""
