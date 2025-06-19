@@ -22,6 +22,18 @@ class AstMutator:
         ast.Return: 0.1,
         ast.UnaryOp: 0.1,
         ast.BoolOp: 0.1,
+        ast.Attribute: 0.2,
+        ast.Subscript: 0.2,
+        ast.For: 0.2,
+        ast.Compare: 0.3,
+    }
+
+    # Interesting values for literal mutations
+    INTERESTING_VALUES = {
+        "uint256": [0, 1, -1, 2**256 - 1],
+        "int256": [0, 1, -1, 2**255 - 1, -(2**255)],
+        "address": [0],
+        "general": [0, 1, -1],
     }
 
     def __init__(
@@ -128,7 +140,22 @@ class AstMutator:
             bit_position = self.rng.randint(0, 255)
             node.value ^= 1 << bit_position
         elif mutation_type == "magic_constant":
-            node.value = self.rng.choice([0, 1, 2**256 - 1])
+            # Use interesting values based on type if available
+            node_type = getattr(node, "_metadata", {}).get("type")
+            if node_type and "uint" in str(node_type):
+                values = self.INTERESTING_VALUES["uint256"]
+            elif node_type and "int" in str(node_type):
+                values = self.INTERESTING_VALUES["int256"]
+            else:
+                values = self.INTERESTING_VALUES["general"]
+
+            # Also add a random large prime sometimes
+            if self.rng.random() < 0.2:
+                # Generate a large prime (simplified - just a large odd number)
+                large_prime = self.rng.randint(10**18, 10**20) | 1
+                values = values + [large_prime]
+
+            node.value = self.rng.choice(values)
 
         self.mutations_done += 1
 
@@ -321,5 +348,76 @@ class AstMutator:
             # Duplicate one input (a and b → a and a)
             duplicate_idx = self.rng.randint(0, len(node.values) - 1)
             node.values[1 - duplicate_idx] = node.values[duplicate_idx]
+
+        self.mutations_done += 1
+
+    def visit_Attribute(self, node: ast.Attribute):
+        """Mutate attribute access (e.g., self.foo)"""
+        self.visit(node.value)
+
+        if not self.should_mutate(ast.Attribute):
+            return
+
+        # For now, we can swap attribute names if we have a mapping
+        # This is a simplified implementation
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            # Could implement storage variable reordering here
+            pass
+
+        self.mutations_done += 1
+
+    def visit_Subscript(self, node: ast.Subscript):
+        """Mutate subscript access (e.g., arr[i])"""
+        self.visit(node.value)
+        self.visit(node.slice)
+
+        if not self.should_mutate(ast.Subscript):
+            return
+
+        # Could mutate the index
+        if isinstance(node.slice, ast.Int):
+            node.slice.value = self.rng.choice(
+                [0, 1, node.slice.value + 1, node.slice.value - 1]
+            )
+
+        self.mutations_done += 1
+
+    def visit_For(self, node: ast.For):
+        """Mutate for loops"""
+        self.visit(node.target)
+        self.visit(node.iter)
+
+        for stmt in node.body:
+            self.visit(stmt)
+
+        if not self.should_mutate(ast.For):
+            return
+
+        # Could swap loop bounds or modify iteration
+        # This is a simplified implementation
+        self.mutations_done += 1
+
+    def visit_Compare(self, node: ast.Compare):
+        """Mutate comparison operations"""
+        self.visit(node.left)
+        self.visit(node.right)
+
+        if not self.should_mutate(ast.Compare):
+            return
+
+        # Swap comparison operators
+        op_swaps = {
+            ast.Lt: [ast.LtE, ast.Gt, ast.Eq],
+            ast.LtE: [ast.Lt, ast.GtE, ast.Eq],
+            ast.Gt: [ast.GtE, ast.Lt, ast.Eq],
+            ast.GtE: [ast.Gt, ast.LtE, ast.Eq],
+            ast.Eq: [ast.NotEq, ast.Lt, ast.Gt],
+            ast.NotEq: [ast.Eq, ast.Lt, ast.Gt],
+        }
+
+        op_type = type(node.op)
+        if op_type in op_swaps:
+            new_op_type = self.rng.choice(op_swaps[op_type])
+            node.op = new_op_type()
 
         self.mutations_done += 1
