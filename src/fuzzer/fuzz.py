@@ -13,12 +13,6 @@ from dataclasses import dataclass
 import json
 from datetime import datetime
 
-from ivy.frontend.loader import loads as ivy_loads
-from ivy.frontend.env import Env
-from ivy.types import Address
-from boa import loads as boa_loads
-import boa
-
 from .mutator import AstMutator
 from .value_mutator import ValueMutator
 from .type_retrieval import (
@@ -37,6 +31,10 @@ from .export_utils import (
 )
 from src.unparser.unparser import unparse
 
+from .runner import Scenario, Call, DivergenceDetector, Divergence
+from .ivy_runner import IvyRunner
+from .boa_runner import BoaRunner
+
 
 # Configuration constants from spec
 MAX_SCENARIOS_PER_ITEM = 30
@@ -46,28 +44,6 @@ TIMEOUT_PER_SCENARIO = 120  # seconds
 LOG_LEVEL = logging.INFO
 
 logging.basicConfig(level=LOG_LEVEL, format="%(levelname)s: %(message)s")
-
-
-@dataclass
-class Call:
-    """Represents a function call in the call schedule"""
-
-    fn_name: str
-    args: List[Any]
-    kwargs: Dict[str, Any]
-    msg_sender: Optional[str] = None
-
-
-@dataclass
-class Scenario:
-    """Fuzzing scenario as specified in the spec"""
-
-    mutated_source: str
-    deploy_args: List[Any]
-    deploy_kwargs: Dict[str, Any]  # contains "value"
-    call_schedule: List[Call]
-
-
 
 
 class DifferentialFuzzer:
@@ -109,14 +85,14 @@ class DifferentialFuzzer:
     ) -> List[Any]:
         """Generalized function to mutate arguments based on ABI inputs."""
         mutated_args = args.copy()
-        
+
         for i, input_spec in enumerate(inputs):
             if i < len(mutated_args) and self.rng.random() < mutation_prob:
                 abi_type = input_spec.get("type", "")
                 boundary_values = self.get_boundary_values(abi_type)
                 if boundary_values:
                     mutated_args[i] = self.rng.choice(boundary_values)
-        
+
         return mutated_args
 
     def mutate_value(self, is_payable: bool, mutation_prob: float = 0.3) -> int:
@@ -224,14 +200,18 @@ class DifferentialFuzzer:
                     base_args.append(self.rng.choice(boundary_values))
                 else:
                     base_args.append(0)  # Default value
-            
+
             # Apply mutations to the arguments
-            args = self.mutate_arguments(fn.get("inputs", []), base_args, mutation_prob=0.5)
+            args = self.mutate_arguments(
+                fn.get("inputs", []), base_args, mutation_prob=0.5
+            )
 
             # Generate kwargs (value for payable functions)
             kwargs = {}
             is_payable = fn.get("stateMutability") == "payable"
-            value = self.mutate_value(is_payable, mutation_prob=1.0 if is_payable else 0.1)
+            value = self.mutate_value(
+                is_payable, mutation_prob=1.0 if is_payable else 0.1
+            )
             if value > 0:
                 kwargs["value"] = value
 
@@ -270,170 +250,19 @@ class DifferentialFuzzer:
 
         return deployments
 
-
-    def compare_step(
-        self, ivy_res: Any, boa_res: Any, ivy_env: Env, boa_env: Any
-    ) -> bool:
-        """Compare execution step results between Ivy and Boa."""
-        # Check if both reverted or both succeeded
-        ivy_reverted = isinstance(ivy_res, Exception) or (
-            hasattr(ivy_res, "reverted") and ivy_res.reverted
-        )
-        boa_reverted = isinstance(boa_res, Exception) or (
-            hasattr(boa_res, "reverted") and boa_res.reverted
-        )
-
-        if ivy_reverted != boa_reverted:
-            return False
-
-        # If both reverted, we consider them equal (for now)
-        if ivy_reverted:
-            return True
-
-        # Compare outputs (if not reverted)
-        ivy_output = ivy_res if not hasattr(ivy_res, "output") else ivy_res.output
-        boa_output = boa_res if not hasattr(boa_res, "output") else boa_res.output
-
-        if ivy_output != boa_output:
-            return False
-
-        # TODO: Compare state - this would require accessing storage from both environments
-        # For now, we only compare deployment and outputs
-
-        return True
-
-    def run_scenario(self, scenario: Scenario) -> Optional[Dict[str, Any]]:
+    def run_scenario(self, scenario: Scenario) -> Optional[Divergence]:
         """Run a complete scenario and check for divergences."""
-        # Deploy in both Ivy and Boa
-        ivy_env = Env()
+        # Create runners
+        ivy_runner = IvyRunner()
+        boa_runner = BoaRunner()
 
-        # Deploy with Ivy - ivy_loads already deploys the contract
-        try:
-            # Set up environment
-            deployer_addr = Address("0x0000000000000000000000000000000000000001")
-            ivy_env.set_balance(deployer_addr, 10**21)  # Give deployer some ETH
-            # Set deployer as tx origin if available
-            if hasattr(ivy_env, "evm") and hasattr(ivy_env.evm, "set_tx_origin"):
-                ivy_env.evm.set_tx_origin(deployer_addr)
+        # Run scenarios in both environments
+        ivy_result = ivy_runner.run(scenario)
+        boa_result = boa_runner.run(scenario)
 
-            # ivy_loads compiles and deploys the contract with constructor args
-            if scenario.deploy_args:
-                ivy_address = ivy_loads(
-                    scenario.mutated_source,
-                    env=ivy_env,
-                    *scenario.deploy_args,
-                    value=scenario.deploy_kwargs.get("value", 0),
-                )
-            else:
-                ivy_address = ivy_loads(
-                    scenario.mutated_source,
-                    env=ivy_env,
-                    value=scenario.deploy_kwargs.get("value", 0),
-                )
-
-            ivy_deployed = True
-            ivy_deploy_error = None
-        except Exception as e:
-            ivy_deployed = False
-            ivy_deploy_error = e
-            ivy_address = None
-
-        # Deploy with Boa
-        try:
-            boa_contract = boa_loads(
-                scenario.mutated_source, *scenario.deploy_args, **scenario.deploy_kwargs
-            )
-            boa_deployed = True
-            boa_deploy_error = None
-        except Exception as e:
-            boa_deployed = False
-            boa_deploy_error = e
-            boa_contract = None
-
-        # Check deployment divergence
-        if ivy_deployed != boa_deployed:
-            # Skip known risky overlap errors
-            if boa_deploy_error and "risky overlap" in str(boa_deploy_error):
-                return None
-
-            return {
-                "type": "deployment",
-                "step": 0,
-                "mutated_source": scenario.mutated_source,
-                "deploy_args": scenario.deploy_args,
-                "deploy_kwargs": scenario.deploy_kwargs,
-                "ivy_error": ivy_deploy_error,
-                "boa_error": boa_deploy_error,
-            }
-
-        # If both failed to deploy, no divergence
-        if not ivy_deployed:
-            return None
-
-        # Execute call schedule
-        for step, call in enumerate(scenario.call_schedule):
-            # Execute in Ivy
-            try:
-                if call.msg_sender:
-                    ivy_env.set_balance(
-                        Address(call.msg_sender), 10**20
-                    )  # Give sender some ETH
-
-                ivy_result = getattr(ivy_address, call.fn_name)(
-                    *call.args,
-                    value=call.kwargs.get("value", 0),
-                    sender=Address(call.msg_sender) if call.msg_sender else None,
-                )
-                ivy_error = None
-            except Exception as e:
-                ivy_result = None
-                ivy_error = e
-
-            # Execute in Boa
-            try:
-                if call.msg_sender:
-                    boa.env.set_balance(call.msg_sender, 10**20)  # Give sender some ETH
-                    with boa.env.prank(call.msg_sender):
-                        boa_fn = getattr(boa_contract, call.fn_name)
-                        boa_result = boa_fn(*call.args, **call.kwargs)
-                else:
-                    boa_fn = getattr(boa_contract, call.fn_name)
-                    boa_result = boa_fn(*call.args, **call.kwargs)
-                boa_error = None
-            except Exception as e:
-                boa_result = None
-                boa_error = e
-
-            # Compare results
-            if not self.compare_step(
-                ivy_result if ivy_error is None else ivy_error,
-                boa_result if boa_error is None else boa_error,
-                ivy_env,
-                boa,
-            ):
-                return {
-                    "type": "execution",
-                    "step": step + 1,  # +1 because step 0 is deployment
-                    "function": call.fn_name,
-                    "mutated_source": scenario.mutated_source,
-                    "deploy_args": scenario.deploy_args,
-                    "deploy_kwargs": scenario.deploy_kwargs,
-                    "call_schedule": [
-                        {
-                            "fn_name": c.fn_name,
-                            "args": c.args,
-                            "kwargs": c.kwargs,
-                            "msg_sender": c.msg_sender,
-                        }
-                        for c in scenario.call_schedule[: step + 1]
-                    ],  # Include calls up to divergence
-                    "ivy_result": str(ivy_result) if ivy_error is None else None,
-                    "ivy_error": str(ivy_error) if ivy_error else None,
-                    "boa_result": str(boa_result) if boa_error is None else None,
-                    "boa_error": str(boa_error) if boa_error else None,
-                }
-
-        return None  # No divergence found
+        # Compare results
+        detector = DivergenceDetector()
+        return detector.compare_results(ivy_result, boa_result, scenario)
 
     def save_divergence(
         self, divergence: Dict[str, Any], item_name: str, scenario_num: int
@@ -506,14 +335,20 @@ class DifferentialFuzzer:
             baseline_divergence = self.run_scenario(baseline_scenario)
             if baseline_divergence:
                 logging.error(f"Baseline failure for {item_name} - skipping")
-                logging.error(f"  Divergence type: {baseline_divergence.get('type')}")
-                if baseline_divergence.get("ivy_error"):
+                logging.error(f"  Divergence type: {baseline_divergence.type}")
+                if (
+                    baseline_divergence.ivy_result
+                    and baseline_divergence.ivy_result.error
+                ):
                     logging.error(
-                        f"  Ivy error: {baseline_divergence.get('ivy_error')}"
+                        f"  Ivy error: {baseline_divergence.ivy_result.error}"
                     )
-                if baseline_divergence.get("boa_error"):
+                if (
+                    baseline_divergence.boa_result
+                    and baseline_divergence.boa_result.error
+                ):
                     logging.error(
-                        f"  Boa error: {baseline_divergence.get('boa_error')}"
+                        f"  Boa error: {baseline_divergence.boa_result.error}"
                     )
                 continue
 
@@ -553,17 +388,17 @@ class DifferentialFuzzer:
                 if divergence:
                     divergence_count += 1
                     logging.error(
-                        f"diff| item {item_name} | mut#{scenario_num} | calls {len(call_schedule)} | step {divergence['step']}"
+                        f"diff| item {item_name} | mut#{scenario_num} | calls {len(call_schedule)} | step {divergence.step}"
                     )
-                    if divergence["type"] == "deployment":
+                    if divergence.type == "deployment":
                         logging.error(f"  Deployment divergence")
                     else:
                         logging.error(
-                            f"  Execution divergence at function {divergence['function']}"
+                            f"  Execution divergence at function {divergence.function}"
                         )
 
                     # Save divergence
-                    self.save_divergence(divergence, item_name, scenario_num)
+                    self.save_divergence(divergence.to_dict(), item_name, scenario_num)
                 else:
                     logging.info(
                         f"ok  | item {item_name} | mut#{scenario_num} | calls {len(call_schedule)}"

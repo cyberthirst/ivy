@@ -11,7 +11,7 @@ from .value_mutator import ValueMutator
 
 class FreshNameGenerator:
     """Generates unique variable names with a consistent prefix."""
-    
+
     def __init__(self, prefix: str = "ivy_internal"):
         self.prefix = prefix
         self.counter = 0
@@ -20,7 +20,6 @@ class FreshNameGenerator:
         name = f"{self.prefix}{self.counter}"
         self.counter += 1
         return name
-
 
 
 class Scope:
@@ -140,14 +139,14 @@ class AstMutator:
 
         # Get the type if available
         node_type = getattr(node, "_metadata", {}).get("type")
-        
+
         if node_type and isinstance(node_type, IntegerT):
             # Use the value mutator with proper type
             node.value = self.value_mutator.mutate_value(node.value, node_type)
         else:
             # Fallback to simple mutations
             mutation_type = self.rng.choice(["add_one", "subtract_one", "bit_flip"])
-            
+
             if mutation_type == "add_one":
                 node.value += 1
             elif mutation_type == "subtract_one":
@@ -269,7 +268,7 @@ class AstMutator:
             # For this example, we just skip this part as we don't have the actual fold helper
             pass
 
-        #self.mutations_done += 1
+        # self.mutations_done += 1
 
     def visit_Assign(self, node: ast.Assign):
         self.visit(node.target)
@@ -393,7 +392,7 @@ class AstMutator:
 
         # Could swap loop bounds or modify iteration
         # This is a simplified implementation
-        #self.mutations_done += 1
+        # self.mutations_done += 1
 
     def visit_Compare(self, node: ast.Compare):
         """Mutate comparison operations"""
