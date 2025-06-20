@@ -324,34 +324,6 @@ class DifferentialFuzzer:
             logging.debug(f"Deploy kwargs: {deploy_kwargs}")
             logging.debug(f"Python args: {deployment_trace.python_args}")
 
-            # Step 0: Baseline run (no mutation)
-            baseline_scenario = Scenario(
-                mutated_source=deployment_trace.source_code,
-                deploy_args=deploy_args,
-                deploy_kwargs=deploy_kwargs,
-                call_schedule=[],  # No calls for baseline
-            )
-
-            baseline_divergence = self.run_scenario(baseline_scenario)
-            if baseline_divergence:
-                logging.error(f"Baseline failure for {item_name} - skipping")
-                logging.error(f"  Divergence type: {baseline_divergence.type}")
-                if (
-                    baseline_divergence.ivy_result
-                    and baseline_divergence.ivy_result.error
-                ):
-                    logging.error(
-                        f"  Ivy error: {baseline_divergence.ivy_result.error}"
-                    )
-                if (
-                    baseline_divergence.boa_result
-                    and baseline_divergence.boa_result.error
-                ):
-                    logging.error(
-                        f"  Boa error: {baseline_divergence.boa_result.error}"
-                    )
-                continue
-
             # Run mutation scenarios
             scenarios_run = 0
             for scenario_num in range(max_scenarios):
