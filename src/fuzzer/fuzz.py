@@ -20,6 +20,12 @@ from boa import loads as boa_loads
 import boa
 
 from .mutator import AstMutator
+from .value_mutator import ValueMutator
+from .type_retrieval import (
+    abi_type_to_vyper_type,
+    get_function_types_from_abi,
+    get_constructor_types_from_abi,
+)
 from .export_utils import (
     load_all_exports,
     filter_exports,
@@ -86,6 +92,7 @@ class DifferentialFuzzer:
         self.mutator = AstMutator(
             self.rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
         )
+        self.value_mutator = ValueMutator(self.rng)
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -98,77 +105,40 @@ class DifferentialFuzzer:
 
     def get_boundary_values(self, abi_type: str) -> List[Any]:
         """Get boundary values for a given ABI type."""
-        if "uint" in abi_type:
-            # Extract bit size (default to 256)
-            bits = 256
-            if abi_type != "uint":
-                try:
-                    bits = int(abi_type[4:])
-                except:
-                    pass
-            max_val = (2**bits) - 1
-            return [
-                0,
-                1,
-                max_val,
-                max_val - 1,
-                2 ** (bits - 1),
-                self.rng.randint(0, max_val),
-            ]
-        elif "int" in abi_type:
-            # Signed integers
-            bits = 256
-            if abi_type != "int":
-                try:
-                    bits = int(abi_type[3:])
-                except:
-                    pass
-            max_val = (2 ** (bits - 1)) - 1
-            min_val = -(2 ** (bits - 1))
-            return [0, 1, -1, max_val, min_val, self.rng.randint(min_val, max_val)]
-        elif "address" in abi_type:
-            return [
-                "0x0000000000000000000000000000000000000000",
-                "0x0000000000000000000000000000000000000001",
-                "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-                f"0x{self.rng.randbytes(20).hex()}",
-            ]
-        elif "bool" in abi_type:
-            return [True, False]
-        elif "bytes" in abi_type:
-            if abi_type == "bytes":
-                # Dynamic bytes
-                return [
-                    b"",
-                    b"\\x00",
-                    b"\\xff" * 32,
-                    self.rng.randbytes(self.rng.randint(1, 100)),
-                ]
-            else:
-                # Fixed bytes
-                try:
-                    size = int(abi_type[5:])
-                    return [b"\\x00" * size, b"\\xff" * size, self.rng.randbytes(size)]
-                except:
-                    return [b""]
-        elif "string" in abi_type:
-            return [
-                "",
-                "a",
-                "A" * 1000,
-                "\\x00",
-                "test_" + str(self.rng.randint(0, 1000)),
-            ]
+        # Convert ABI type to Vyper type
+        vyper_type = abi_type_to_vyper_type(abi_type)
+        if vyper_type:
+            return self.value_mutator.get_boundary_values(vyper_type)
         else:
-            # Default/unknown types
+            # Fallback for unknown types
             return [0, 1, -1]
+
+    def mutate_arguments(
+        self, inputs: List[Dict[str, Any]], args: List[Any], mutation_prob: float = 0.3
+    ) -> List[Any]:
+        """Generalized function to mutate arguments based on ABI inputs."""
+        mutated_args = args.copy()
+        
+        for i, input_spec in enumerate(inputs):
+            if i < len(mutated_args) and self.rng.random() < mutation_prob:
+                abi_type = input_spec.get("type", "")
+                boundary_values = self.get_boundary_values(abi_type)
+                if boundary_values:
+                    mutated_args[i] = self.rng.choice(boundary_values)
+        
+        return mutated_args
+
+    def mutate_value(self, is_payable: bool, mutation_prob: float = 0.3) -> int:
+        """Mutate ETH value for payable functions."""
+        if is_payable and self.rng.random() < mutation_prob:
+            value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, 2^128-1
+            return self.rng.choice(value_choices)
+        return 0
 
     def mutate_deployment(
         self, abi: List[Dict[str, Any]], deploy_args: List[Any], deploy_value: int
     ) -> Tuple[List[Any], int]:
         """Mutate deployment arguments and value according to spec."""
-        mutated_args = deploy_args.copy()
-
         # Find constructor in ABI
         constructor = None
         for item in abi:
@@ -176,23 +146,19 @@ class DifferentialFuzzer:
                 constructor = item
                 break
 
+        # Mutate constructor arguments
+        mutated_args = deploy_args.copy()
         if constructor and constructor.get("inputs"):
-            # Mutate constructor arguments
-            for i, input_spec in enumerate(constructor["inputs"]):
-                if (
-                    i < len(mutated_args) and self.rng.random() < 0.3
-                ):  # 30% chance to mutate each arg
-                    abi_type = input_spec.get("type", "")
-                    boundary_values = self.get_boundary_values(abi_type)
-                    if boundary_values:
-                        mutated_args[i] = self.rng.choice(boundary_values)
+            mutated_args = self.mutate_arguments(constructor["inputs"], deploy_args)
 
         # Mutate deployment value
-        if self.rng.random() < 0.3:  # 30% chance to mutate value
-            value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, 2^128-1
-            deploy_value = self.rng.choice(value_choices)
+        is_payable = constructor and constructor.get("stateMutability") == "payable"
+        mutated_value = self.mutate_value(is_payable) if is_payable else deploy_value
+        if not is_payable and self.rng.random() < 0.1:
+            # For non-payable constructors, sometimes try sending value anyway
+            mutated_value = self.mutate_value(True)
 
-        return mutated_args, deploy_value
+        return mutated_args, mutated_value
 
     def mutate_source(self, source: str) -> Optional[str]:
         """Mutate source code and return the mutated version."""
@@ -257,21 +223,26 @@ class DifferentialFuzzer:
             else:
                 continue
 
-            # Generate arguments
-            args = []
+            # Generate arguments using the generalized mutation function
+            # First create base arguments with boundary values
+            base_args = []
             for input_spec in fn.get("inputs", []):
                 abi_type = input_spec.get("type", "")
                 boundary_values = self.get_boundary_values(abi_type)
                 if boundary_values:
-                    args.append(self.rng.choice(boundary_values))
+                    base_args.append(self.rng.choice(boundary_values))
                 else:
-                    args.append(0)  # Default value
+                    base_args.append(0)  # Default value
+            
+            # Apply mutations to the arguments
+            args = self.mutate_arguments(fn.get("inputs", []), base_args, mutation_prob=0.5)
 
             # Generate kwargs (value for payable functions)
             kwargs = {}
-            if fn.get("stateMutability") == "payable":
-                value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, 2^128-1
-                kwargs["value"] = self.rng.choice(value_choices)
+            is_payable = fn.get("stateMutability") == "payable"
+            value = self.mutate_value(is_payable, mutation_prob=1.0 if is_payable else 0.1)
+            if value > 0:
+                kwargs["value"] = value
 
             # Random msg.sender from a pool of 3 addresses
             senders = [
@@ -693,12 +664,13 @@ def main():
     # Create test filter - exclude multi-module contracts for now
     test_filter = TestFilter(exclude_multi_module=True)
     # Include tests with certain patterns
-    test_filter.include_path("functional/codegen/calling_convention/test_erc20")
+    test_filter.include_path("functional/codegen/calling_convention/test_internal")
+    test_filter.exclude_source(r"\.code")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
     fuzzer.fuzz_exports(
-        test_filter=test_filter, max_scenarios=10, enable_mutations=True
+        test_filter=test_filter, max_scenarios=200, enable_mutations=True
     )
 
 

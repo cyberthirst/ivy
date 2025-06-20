@@ -4,7 +4,9 @@ from typing import Optional, Type, Set
 
 from vyper.ast import nodes as ast
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, IntegerT
+
+from .value_mutator import ValueMutator
 
 
 class FreshNameGenerator:
@@ -42,14 +44,6 @@ class AstMutator:
         ast.Compare: 0.3,
     }
 
-    # Interesting values for literal mutations
-    INTERESTING_VALUES = {
-        "uint256": [0, 1, -1, 2**256 - 1],
-        "int256": [0, 1, -1, 2**255 - 1, -(2**255)],
-        "address": [0],
-        "general": [0, 1, -1],
-    }
-
     def __init__(
         self, rng: random.Random, *, max_mutations: int = 8, mutate_prob: float = 0.3
     ):
@@ -60,6 +54,7 @@ class AstMutator:
         self.current_scope = None
         self.scope_stack = []
         self.name_generator = FreshNameGenerator()
+        self.value_mutator = ValueMutator(rng)
 
     def visit(self, node):
         method_name = f"visit_{type(node).__name__}"
@@ -143,34 +138,23 @@ class AstMutator:
         if not self.should_mutate(ast.Int):
             return
 
-        mutation_type = self.rng.choice(
-            ["add_one", "subtract_one", "bit_flip", "magic_constant"]
-        )
-
-        if mutation_type == "add_one":
-            node.value += 1
-        elif mutation_type == "subtract_one":
-            node.value -= 1
-        elif mutation_type == "bit_flip":
-            bit_position = self.rng.randint(0, 255)
-            node.value ^= 1 << bit_position
-        elif mutation_type == "magic_constant":
-            # Use interesting values based on type if available
-            node_type = getattr(node, "_metadata", {}).get("type")
-            if node_type and "uint" in str(node_type):
-                values = self.INTERESTING_VALUES["uint256"]
-            elif node_type and "int" in str(node_type):
-                values = self.INTERESTING_VALUES["int256"]
-            else:
-                values = self.INTERESTING_VALUES["general"]
-
-            # Also add a random large prime sometimes
-            if self.rng.random() < 0.2:
-                # Generate a large prime (simplified - just a large odd number)
-                large_prime = self.rng.randint(10**18, 10**20) | 1
-                values = values + [large_prime]
-
-            node.value = self.rng.choice(values)
+        # Get the type if available
+        node_type = getattr(node, "_metadata", {}).get("type")
+        
+        if node_type and isinstance(node_type, IntegerT):
+            # Use the value mutator with proper type
+            node.value = self.value_mutator.mutate_value(node.value, node_type)
+        else:
+            # Fallback to simple mutations
+            mutation_type = self.rng.choice(["add_one", "subtract_one", "bit_flip"])
+            
+            if mutation_type == "add_one":
+                node.value += 1
+            elif mutation_type == "subtract_one":
+                node.value -= 1
+            elif mutation_type == "bit_flip":
+                bit_position = self.rng.randint(0, 63)  # Limit to 64 bits for safety
+                node.value ^= 1 << bit_position
 
         self.mutations_done += 1
 
