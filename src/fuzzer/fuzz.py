@@ -9,11 +9,11 @@ import logging
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 import json
 from datetime import datetime
 
-from ivy.frontend.loader import loads as ivy_loads, loads_from_solc_json
+from ivy.frontend.loader import loads as ivy_loads
 from ivy.frontend.env import Env
 from ivy.types import Address
 from boa import loads as boa_loads
@@ -36,7 +36,6 @@ from .export_utils import (
     TestItem,
 )
 from src.unparser.unparser import unparse
-from tests.test_replay import TestReplay
 
 
 # Configuration constants from spec
@@ -69,14 +68,6 @@ class Scenario:
     call_schedule: List[Call]
 
 
-@dataclass
-class MutatedScenario:
-    """Test scenario with mutated source code"""
-
-    export: TestExport
-    item_name: str
-    mutated_source: str
-    deployment_trace: DeploymentTrace
 
 
 class DifferentialFuzzer:
@@ -279,80 +270,6 @@ class DifferentialFuzzer:
 
         return deployments
 
-    def run_ivy_with_mutated_source(self, scenario: MutatedScenario) -> dict:
-        """
-        Execute test with mutated source code using Ivy.
-        Returns deployment status and execution results.
-        """
-        env = Env()
-
-        # Create a modified export with mutated source
-        modified_export = TestExport(path=scenario.export.path, items={})
-
-        # Deep copy the test item
-        import copy
-
-        item = copy.deepcopy(scenario.export.items[scenario.item_name])
-
-        # Replace the source code in deployment trace
-        for i, trace in enumerate(item.traces):
-            if trace == scenario.deployment_trace:
-                # Create new deployment trace with mutated source
-                new_trace = DeploymentTrace(
-                    deployment_type=trace.deployment_type,
-                    deployer=trace.deployer,
-                    deployed_address=trace.deployed_address,
-                    value=trace.value,
-                    calldata=trace.calldata,
-                    source_code=scenario.mutated_source,
-                    solc_json=trace.solc_json,
-                    deployment_succeeded=trace.deployment_succeeded,
-                    contract_abi=trace.contract_abi,
-                    initcode=trace.initcode,
-                    annotated_ast=trace.annotated_ast,
-                    raw_ir=trace.raw_ir,
-                    blueprint_initcode_prefix=trace.blueprint_initcode_prefix,
-                    runtime_bytecode=trace.runtime_bytecode,
-                    python_args=trace.python_args,
-                )
-                item.traces[i] = new_trace
-                break
-
-        modified_export.items[scenario.item_name] = item
-
-        # Use TestReplay to execute with python_args
-        replay = TestReplay(env, use_python_args=True)
-
-        try:
-            with env.anchor():
-                replay.execute_item(modified_export, scenario.item_name)
-            return {"success": True, "env": env}
-        except Exception as e:
-            return {"error": e, "env": env}
-
-    def run_boa_with_source(
-        self,
-        source_code: str,
-        python_args: Optional[Dict[str, Any]],
-        deployment_value: int,
-    ) -> dict:
-        """
-        Compile and deploy source code with Boa.
-        Returns deployment status.
-        """
-        try:
-            # Deploy with Boa using python args
-            if python_args:
-                args = python_args.get("args", [])
-                kwargs = python_args.get("kwargs", {})
-                kwargs["value"] = deployment_value
-                contract = boa_loads(source_code, *args, **kwargs)
-            else:
-                contract = boa_loads(source_code, value=deployment_value)
-
-            return {"success": True, "contract": contract}
-        except Exception as e:
-            return {"error": e}
 
     def compare_step(
         self, ivy_res: Any, boa_res: Any, ivy_env: Env, boa_env: Any
