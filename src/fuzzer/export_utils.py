@@ -223,36 +223,40 @@ class TestFilter:
                             return True
 
         # Check dependencies recursively
-        for dep in item.deps:
-            dep_path_str, dep_name = dep.rsplit("/", 1)
-            # Fix the path prefix from "tests/export/" to "tests/vyper-exports/"
-            if dep_path_str.startswith("tests/export/"):
-                dep_path_str = dep_path_str.replace(
-                    "tests/export/", "tests/vyper-exports/", 1
-                )
-            dep_path = Path(dep_path_str)
-
-            # Load dependency export if needed
-            if export and dep_path == export_path:
-                # Dependency is in the same export file
-                if dep_name in export.items:
-                    dep_item = export.items[dep_name]
-                    if self.should_skip_item(dep_item, dep_path, export, checked_deps):
+        if item.deps and export:
+            for dep in item.deps:
+                dep_path_str, dep_name = dep.rsplit("/", 1)
+                # Fix the path prefix from "tests/export/" to "tests/vyper-exports/"
+                if dep_path_str.startswith("tests/export/"):
+                    dep_path_str = dep_path_str.replace("tests/export/", "tests/vyper-exports/", 1)
+                
+                # For dependencies in the same file
+                if dep_path_str.endswith(".json"):
+                    dep_export_path = Path(dep_path_str)
+                else:
+                    # Handle relative dependencies
+                    dep_export_path = export_path
+                
+                # Load dependency if from different file
+                if dep_export_path != export_path:
+                    try:
+                        dep_export = load_export(dep_export_path)
+                    except Exception:
+                        # If we can't load the dependency, skip this item
                         return True
-            else:
-                # Need to load the dependency export file
-                try:
-                    dep_export = load_export(dep_path)
-                    if dep_name in dep_export.items:
-                        dep_item = dep_export.items[dep_name]
-                        if self.should_skip_item(
-                            dep_item, dep_path, dep_export, checked_deps
-                        ):
-                            return True
-                except Exception:
-                    # If we can't load the dependency, skip this test
+                else:
+                    dep_export = export
+                
+                # Check if dependency exists
+                if dep_name not in dep_export.items:
+                    continue
+                    
+                dep_item = dep_export.items[dep_name]
+                
+                # Recursively check if dependency should be skipped
+                if self.should_skip_item(dep_item, dep_export_path, dep_export, checked_deps):
                     return True
-
+        
         return False
 
 
@@ -356,7 +360,7 @@ def filter_exports(
                 continue
 
             # Apply test filter
-            if test_filter and test_filter.should_skip_item(item, path):
+            if test_filter and test_filter.should_skip_item(item, path, export):
                 continue
 
             # Check if test is source-only
