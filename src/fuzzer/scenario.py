@@ -21,27 +21,19 @@ class Scenario:
     """
     Scenario that can represent both fuzzer mutations and replay traces.
 
-    This structure stores the original traces and any mutations separately
-    to minimize memory usage during long fuzzing campaigns.
+    This structure stores all traces (deployments, calls, etc.) in execution order
+    and handles mutations uniformly for any trace type.
     """
 
-    # Deployment info (optional - might only exist in dependencies)
-    deployment_trace: Optional[DeploymentTrace] = None
-    mutated_source: Optional[str] = None  # Only if source was mutated
-    mutated_deploy_args: Optional[List[Any]] = None  # Only if args were mutated
-    mutated_deploy_kwargs: Optional[Dict[str, Any]] = (
-        None  # Only if kwargs were mutated
-    )
-
-    # Sequential traces (includes calls, set_balance, clear_transient, and additional deployments)
-    traces: List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace, DeploymentTrace]] = field(
+    # All traces in execution order (deployments, calls, set_balance, clear_transient)
+    traces: List[Union[DeploymentTrace, CallTrace, SetBalanceTrace, ClearTransientStorageTrace]] = field(
         default_factory=list
     )
 
     # Mutated traces (if traces were mutated, this replaces the original traces entirely)
     # This preserves the exact order of execution
     mutated_traces: Optional[
-        List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace, DeploymentTrace]]
+        List[Union[DeploymentTrace, CallTrace, SetBalanceTrace, ClearTransientStorageTrace]]
     ] = None
 
     # Dependencies to execute first
@@ -87,43 +79,6 @@ def build_dependencies_from_item(item: TestItem) -> List[Tuple[Path, str]]:
     return dependencies
 
 
-def find_deployment_trace(item: TestItem) -> Optional[DeploymentTrace]:
-    """
-    Find the first deployment trace in a test item.
-    
-    Only returns source deployments (not create2 deployments).
-    """
-    for trace in item.traces:
-        if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
-            return trace
-    return None
-
-
-def extract_non_deployment_traces(
-    item: TestItem,
-) -> List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace, DeploymentTrace]]:
-    """
-    Extract all traces after the first deployment.
-    
-    The first deployment (if any) is treated as the "primary" deployment for the scenario.
-    All subsequent traces, including additional deployments, are returned in order.
-    
-    This separation allows the fuzzer to mutate the primary deployment's source/args
-    while preserving the exact execution order of all traces.
-    """
-    non_deployment_traces = []
-    deployment_found = False
-    
-    for trace in item.traces:
-        if isinstance(trace, DeploymentTrace) and not deployment_found:
-            # Skip the first deployment trace
-            deployment_found = True
-        else:
-            non_deployment_traces.append(trace)
-    
-    return non_deployment_traces
-
-
 def create_scenario_from_item(
     item: TestItem,
     use_python_args: bool = True,
@@ -144,16 +99,9 @@ def create_scenario_from_item(
     # Build dependencies
     dependencies = build_dependencies_from_item(item)
     
-    # Find deployment trace (if any)
-    deployment_trace = find_deployment_trace(item)
-    
-    # Extract other traces
-    other_traces = extract_non_deployment_traces(item)
-    
-    # Create scenario
+    # Create scenario with all traces in execution order
     return Scenario(
-        deployment_trace=deployment_trace,
-        traces=other_traces,
+        traces=item.traces,
         dependencies=dependencies,
         use_python_args=use_python_args,
     )

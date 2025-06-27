@@ -29,7 +29,7 @@ class DeploymentTrace:
     blueprint_initcode_prefix: Optional[str]
     deployed_address: str
     runtime_bytecode: str
-    deployment_succeeded: Optional[bool] = None
+    deployment_succeeded: bool
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
 
 
@@ -288,7 +288,7 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     ),
                     deployed_address=trace_data["deployed_address"],
                     runtime_bytecode=trace_data["runtime_bytecode"],
-                    deployment_succeeded=trace_data.get("deployment_succeeded"),
+                    deployment_succeeded=trace_data["deployment_succeeded"],
                     python_args=trace_data.get("python_args"),
                 )
             elif trace_data["trace_type"] == "call":

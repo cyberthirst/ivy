@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 import json
 from datetime import datetime
+from copy import deepcopy
 
 from .mutator import AstMutator
 from .value_mutator import ValueMutator
@@ -22,13 +23,15 @@ from .export_utils import (
     filter_exports,
     TestFilter,
     TestItem,
+    DeploymentTrace,
 )
 from src.unparser.unparser import unparse
 
 from .scenario import Scenario, create_scenario_from_item
-from .runner import DivergenceDetector, Divergence
+from .base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
 from .ivy_scenario_runner import IvyScenarioRunner
 from .boa_scenario_runner import BoaScenarioRunner
+from .divergence_detector import Divergence, DivergenceDetector
 
 
 # Configuration constants from spec
@@ -163,38 +166,63 @@ class DifferentialFuzzer:
         scenario = create_scenario_from_item(item, use_python_args=True)
 
         # Apply mutations if enabled
-        if enable_mutations and scenario.deployment_trace:
-            # Mutate source code
-            mutated_source = self.mutate_source(scenario.deployment_trace.source_code)
-            if mutated_source and mutated_source != scenario.deployment_trace.source_code:
-                scenario.mutated_source = mutated_source
-
-            # Mutate deployment args
-            if scenario.deployment_trace.python_args:
-                deploy_args = scenario.deployment_trace.python_args.get("args", [])
-
-                mutated_args, mutated_value = self.mutate_deployment(
-                    scenario.deployment_trace.contract_abi,
-                    deploy_args,
-                    scenario.deployment_trace.value,
-                )
-
-                # Only store if actually mutated
-                if mutated_args != deploy_args:
-                    scenario.mutated_deploy_args = mutated_args
-
-                if mutated_value != scenario.deployment_trace.value:
-                    scenario.mutated_deploy_kwargs = {"value": mutated_value}
-
-            # Mutate call traces
-            if scenario.traces:
-                mutated_traces = self.trace_mutator.mutate_trace_sequence(
-                    scenario.traces,
-                    max_traces=MAX_CALLS,
-                )
-                # Only store if actually mutated
-                if mutated_traces != scenario.traces:
-                    scenario.mutated_traces = mutated_traces
+        if enable_mutations:
+            # Copy traces for potential mutation
+            mutated_traces = []
+            any_mutation = False
+            
+            for trace in scenario.traces:
+                if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
+                    # Check if we should mutate this deployment
+                    mutated_deployment = None
+                    
+                    # Try to mutate source code
+                    if trace.source_code:
+                        mutated_source = self.mutate_source(trace.source_code)
+                        if mutated_source and mutated_source != trace.source_code:
+                            # Need to create a mutated deployment
+                            mutated_deployment = deepcopy(trace)
+                            mutated_deployment.source_code = mutated_source
+                            any_mutation = True
+                    
+                    # Try to mutate deployment args
+                    if trace.python_args:
+                        deploy_args = trace.python_args.get("args", [])
+                        mutated_args, mutated_value = self.mutate_deployment(
+                            trace.contract_abi,
+                            deploy_args,
+                            trace.value,
+                        )
+                        
+                        if mutated_args != deploy_args or mutated_value != trace.value:
+                            # Create or update mutated deployment
+                            if not mutated_deployment:
+                                mutated_deployment = deepcopy(trace)
+                            
+                            # Update python_args with mutations
+                            mutated_deployment.python_args = deepcopy(trace.python_args)
+                            mutated_deployment.python_args["args"] = mutated_args
+                            mutated_deployment.value = mutated_value
+                            any_mutation = True
+                    
+                    # Add the appropriate trace
+                    mutated_traces.append(mutated_deployment if mutated_deployment else trace)
+                else:
+                    # For non-deployment traces, just append
+                    mutated_traces.append(trace)
+            
+            # Apply trace mutations (calls, etc.)
+            final_traces = self.trace_mutator.mutate_trace_sequence(
+                mutated_traces,
+                max_traces=MAX_CALLS,
+            )
+            
+            # Only store if actually mutated
+            if final_traces != scenario.traces:
+                scenario.mutated_traces = final_traces
+            elif any_mutation:
+                # We mutated deployments but trace_mutator didn't change anything else
+                scenario.mutated_traces = mutated_traces
 
         return scenario
 

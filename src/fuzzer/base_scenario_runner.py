@@ -25,9 +25,10 @@ class DeploymentResult:
     """Result of deploying a contract."""
 
     success: bool
-    address: Optional[Any] = None  # Contract address/instance
+    contract: Optional[Any] = None  # Contract instance (VyperContract)
     error: Optional[Exception] = None
     storage_dump: Optional[Dict[str, Any]] = None
+    deployed_address: Optional[str] = None  # Expected address where contract was deployed
 
 
 @dataclass
@@ -41,17 +42,29 @@ class CallResult:
 
 
 @dataclass
+class TraceResult:
+    """Result of executing any trace type."""
+    
+    trace_type: str  # "deployment", "call", "set_balance", "clear_transient_storage"
+    trace_index: int  # Index in the original traces list
+    result: Optional[Union[DeploymentResult, CallResult]] = None  # None for set_balance/clear_transient
+    
+
+@dataclass
 class ScenarioResult:
     """Complete result of running a scenario."""
 
-    deployment: DeploymentResult
-    calls: List[CallResult] = field(default_factory=list)
+    results: List[TraceResult] = field(default_factory=list)
 
-    def get_step_result(self, step: int) -> Union[DeploymentResult, CallResult]:
-        """Get result for a specific step (0 = deployment, 1+ = calls)."""
-        if step == 0:
-            return self.deployment
-        return self.calls[step - 1]
+    def get_deployment_results(self) -> List[Tuple[int, DeploymentResult]]:
+        """Get all deployment results with their trace indices."""
+        return [(r.trace_index, r.result) for r in self.results 
+                if r.trace_type == "deployment" and r.result is not None]
+    
+    def get_call_results(self) -> List[Tuple[int, CallResult]]:
+        """Get all call results with their trace indices."""
+        return [(r.trace_index, r.result) for r in self.results 
+                if r.trace_type == "call" and r.result is not None]
 
 
 class BaseScenarioRunner(ABC):
@@ -127,44 +140,36 @@ class BaseScenarioRunner(ABC):
         for dep_path, dep_item_name in scenario.dependencies:
             self._execute_dependency(dep_path, dep_item_name)
 
-        # Check if we have a deployment trace in the scenario
-        if scenario.deployment_trace:
-            # Deploy the main contract
-            deployment_result = self._execute_deployment(
-                trace=scenario.deployment_trace,
-                mutated_source=scenario.mutated_source,
-                mutated_args=scenario.mutated_deploy_args,
-                mutated_kwargs=scenario.mutated_deploy_kwargs,
-                use_python_args=scenario.use_python_args,
-            )
-
-            # If deployment failed, return early
-            if not deployment_result.success:
-                return ScenarioResult(deployment=deployment_result)
-        else:
-            # No deployment in main scenario (deployment might be in dependencies)
-            deployment_result = DeploymentResult(success=True)
-
         # Execute all traces in order
-        call_results = []
+        result = ScenarioResult()
         traces_to_execute = scenario.get_traces_to_execute()
 
-        for trace in traces_to_execute:
+        for trace_index, trace in enumerate(traces_to_execute):
             if isinstance(trace, DeploymentTrace):
-                # Execute additional deployment
-                self._execute_deployment(
+                # Execute deployment
+                deployment_result = self._execute_deployment(
                     trace=trace,
                     use_python_args=scenario.use_python_args,
                 )
+                result.results.append(TraceResult(
+                    trace_type="deployment",
+                    trace_index=trace_index,
+                    result=deployment_result,
+                ))
+                
                 # Continue even if deployment fails to match test behavior
                 
             elif isinstance(trace, CallTrace):
-                # Execute call and record result
+                # Execute call
                 call_result = self._execute_call(
                     trace=trace,
                     use_python_args=scenario.use_python_args,
                 )
-                call_results.append(call_result)
+                result.results.append(TraceResult(
+                    trace_type="call",
+                    trace_index=trace_index,
+                    result=call_result,
+                ))
 
                 # Stop if call failed (for consistency with original runner)
                 if not call_result.success:
@@ -173,12 +178,22 @@ class BaseScenarioRunner(ABC):
             elif isinstance(trace, SetBalanceTrace):
                 # Execute set_balance (no result to record)
                 self._execute_set_balance(trace)
+                result.results.append(TraceResult(
+                    trace_type="set_balance",
+                    trace_index=trace_index,
+                    result=None,
+                ))
 
             elif isinstance(trace, ClearTransientStorageTrace):
                 # Execute clear_transient_storage (no result to record)
                 self._execute_clear_transient_storage(trace)
+                result.results.append(TraceResult(
+                    trace_type="clear_transient_storage",
+                    trace_index=trace_index,
+                    result=None,
+                ))
 
-        return ScenarioResult(deployment=deployment_result, calls=call_results)
+        return result
 
     def _execute_deployment(
         self,
@@ -220,11 +235,13 @@ class BaseScenarioRunner(ABC):
             )
 
             # Store the deployed contract by its address
-            if hasattr(trace, 'deployed_address') and trace.deployed_address:
-                self.deployed_contracts[trace.deployed_address] = contract
+            deployed_addr = getattr(trace, 'deployed_address', None)
+            if deployed_addr:
+                self.deployed_contracts[deployed_addr] = contract
             # Also store by the contract's address if available
-            if hasattr(contract, 'address'):
-                self.deployed_contracts[str(contract.address)] = contract
+            contract_addr = getattr(contract, 'address', None)
+            if contract_addr:
+                self.deployed_contracts[str(contract_addr)] = contract
 
             # Get storage dump if requested
             storage_dump = None
@@ -233,8 +250,9 @@ class BaseScenarioRunner(ABC):
 
             return DeploymentResult(
                 success=True,
-                address=contract,
+                contract=contract,
                 storage_dump=storage_dump,
+                deployed_address=getattr(trace, 'deployed_address', None),
             )
 
         except Exception as e:

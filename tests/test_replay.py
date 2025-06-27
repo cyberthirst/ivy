@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from fuzzer.base_scenario_runner import ScenarioResult
 from fuzzer.export_utils import (
     CallTrace,
     TestExport,
@@ -25,46 +26,64 @@ class TestReplay:
         return load_export(export_path)
 
 
-    def validate_result(self, scenario: Scenario, result) -> None:
+    def validate_result(self, scenario: Scenario, result: ScenarioResult) -> None:
         """Validate execution result matches expected outcomes."""
-        # Check deployment result
-        if scenario.deployment_trace and scenario.deployment_trace.deployment_succeeded is not None:
-            if scenario.deployment_trace.deployment_succeeded and not result.deployment.success:
-                raise Exception(f"Deployment failed unexpectedly: {result.deployment.error}")
-            elif not scenario.deployment_trace.deployment_succeeded and result.deployment.success:
-                raise AssertionError(
-                    f"Deployment success mismatch: expected {scenario.deployment_trace.deployment_succeeded}, "
-                    f"got {result.deployment.success}"
-                )
-
-        # Check call results
-        call_idx = 0
-        for trace in scenario.traces:
-            if isinstance(trace, CallTrace):
-                if call_idx >= len(result.calls):
-                    break
-                    
-                call_result = result.calls[call_idx]
-                call_idx += 1
-
-                # Check if call success matches expected
-                if trace.call_succeeded is not None:
-                    if trace.call_succeeded and not call_result.success:
-                        raise Exception(f"Call failed unexpectedly: {call_result.error}")
-                    elif not trace.call_succeeded and call_result.success:
+        # Get all traces to execute (respects mutations if any)
+        traces = scenario.get_traces_to_execute()
+        
+        # Validate each trace result
+        for trace_result in result.results:
+            trace = traces[trace_result.trace_index]
+            
+            if trace_result.trace_type == "deployment":
+                deployment_trace = trace
+                deployment_result = trace_result.result
+                
+                # Validate deployment success matches expected
+                if deployment_trace.deployment_succeeded != deployment_result.success:
+                    raise AssertionError(
+                        f"Deployment success mismatch: expected {deployment_trace.deployment_succeeded}, "
+                        f"got {deployment_result.success}"
+                    )
+                
+                # Validate deployed address
+                if deployment_result.success:
+                    # The deployment_result.contract is the VyperContract object
+                    # Use the address property to get the actual address
+                    contract = deployment_result.contract
+                    actual_address_str = str(contract.address)
+                else:
+                    # Failed deployments should have zero address
+                    actual_address_str = "0x0000000000000000000000000000000000000000"
+                
+                if actual_address_str != deployment_trace.deployed_address:
+                    raise AssertionError(
+                        f"Deployed address mismatch: expected {deployment_trace.deployed_address}, "
+                        f"got {actual_address_str}"
+                    )
+                        
+            elif trace_result.trace_type == "call":
+                call_trace = trace
+                call_result = trace_result.result
+                
+                # Check if call success matches expected (only if call_succeeded is specified)
+                if call_trace.call_succeeded is not None:
+                    if call_trace.call_succeeded != call_result.success:
                         raise AssertionError(
-                            f"Call success mismatch: expected {trace.call_succeeded}, "
+                            f"Call success mismatch: expected {call_trace.call_succeeded}, "
                             f"got {call_result.success}"
                         )
 
-                # Only verify output if not using python_args
-                if not self.use_python_args and call_result.success and trace.output is not None:
-                    expected_output = bytes.fromhex(trace.output)
-                    if call_result.output != expected_output:
-                        raise AssertionError(
-                            f"Call output mismatch: expected {trace.output}, "
-                            f"got {call_result.output.hex()}"
-                        )
+                # Only verify output if not using python_args and output is specified
+                if not self.use_python_args and call_trace.output is not None:
+                    if call_result.success:
+                        expected_output = bytes.fromhex(call_trace.output)
+                        if call_result.output != expected_output:
+                            raise AssertionError(
+                                f"Call output mismatch: expected {call_trace.output}, "
+                                f"got {call_result.output.hex()}"
+                            )
+                    # Note: We don't check output for failed calls as it may be undefined
 
     def execute_item(self, export: TestExport, item_name: str) -> None:
         """Execute a test item and validate results."""
