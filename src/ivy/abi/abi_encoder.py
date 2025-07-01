@@ -90,18 +90,23 @@ def _encode_dynamic_array(abi_t: ABI_DynamicArray, value: list) -> bytes:
 
 
 def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
-    if isinstance(value, str):
-        if value.startswith("0x"):
-            try:
-                value = bytes.fromhex(value[2:])
-            except ValueError:
-                raise EncodeError(f"Invalid hex string: {value}")
-    else:
-        if not isinstance(value, (bytes, str)):
-            raise EncodeError(f"Expected bytes or str, got {type(value)}")
+    if not isinstance(value, (bytes, str)):
+        raise EncodeError(f"Expected bytes or str, got {type(value)}")
 
-        if isinstance(value, str):
-            value = bytes.fromhex(value)
+    if isinstance(value, str):
+        # Handle hex string with 0x prefix
+        if value.startswith("0x"):
+            if value == "0x":
+                raise EncodeError("Invalid hex string: empty hex value after '0x'")
+            hex_value = value.removeprefix("0x")
+        else:
+            # Handle hex string without 0x prefix
+            hex_value = value
+
+        try:
+            value = bytes.fromhex(hex_value)
+        except ValueError:
+            raise EncodeError(f"Invalid hex string: {value}")
 
     length = len(value).to_bytes(32, "big")
     padded_value = value.ljust((len(value) + 31) // 32 * 32, b"\x00")
@@ -138,8 +143,10 @@ def _encode_bytesM(abi_t: ABI_BytesM, value: Union[bytes, str]) -> bytes:
     if isinstance(value, str):
         if not value.startswith("0x"):
             raise EncodeError("Hex string must start with 0x")
+        if value == "0x":
+            raise EncodeError("Invalid hex string: empty hex value after '0x'")
         try:
-            value = bytes.fromhex(value[2:])
+            value = bytes.fromhex(value.removeprefix("0x"))
         except ValueError:
             raise EncodeError("Invalid hex string")
 
