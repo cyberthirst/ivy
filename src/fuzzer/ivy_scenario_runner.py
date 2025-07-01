@@ -8,7 +8,8 @@ from ivy.frontend.env import Env
 from ivy.frontend.loader import loads_from_solc_json
 from ivy.types import Address
 
-from .base_scenario_runner import BaseScenarioRunner
+from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
+from .scenario import Scenario
 
 
 class IvyScenarioRunner(BaseScenarioRunner):
@@ -138,3 +139,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
         if hasattr(contract, "storage_dump"):
             return contract.storage_dump()
         return None
+
+    def run(self, scenario: Scenario) -> ScenarioResult:
+        with self.env.anchor():
+            return super().run(scenario)

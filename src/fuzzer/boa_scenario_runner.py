@@ -7,7 +7,8 @@ from typing import Any, Dict, List, Optional
 import boa
 from boa.contracts.vyper.vyper_contract import VyperContract
 
-from .base_scenario_runner import BaseScenarioRunner
+from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
+from .scenario import Scenario
 
 
 class BoaScenarioRunner(BaseScenarioRunner):
@@ -92,3 +93,7 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
         return contract._storage.dump()
+
+    def run(self, scenario: Scenario) -> ScenarioResult:
+        with boa.env.anchor():
+            return super().run(scenario)
