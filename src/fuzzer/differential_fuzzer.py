@@ -131,7 +131,7 @@ class DifferentialFuzzer:
             mutated_args = self.mutate_arguments_with_types(arg_types, deploy_args)
 
         mutated_value = self.value_mutator.mutate_eth_value(
-            deploy_value, is_payable=init_function.is_payable
+            deploy_value, is_payable=init_function.is_payable if init_function else False
         )
 
         return mutated_args, mutated_value
