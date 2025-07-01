@@ -99,7 +99,8 @@ def loads_partial(
     dedent: bool = True,
     compiler_args: dict = None,
     input_bundle=None,
-) -> VyperDeployer:
+    get_compiler_data=False,
+) -> Union[VyperDeployer, CompilerData]:
     name = name or "VyperContract"  # TODO handle this upstream in CompilerData
     filename = filename or "<unknown>"
     if dedent:
@@ -117,6 +118,10 @@ def loads_partial(
     data = compiler_data(
         source_code, name, filename, input_bundle=input_bundle, **compiler_args
     )
+
+    if get_compiler_data:
+        return data
+
     return deployer_class(data, filename=filename)
 
 
@@ -138,8 +143,10 @@ def loads_from_solc_json(
     as_blueprint=False,
     encoded_constructor_args=None,
     constructor_args=None,
+    # TODO we should probably split getting the compiler data to a separate method
+    get_compiler_data=False,
     **kwargs,
-):
+) -> Union[VyperContract, CompilerData]:
     """
     Load and deploy a contract from solc_json format using Vyper's JSON compilation machinery.
 
@@ -180,7 +187,11 @@ def loads_from_solc_json(
         filename=str(target),
         input_bundle=input_bundle,
         dedent=False,
+        get_compiler_data=get_compiler_data,
     )
+
+    if get_compiler_data:
+        return d
 
     # Deploy the contract
     if as_blueprint:
