@@ -32,6 +32,16 @@ class DeploymentResult:
         None  # Expected address where contract was deployed
     )
 
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "error": str(self.error) if self.error else None,
+            "address": str(getattr(self.contract, "address", self.contract))
+            if self.success
+            else None,
+            "storage_dump": self.storage_dump,
+        }
+
 
 @dataclass
 class CallResult:
@@ -41,6 +51,14 @@ class CallResult:
     output: Any = None
     error: Optional[Exception] = None
     storage_dump: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "success": self.success,
+            "output": self.output if self.output else None,
+            "error": str(self.error) if self.error else None,
+            "storage_dump": self.storage_dump,
+        }
 
 
 @dataclass

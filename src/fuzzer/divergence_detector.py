@@ -42,63 +42,15 @@ class Divergence:
 
         if self.type == "deployment":
             if self.ivy_result:
-                result["ivy_deployment"] = {
-                    "success": self.ivy_result.success,
-                    "error": str(self.ivy_result.error)
-                    if self.ivy_result.error
-                    else None,
-                    "address": str(
-                        getattr(
-                            self.ivy_result.contract,
-                            "address",
-                            self.ivy_result.contract,
-                        )
-                    )
-                    if self.ivy_result.success
-                    else None,
-                    "storage_dump": self.ivy_result.storage_dump,
-                }
+                result["ivy_deployment"] = self.ivy_result.to_dict()
             if self.boa_result:
-                result["boa_deployment"] = {
-                    "success": self.boa_result.success,
-                    "error": str(self.boa_result.error)
-                    if self.boa_result.error
-                    else None,
-                    "address": str(
-                        getattr(
-                            self.boa_result.contract,
-                            "address",
-                            self.boa_result.contract,
-                        )
-                    )
-                    if self.boa_result.success
-                    else None,
-                    "storage_dump": self.boa_result.storage_dump,
-                }
+                result["boa_deployment"] = self.boa_result.to_dict()
         else:  # execution
             result["function"] = self.function
             if self.ivy_result:
-                result["ivy_call"] = {
-                    "success": self.ivy_result.success,
-                    "output": self.ivy_result.output.hex()
-                    if self.ivy_result.output
-                    else None,
-                    "error": str(self.ivy_result.error)
-                    if self.ivy_result.error
-                    else None,
-                    "storage_dump": self.ivy_result.storage_dump,
-                }
+                result["ivy_call"] = self.ivy_result.to_dict()
             if self.boa_result:
-                result["boa_call"] = {
-                    "success": self.boa_result.success,
-                    "output": self.boa_result.output.hex()
-                    if self.boa_result.output
-                    else None,
-                    "error": str(self.boa_result.error)
-                    if self.boa_result.error
-                    else None,
-                    "storage_dump": self.boa_result.storage_dump,
-                }
+                result["boa_call"] = self.boa_result.to_dict()
 
         # Add relevant traces up to the divergence point
         if self.scenario.get_traces_to_execute():
