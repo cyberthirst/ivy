@@ -89,13 +89,4 @@ class BoaScenarioRunner(BaseScenarioRunner):
             boa.env.clear_transient_storage()
 
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
-        """Get storage dump from a contract in Boa."""
-        if isinstance(contract, VyperContract):
-            # Get storage dump from boa contract
-            storage = {}
-            if hasattr(contract, "_storage"):
-                # Try to access internal storage representation
-                for slot, value in contract._storage.items():
-                    storage[hex(slot)] = hex(value)
-            return storage
-        return None
+        return contract._storage.dump()

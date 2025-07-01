@@ -98,11 +98,13 @@ class DivergenceDetector:
         self, ivy_result: ScenarioResult, boa_result: ScenarioResult, scenario: Scenario
     ) -> Optional[Divergence]:
         """Compare results from two runners and identify divergences."""
-        # Check that both have same number of results
+        # If result counts differ, report it as a divergence
         if len(ivy_result.results) != len(boa_result.results):
-            raise ValueError(
-                f"Result count mismatch: Ivy has {len(ivy_result.results)}, "
-                f"Boa has {len(boa_result.results)}"
+            return Divergence(
+                type="execution",
+                step=0,
+                scenario=scenario,
+                function=f"Result count mismatch: Ivy has {len(ivy_result.results)} results, Boa has {len(boa_result.results)} results",
             )
         
         # Compare each trace result
