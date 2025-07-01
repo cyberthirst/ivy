@@ -23,14 +23,20 @@ from .export_utils import (
     TestFilter,
     TestItem,
     DeploymentTrace,
+    CallTrace,
 )
 from src.unparser.unparser import unparse
+from src.ivy.frontend.loader import loads_from_solc_json
 
 from .scenario import Scenario, create_scenario_from_item
 from .base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
 from .ivy_scenario_runner import IvyScenarioRunner
 from .boa_scenario_runner import BoaScenarioRunner
 from .divergence_detector import Divergence, DivergenceDetector
+
+from vyper.compiler.phases import CompilerData
+from vyper.semantics.types.module import ModuleT
+from vyper.semantics.types.function import ContractFunctionT
 
 
 # Configuration constants from spec
@@ -58,6 +64,8 @@ class DifferentialFuzzer:
         )
         self.value_mutator = ValueMutator(self.rng)
         self.trace_mutator = TraceMutator(self.rng, self.value_mutator)
+        # Cache for CompilerData objects, keyed by id of solc_json
+        self._compiler_data_cache: Dict[int, CompilerData] = {}
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -68,61 +76,106 @@ class DifferentialFuzzer:
 
         return exports
 
-    def mutate_arguments(
-        self, inputs: List[Dict[str, Any]], args: List[Any], mutation_prob: float = 0.3
+    def get_compiler_data(self, trace: DeploymentTrace) -> Optional[CompilerData]:
+        """Get CompilerData for a deployment trace, using cache if available."""
+        if not trace.solc_json:
+            return None
+
+        cache_key = id(trace.solc_json)
+
+        if cache_key in self._compiler_data_cache:
+            return self._compiler_data_cache[cache_key]
+
+        try:
+            compiler_data = loads_from_solc_json(
+                trace.solc_json, get_compiler_data=True
+            )
+
+            self._compiler_data_cache[cache_key] = compiler_data
+
+            return compiler_data
+        # TODO this might be a compiler crash, we should use some filtering
+        except Exception as e:
+            logging.debug(f"Failed to load CompilerData: {e}")
+            return None
+
+    def mutate_arguments_with_types(
+        self,
+        arg_types: List[Any],  # VyperType objects
+        args: List[Any],
+        mutation_prob: float = 0.3,
     ) -> List[Any]:
-        """Generalized function to mutate arguments based on ABI inputs."""
+        """Mutate arguments based on Vyper types."""
         mutated_args = args.copy()
 
-        for i, input_spec in enumerate(inputs):
+        for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
             if i < len(mutated_args) and self.rng.random() < mutation_prob:
-                abi_type = input_spec.get("type", "")
-                boundary_values = self.get_boundary_values(abi_type)
-                if boundary_values:
-                    mutated_args[i] = self.rng.choice(boundary_values)
+                if self.rng.random() < 0.2:
+                    mutated_args[i] = self.value_mutator.mutate_value(
+                        arg_value, arg_type
+                    )
 
         return mutated_args
 
-
-    def mutate_deployment(
-        self, abi: List[Dict[str, Any]], deploy_args: List[Any], deploy_value: int
+    def mutate_deployment_args(
+        self,
+        init_function: Optional[ContractFunctionT],
+        deploy_args: List[Any],
+        deploy_value: int,
     ) -> Tuple[List[Any], int]:
-        """Mutate deployment arguments and value according to spec."""
-        # Find constructor in ABI
-        constructor = None
-
-        # Mutate constructor arguments
+        """Mutate deployment arguments using init function type info."""
         mutated_args = deploy_args.copy()
-        if constructor and constructor.get("inputs"):
-            mutated_args = self.mutate_arguments(constructor["inputs"], deploy_args)
 
-        # TODO mutate based on payability and call into value_mutator.py
-        mutated_value = ...
+        if init_function and deploy_args:
+            arg_types = init_function.argument_types
+            mutated_args = self.mutate_arguments_with_types(arg_types, deploy_args)
+
+        mutated_value = self.value_mutator.mutate_eth_value(
+            deploy_value, is_payable=init_function.is_payable
+        )
+
         return mutated_args, mutated_value
 
-    def mutate_source(self, source: str) -> Optional[str]:
-        """Mutate source code and return the mutated version."""
-        try:
-            # Parse the source into AST
-            import vyper
+    def mutate_call_args(
+        self, function: ContractFunctionT, call_args: List[Any], call_value: int = 0
+    ) -> Tuple[List[Any], int]:
+        """Mutate call arguments using function type info."""
+        mutated_args = call_args.copy()
 
-            # TODO use CompilerData.annotated_ast
-            ast = vyper.ast.parse_to_ast(source)
-            logging.debug(f"Parsed AST successfully")
+        if function and call_args:
+            arg_types = function.argument_types
+            mutated_args = self.mutate_arguments_with_types(arg_types, call_args)
+
+        mutated_value = self.value_mutator.mutate_eth_value(
+            call_value, is_payable=function.is_payable
+        )
+
+        return mutated_args, mutated_value
+
+    def mutate_source_with_compiler_data(
+        self, compiler_data: CompilerData
+    ) -> Optional[str]:
+        """Mutate source using annotated AST from CompilerData."""
+        try:
+            # Get the annotated AST module
+            annotated_module = compiler_data.annotated_vyper_module
+            logging.debug(f"Got annotated AST module")
 
             # Mutate the AST
-            mutated_ast = self.ast_mutator.mutate(ast)
+            mutated_ast = self.ast_mutator.mutate(annotated_module)
             logging.debug(f"Mutation completed")
 
             # Unparse back to source
             result = unparse(mutated_ast)
 
+            # Get original source for pragma check
+            original_source = compiler_data.file_input.contents
+
             # Preserve pragma version if present in original source
-            if source.lstrip().startswith("#pragma"):
-                pragma_line = source.split("\n")[0]
+            if original_source.lstrip().startswith("#pragma"):
+                pragma_line = original_source.split("\n")[0]
                 result = pragma_line + "\n\n" + result
 
-            logging.debug(f"Unparsed successfully, result differs: {result != source}")
             return result
         except Exception as e:
             logging.info(f"Failed to mutate source: {e}")
@@ -130,7 +183,6 @@ class DifferentialFuzzer:
 
             logging.debug(traceback.format_exc())
             return None
-
 
     def create_mutated_scenario(
         self,
@@ -146,53 +198,82 @@ class DifferentialFuzzer:
             # Copy traces for potential mutation
             mutated_traces = []
             any_mutation = False
-            
+
             for trace in scenario.traces:
-                if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
+                if (
+                    isinstance(trace, DeploymentTrace)
+                    and trace.deployment_type == "source"
+                ):
                     # Check if we should mutate this deployment
                     mutated_deployment = None
-                    
-                    # Try to mutate source code
-                    if trace.source_code:
-                        mutated_source = self.mutate_source(trace.source_code)
+
+                    # Get CompilerData for type information
+                    compiler_data = self.get_compiler_data(trace)
+
+                    # Try to mutate source code using annotated AST
+                    if trace.source_code and compiler_data:
+                        mutated_source = self.mutate_source_with_compiler_data(
+                            compiler_data
+                        )
                         if mutated_source and mutated_source != trace.source_code:
                             # Need to create a mutated deployment
                             mutated_deployment = deepcopy(trace)
                             mutated_deployment.source_code = mutated_source
                             any_mutation = True
-                    
-                    # Try to mutate deployment args
-                    if trace.python_args:
+
+                    # Try to mutate deployment args using type information
+                    if trace.python_args and compiler_data:
                         deploy_args = trace.python_args.get("args", [])
-                        mutated_args, mutated_value = self.mutate_deployment(
-                            trace.contract_abi,
+
+                        # Get module type and init function
+                        module_t = compiler_data.annotated_vyper_module._metadata[
+                            "type"
+                        ]
+                        init_function = module_t.init_function
+
+                        mutated_args, mutated_value = self.mutate_deployment_args(
+                            init_function,
                             deploy_args,
                             trace.value,
                         )
-                        
+
                         if mutated_args != deploy_args or mutated_value != trace.value:
                             # Create or update mutated deployment
                             if not mutated_deployment:
                                 mutated_deployment = deepcopy(trace)
-                            
+
                             # Update python_args with mutations
                             mutated_deployment.python_args = deepcopy(trace.python_args)
                             mutated_deployment.python_args["args"] = mutated_args
                             mutated_deployment.value = mutated_value
                             any_mutation = True
-                    
+
                     # Add the appropriate trace
-                    mutated_traces.append(mutated_deployment if mutated_deployment else trace)
+                    mutated_traces.append(
+                        mutated_deployment if mutated_deployment else trace
+                    )
                 else:
                     # For non-deployment traces, just append
                     mutated_traces.append(trace)
-            
-            # Apply trace mutations (calls, etc.)
+
+            # Build a map of deployment addresses to compiler data
+            deployment_compiler_data = {}
+            for trace in mutated_traces:
+                if (
+                    isinstance(trace, DeploymentTrace)
+                    and trace.deployment_type == "source"
+                ):
+                    compiler_data = self.get_compiler_data(trace)
+                    if compiler_data:
+                        deployment_compiler_data[trace.deployed_address] = compiler_data
+
+            # Apply trace mutations (calls, etc.) with type information
             final_traces = self.trace_mutator.mutate_trace_sequence(
                 mutated_traces,
+                deployment_compiler_data=deployment_compiler_data,
                 max_traces=MAX_CALLS,
             )
-            
+
             # Only store if actually mutated
             if final_traces != scenario.traces:
                 scenario.mutated_traces = final_traces
@@ -260,9 +341,7 @@ class DifferentialFuzzer:
                 # Run mutation scenarios
                 for scenario_num in range(max_scenarios):
                     # Create scenario with mutations
-                    scenario = self.create_mutated_scenario(
-                        item, enable_mutations
-                    )
+                    scenario = self.create_mutated_scenario(item, enable_mutations)
 
                     # Run in both environments
                     ivy_result = ivy_runner.run(scenario)
@@ -304,9 +383,7 @@ def main():
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
-    fuzzer.fuzz_exports(
-        test_filter=test_filter, max_scenarios=2, enable_mutations=True
-    )
+    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=2, enable_mutations=True)
 
 
 if __name__ == "__main__":

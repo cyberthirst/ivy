@@ -37,6 +37,7 @@ class TraceMutator:
         duplicate_prob: float = 0.2,
         drop_prob: float = 0.2,
         mutate_args_prob: float = 0.5,
+        deployment_compiler_data: Optional[Dict[str, Any]] = None,
     ) -> List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace]]:
         """
         Mutate a sequence of traces.
@@ -80,6 +81,7 @@ class TraceMutator:
             duplicate_prob,
             drop_prob,
             mutate_args_prob,
+            deployment_compiler_data,
         )
 
         # Reconstruct the full trace list maintaining relative positions
@@ -110,6 +112,7 @@ class TraceMutator:
         duplicate_prob: float,
         drop_prob: float,
         mutate_args_prob: float,
+        deployment_compiler_data: Optional[Dict[str, Any]] = None,
     ) -> List[CallTrace]:
         """Mutate a list of call traces."""
         mutated = []
@@ -129,7 +132,7 @@ class TraceMutator:
 
             # Mutate arguments
             if self.rng.random() < mutate_args_prob:
-                mutated_call = self.mutate_call_args(call)
+                mutated_call = self.mutate_call_args(call, deployment_compiler_data)
             else:
                 mutated_call = deepcopy(call)
 
@@ -138,36 +141,93 @@ class TraceMutator:
             # Duplicate
             if self.rng.random() < duplicate_prob and len(mutated) < max_calls:
                 # Mutate the duplicate too
-                dup_call = self.mutate_call_args(mutated_call)
+                dup_call = self.mutate_call_args(mutated_call, deployment_compiler_data)
                 mutated.append(dup_call)
 
         return mutated[:max_calls]
 
-    def mutate_call_args(self, trace: CallTrace) -> CallTrace:
+    def mutate_call_args(
+        self,
+        trace: CallTrace,
+        deployment_compiler_data: Optional[Dict[str, Any]] = None,
+    ) -> CallTrace:
         """Mutate arguments of a single call trace."""
         # Deep copy to avoid modifying original
         mutated = deepcopy(trace)
 
-        # Mutate python args if available
-        if mutated.python_args is not None:
-            mutated_python_args = self._mutate_python_args(mutated.python_args)
-            mutated.python_args = mutated_python_args
+        # If we have a function name, we can do type-aware mutation
+        if trace.function_name and deployment_compiler_data:
+            # Get the contract address
+            contract_address = trace.call_args.get("to")
+            if contract_address in deployment_compiler_data:
+                # Get compiler data and module type
+                compiler_data = deployment_compiler_data[contract_address]
+                try:
+                    module_t = compiler_data.annotated_vyper_module._metadata["type"]
 
-        # Mutate call args (sender, value, etc.)
-        if self.rng.random() < 0.3:
-            # Change sender to one of the standard test addresses
-            senders = [
-                "0x0000000000000000000000000000000000000001",
-                "0x0000000000000000000000000000000000000002",
-                "0x0000000000000000000000000000000000000003",
-            ]
-            mutated.call_args["sender"] = self.rng.choice(senders)
+                    # Find the function in exposed functions
+                    function = None
+                    for func in module_t.exposed_functions:
+                        if func.name == trace.function_name:
+                            function = func
+                            break
 
-        if self.rng.random() < 0.3:
-            # Mutate value
-            value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, max uint128
-            mutated.call_args["value"] = self.rng.choice(value_choices)
+                    if function:
+                        # Get argument types and current args
+                        arg_types = function.argument_types
+                        current_args = (
+                            trace.python_args.get("args", [])
+                            if trace.python_args
+                            else []
+                        )
 
+                        # Mutate arguments using type information
+                        mutated_args = []
+                        for i, (arg_type, arg_value) in enumerate(
+                            zip(arg_types, current_args)
+                        ):
+                            if self.rng.random() < 0.3:  # 30% chance to mutate each arg
+                                if self.rng.random() < 0.5:
+                                    # Mutate existing value
+                                    mutated_args.append(
+                                        self.value_mutator.mutate_value(
+                                            arg_value, arg_type
+                                        )
+                                    )
+                                else:
+                                    # Generate new value
+                                    mutated_args.append(
+                                        self.value_mutator.generate_value_for_type(
+                                            arg_type
+                                        )
+                                    )
+                            else:
+                                mutated_args.append(arg_value)
+
+                        # Mutate value with normal integer mutation if payable
+                        mutated_value = trace.call_args.get("value", 0)
+                        if function.is_payable and self.rng.random() < 0.3:
+                            # Use regular integer mutation
+                            mutated_value = self._mutate_value(mutated_value)
+
+                        # Update the trace
+                        if trace.python_args:
+                            mutated.python_args = deepcopy(trace.python_args)
+                            mutated.python_args["args"] = mutated_args
+                        mutated.call_args["value"] = mutated_value
+                        return mutated
+
+                except Exception as e:
+                    # Log and fall through to no mutation
+                    import logging
+
+                    logging.debug(f"Failed to get type info for mutation: {e}")
+
+        # No function name = low-level call, skip mutation for now
+        # TODO: Implement ABI decoding for low-level calls to enable type-aware mutation
+        # TODO: Or implement byte-level mutations on raw calldata
+
+        # No mutation - return the copy as-is
         return mutated
 
     def _mutate_python_args(self, python_args: Dict[str, Any]) -> Dict[str, Any]:
