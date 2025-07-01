@@ -17,7 +17,6 @@ from copy import deepcopy
 from .mutator import AstMutator
 from .value_mutator import ValueMutator
 from .trace_mutator import TraceMutator
-from .type_retrieval import abi_type_to_vyper_type
 from .export_utils import (
     load_all_exports,
     filter_exports,
@@ -69,15 +68,6 @@ class DifferentialFuzzer:
 
         return exports
 
-    def get_boundary_values(self, abi_type: str) -> List[Any]:
-        """Get boundary values for a given ABI type."""
-        vyper_type = abi_type_to_vyper_type(abi_type)
-        if vyper_type:
-            return self.value_mutator.get_boundary_values(vyper_type)
-        else:
-            # Fallback for unknown types
-            return [0, 1, -1]
-
     def mutate_arguments(
         self, inputs: List[Dict[str, Any]], args: List[Any], mutation_prob: float = 0.3
     ) -> List[Any]:
@@ -93,12 +83,6 @@ class DifferentialFuzzer:
 
         return mutated_args
 
-    def mutate_value(self, is_payable: bool, mutation_prob: float = 0.3) -> int:
-        """Mutate ETH value for payable functions."""
-        if is_payable and self.rng.random() < mutation_prob:
-            value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, 2^128-1
-            return self.rng.choice(value_choices)
-        return 0
 
     def mutate_deployment(
         self, abi: List[Dict[str, Any]], deploy_args: List[Any], deploy_value: int
@@ -106,23 +90,14 @@ class DifferentialFuzzer:
         """Mutate deployment arguments and value according to spec."""
         # Find constructor in ABI
         constructor = None
-        for item in abi:
-            if item.get("type") == "constructor":
-                constructor = item
-                break
 
         # Mutate constructor arguments
         mutated_args = deploy_args.copy()
         if constructor and constructor.get("inputs"):
             mutated_args = self.mutate_arguments(constructor["inputs"], deploy_args)
 
-        # Mutate deployment value
-        is_payable = constructor and constructor.get("stateMutability") == "payable"
-        mutated_value = self.mutate_value(is_payable) if is_payable else deploy_value
-        if not is_payable and self.rng.random() < 0.1:
-            # For non-payable constructors, sometimes try sending value anyway
-            mutated_value = self.mutate_value(True)
-
+        # TODO mutate based on payability and call into value_mutator.py
+        mutated_value = ...
         return mutated_args, mutated_value
 
     def mutate_source(self, source: str) -> Optional[str]:
@@ -131,6 +106,7 @@ class DifferentialFuzzer:
             # Parse the source into AST
             import vyper
 
+            # TODO use CompilerData.annotated_ast
             ast = vyper.ast.parse_to_ast(source)
             logging.debug(f"Parsed AST successfully")
 
@@ -323,12 +299,13 @@ def main():
     test_filter = TestFilter(exclude_multi_module=True)
     # Include tests with certain patterns
     test_filter.include_path("functional/codegen/calling_convention/test_internal")
+    test_filter.include_name("test_internal_call_kwargs")
     test_filter.exclude_source(r"\.code")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
     fuzzer.fuzz_exports(
-        test_filter=test_filter, max_scenarios=200, enable_mutations=True
+        test_filter=test_filter, max_scenarios=2, enable_mutations=True
     )
 
 

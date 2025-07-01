@@ -349,3 +349,10 @@ class ValueMutator:
         byte_array[idx] ^= self.rng.randint(1, 255)
 
         return bytes(byte_array)
+
+    def mutate_eth_value(self, is_payable: bool, mutation_prob: float = 0.3) -> int:
+        """Mutate ETH value for payable functions."""
+        if is_payable and self.rng.random() < mutation_prob:
+            value_choices = [0, 1, 10**18, 2**128 - 1]  # 0, 1 wei, 1 ether, 2^128-1
+            return self.rng.choice(value_choices)
+        return 0
