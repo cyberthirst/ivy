@@ -27,7 +27,9 @@ class BoaScenarioRunner(BaseScenarioRunner):
         """Deploy a contract from source in Boa."""
         # Set sender if specified
         if sender:
-            boa.env.set_balance(sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18)
+            boa.env.set_balance(
+                sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
+            )
             boa.env.eoa = sender
 
         try:

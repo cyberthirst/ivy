@@ -25,27 +25,26 @@ class TestReplay:
         """Load test export from JSON file."""
         return load_export(export_path)
 
-
     def validate_result(self, scenario: Scenario, result: ScenarioResult) -> None:
         """Validate execution result matches expected outcomes."""
         # Get all traces to execute (respects mutations if any)
         traces = scenario.get_traces_to_execute()
-        
+
         # Validate each trace result
         for trace_result in result.results:
             trace = traces[trace_result.trace_index]
-            
+
             if trace_result.trace_type == "deployment":
                 deployment_trace = trace
                 deployment_result = trace_result.result
-                
+
                 # Validate deployment success matches expected
                 if deployment_trace.deployment_succeeded != deployment_result.success:
                     raise AssertionError(
                         f"Deployment success mismatch: expected {deployment_trace.deployment_succeeded}, "
                         f"got {deployment_result.success}"
                     )
-                
+
                 # Validate deployed address
                 if deployment_result.success:
                     # The deployment_result.contract is the VyperContract object
@@ -55,17 +54,17 @@ class TestReplay:
                 else:
                     # Failed deployments should have zero address
                     actual_address_str = "0x0000000000000000000000000000000000000000"
-                
+
                 if actual_address_str != deployment_trace.deployed_address:
                     raise AssertionError(
                         f"Deployed address mismatch: expected {deployment_trace.deployed_address}, "
                         f"got {actual_address_str}"
                     )
-                        
+
             elif trace_result.trace_type == "call":
                 call_trace = trace
                 call_result = trace_result.result
-                
+
                 # Check if call success matches expected (only if call_succeeded is specified)
                 if call_trace.call_succeeded is not None:
                     if call_trace.call_succeeded != call_result.success:
@@ -97,9 +96,7 @@ class TestReplay:
         self.validate_result(scenario, result)
 
 
-def replay_test(
-    export_path: Union[str, Path], test_name: str
-) -> TestReplay:
+def replay_test(export_path: Union[str, Path], test_name: str) -> TestReplay:
     """Convenience function to replay a single test."""
     replay = TestReplay(use_python_args=True)
     export = replay.load_export(export_path)
@@ -151,7 +148,7 @@ def validate_exports(
                 try:
                     # Create replay with the appropriate mode
                     replay = TestReplay(use_python_args=use_python_args_flag)
-                    
+
                     # Execute the test
                     replay.execute_item(export, item_name)
 

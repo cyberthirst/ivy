@@ -31,11 +31,11 @@ class Divergence:
         traces = self.scenario.get_traces_to_execute()
         if self.step < len(traces):
             trace = traces[self.step]
-            
+
             # If it's a deployment trace, add source information
             if hasattr(trace, "source_code"):
                 result["source_code"] = trace.source_code
-            
+
             # Add mutation information if traces were mutated
             if self.scenario.mutated_traces:
                 result["has_mutations"] = True
@@ -44,15 +44,35 @@ class Divergence:
             if self.ivy_result:
                 result["ivy_deployment"] = {
                     "success": self.ivy_result.success,
-                    "error": str(self.ivy_result.error) if self.ivy_result.error else None,
-                    "address": str(getattr(self.ivy_result.contract, 'address', self.ivy_result.contract)) if self.ivy_result.success else None,
+                    "error": str(self.ivy_result.error)
+                    if self.ivy_result.error
+                    else None,
+                    "address": str(
+                        getattr(
+                            self.ivy_result.contract,
+                            "address",
+                            self.ivy_result.contract,
+                        )
+                    )
+                    if self.ivy_result.success
+                    else None,
                     "storage_dump": self.ivy_result.storage_dump,
                 }
             if self.boa_result:
                 result["boa_deployment"] = {
                     "success": self.boa_result.success,
-                    "error": str(self.boa_result.error) if self.boa_result.error else None,
-                    "address": str(getattr(self.boa_result.contract, 'address', self.boa_result.contract)) if self.boa_result.success else None,
+                    "error": str(self.boa_result.error)
+                    if self.boa_result.error
+                    else None,
+                    "address": str(
+                        getattr(
+                            self.boa_result.contract,
+                            "address",
+                            self.boa_result.contract,
+                        )
+                    )
+                    if self.boa_result.success
+                    else None,
                     "storage_dump": self.boa_result.storage_dump,
                 }
         else:  # execution
@@ -60,29 +80,43 @@ class Divergence:
             if self.ivy_result:
                 result["ivy_call"] = {
                     "success": self.ivy_result.success,
-                    "output": self.ivy_result.output.hex() if self.ivy_result.output else None,
-                    "error": str(self.ivy_result.error) if self.ivy_result.error else None,
+                    "output": self.ivy_result.output.hex()
+                    if self.ivy_result.output
+                    else None,
+                    "error": str(self.ivy_result.error)
+                    if self.ivy_result.error
+                    else None,
                     "storage_dump": self.ivy_result.storage_dump,
                 }
             if self.boa_result:
                 result["boa_call"] = {
                     "success": self.boa_result.success,
-                    "output": self.boa_result.output.hex() if self.boa_result.output else None,
-                    "error": str(self.boa_result.error) if self.boa_result.error else None,
+                    "output": self.boa_result.output.hex()
+                    if self.boa_result.output
+                    else None,
+                    "error": str(self.boa_result.error)
+                    if self.boa_result.error
+                    else None,
                     "storage_dump": self.boa_result.storage_dump,
                 }
 
         # Add relevant traces up to the divergence point
         if self.scenario.get_traces_to_execute():
             result["traces"] = []
-            for i, trace in enumerate(self.scenario.get_traces_to_execute()[:self.step + 1]):
+            for i, trace in enumerate(
+                self.scenario.get_traces_to_execute()[: self.step + 1]
+            ):
                 trace_info = {
                     "type": trace.__class__.__name__,
                     "index": i,
                 }
                 if hasattr(trace, "function_name"):
                     trace_info["function"] = trace.function_name
-                elif hasattr(trace, "python_args") and trace.python_args and "method" in trace.python_args:
+                elif (
+                    hasattr(trace, "python_args")
+                    and trace.python_args
+                    and "method" in trace.python_args
+                ):
                     trace_info["function"] = trace.python_args["method"]
                 if hasattr(trace, "python_args"):
                     trace_info["args"] = trace.python_args
@@ -106,22 +140,24 @@ class DivergenceDetector:
                 scenario=scenario,
                 function=f"Result count mismatch: Ivy has {len(ivy_result.results)} results, Boa has {len(boa_result.results)} results",
             )
-        
+
         # Compare each trace result
-        for ivy_trace_result, boa_trace_result in zip(ivy_result.results, boa_result.results):
+        for ivy_trace_result, boa_trace_result in zip(
+            ivy_result.results, boa_result.results
+        ):
             # Verify they're for the same trace
             if ivy_trace_result.trace_type != boa_trace_result.trace_type:
                 raise ValueError(
                     f"Trace type mismatch at index {ivy_trace_result.trace_index}: "
                     f"Ivy has {ivy_trace_result.trace_type}, Boa has {boa_trace_result.trace_type}"
                 )
-            
+
             if ivy_trace_result.trace_index != boa_trace_result.trace_index:
                 raise ValueError(
                     f"Trace index mismatch: Ivy has {ivy_trace_result.trace_index}, "
                     f"Boa has {boa_trace_result.trace_index}"
                 )
-            
+
             # Compare deployment results
             if ivy_trace_result.trace_type == "deployment":
                 if not self._compare_deployment_results(
@@ -134,7 +170,7 @@ class DivergenceDetector:
                         ivy_result=ivy_trace_result.result,
                         boa_result=boa_trace_result.result,
                     )
-            
+
             # Compare call results
             elif ivy_trace_result.trace_type == "call":
                 if not self._compare_call_results(
@@ -148,7 +184,7 @@ class DivergenceDetector:
                         function_name = trace.function_name
                     elif hasattr(trace, "python_args") and trace.python_args:
                         function_name = trace.python_args.get("method")
-                    
+
                     return Divergence(
                         type="execution",
                         step=ivy_trace_result.trace_index,
@@ -173,9 +209,9 @@ class DivergenceDetector:
             return True
 
         # Compare deployed addresses
-        ivy_addr = str(getattr(ivy_res.contract, 'address', ivy_res.contract))
-        boa_addr = str(getattr(boa_res.contract, 'address', boa_res.contract))
-        
+        ivy_addr = str(getattr(ivy_res.contract, "address", ivy_res.contract))
+        boa_addr = str(getattr(boa_res.contract, "address", boa_res.contract))
+
         if ivy_addr != boa_addr:
             return False
 

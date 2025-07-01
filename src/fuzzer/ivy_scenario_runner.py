@@ -33,7 +33,10 @@ class IvyScenarioRunner(BaseScenarioRunner):
             self._original_eoa = self.env.eoa
             self.env.eoa = Address(sender)
             # Ensure deployer has enough balance
-            self.env.set_balance(self.env.eoa, self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18)
+            self.env.set_balance(
+                self.env.eoa,
+                self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
+            )
 
         try:
             # Prepare deployment kwargs

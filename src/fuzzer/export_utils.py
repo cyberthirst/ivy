@@ -228,15 +228,17 @@ class TestFilter:
                 dep_path_str, dep_name = dep.rsplit("/", 1)
                 # Fix the path prefix from "tests/export/" to "tests/vyper-exports/"
                 if dep_path_str.startswith("tests/export/"):
-                    dep_path_str = dep_path_str.replace("tests/export/", "tests/vyper-exports/", 1)
-                
+                    dep_path_str = dep_path_str.replace(
+                        "tests/export/", "tests/vyper-exports/", 1
+                    )
+
                 # For dependencies in the same file
                 if dep_path_str.endswith(".json"):
                     dep_export_path = Path(dep_path_str)
                 else:
                     # Handle relative dependencies
                     dep_export_path = export_path
-                
+
                 # Load dependency if from different file
                 if dep_export_path != export_path:
                     try:
@@ -246,17 +248,19 @@ class TestFilter:
                         return True
                 else:
                     dep_export = export
-                
+
                 # Check if dependency exists
                 if dep_name not in dep_export.items:
                     continue
-                    
+
                 dep_item = dep_export.items[dep_name]
-                
+
                 # Recursively check if dependency should be skipped
-                if self.should_skip_item(dep_item, dep_export_path, dep_export, checked_deps):
+                if self.should_skip_item(
+                    dep_item, dep_export_path, dep_export, checked_deps
+                ):
                     return True
-        
+
         return False
 
 

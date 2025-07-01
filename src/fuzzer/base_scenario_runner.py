@@ -28,7 +28,9 @@ class DeploymentResult:
     contract: Optional[Any] = None  # Contract instance (VyperContract)
     error: Optional[Exception] = None
     storage_dump: Optional[Dict[str, Any]] = None
-    deployed_address: Optional[str] = None  # Expected address where contract was deployed
+    deployed_address: Optional[str] = (
+        None  # Expected address where contract was deployed
+    )
 
 
 @dataclass
@@ -44,11 +46,13 @@ class CallResult:
 @dataclass
 class TraceResult:
     """Result of executing any trace type."""
-    
+
     trace_type: str  # "deployment", "call", "set_balance", "clear_transient_storage"
     trace_index: int  # Index in the original traces list
-    result: Optional[Union[DeploymentResult, CallResult]] = None  # None for set_balance/clear_transient
-    
+    result: Optional[Union[DeploymentResult, CallResult]] = (
+        None  # None for set_balance/clear_transient
+    )
+
 
 @dataclass
 class ScenarioResult:
@@ -58,13 +62,19 @@ class ScenarioResult:
 
     def get_deployment_results(self) -> List[Tuple[int, DeploymentResult]]:
         """Get all deployment results with their trace indices."""
-        return [(r.trace_index, r.result) for r in self.results 
-                if r.trace_type == "deployment" and r.result is not None]
-    
+        return [
+            (r.trace_index, r.result)
+            for r in self.results
+            if r.trace_type == "deployment" and r.result is not None
+        ]
+
     def get_call_results(self) -> List[Tuple[int, CallResult]]:
         """Get all call results with their trace indices."""
-        return [(r.trace_index, r.result) for r in self.results 
-                if r.trace_type == "call" and r.result is not None]
+        return [
+            (r.trace_index, r.result)
+            for r in self.results
+            if r.trace_type == "call" and r.result is not None
+        ]
 
 
 class BaseScenarioRunner(ABC):
@@ -151,25 +161,29 @@ class BaseScenarioRunner(ABC):
                     trace=trace,
                     use_python_args=scenario.use_python_args,
                 )
-                result.results.append(TraceResult(
-                    trace_type="deployment",
-                    trace_index=trace_index,
-                    result=deployment_result,
-                ))
-                
+                result.results.append(
+                    TraceResult(
+                        trace_type="deployment",
+                        trace_index=trace_index,
+                        result=deployment_result,
+                    )
+                )
+
                 # Continue even if deployment fails to match test behavior
-                
+
             elif isinstance(trace, CallTrace):
                 # Execute call
                 call_result = self._execute_call(
                     trace=trace,
                     use_python_args=scenario.use_python_args,
                 )
-                result.results.append(TraceResult(
-                    trace_type="call",
-                    trace_index=trace_index,
-                    result=call_result,
-                ))
+                result.results.append(
+                    TraceResult(
+                        trace_type="call",
+                        trace_index=trace_index,
+                        result=call_result,
+                    )
+                )
 
                 # Stop if call failed (for consistency with original runner)
                 if not call_result.success:
@@ -178,20 +192,24 @@ class BaseScenarioRunner(ABC):
             elif isinstance(trace, SetBalanceTrace):
                 # Execute set_balance (no result to record)
                 self._execute_set_balance(trace)
-                result.results.append(TraceResult(
-                    trace_type="set_balance",
-                    trace_index=trace_index,
-                    result=None,
-                ))
+                result.results.append(
+                    TraceResult(
+                        trace_type="set_balance",
+                        trace_index=trace_index,
+                        result=None,
+                    )
+                )
 
             elif isinstance(trace, ClearTransientStorageTrace):
                 # Execute clear_transient_storage (no result to record)
                 self._execute_clear_transient_storage(trace)
-                result.results.append(TraceResult(
-                    trace_type="clear_transient_storage",
-                    trace_index=trace_index,
-                    result=None,
-                ))
+                result.results.append(
+                    TraceResult(
+                        trace_type="clear_transient_storage",
+                        trace_index=trace_index,
+                        result=None,
+                    )
+                )
 
         return result
 
@@ -215,15 +233,27 @@ class BaseScenarioRunner(ABC):
             # Prepare constructor arguments
             if use_python_args and trace.python_args:
                 # Use python args from trace or mutations
-                args = mutated_args if mutated_args is not None else trace.python_args.get("args", [])
-                kwargs = mutated_kwargs if mutated_kwargs is not None else trace.python_args.get("kwargs", {})
+                args = (
+                    mutated_args
+                    if mutated_args is not None
+                    else trace.python_args.get("args", [])
+                )
+                kwargs = (
+                    mutated_kwargs
+                    if mutated_kwargs is not None
+                    else trace.python_args.get("kwargs", {})
+                )
                 # Add value from trace if not in kwargs
                 if "value" not in kwargs:
                     kwargs["value"] = trace.value
             else:
                 # Use empty args/kwargs for raw deployment
                 args = mutated_args if mutated_args is not None else []
-                kwargs = mutated_kwargs if mutated_kwargs is not None else {"value": trace.value}
+                kwargs = (
+                    mutated_kwargs
+                    if mutated_kwargs is not None
+                    else {"value": trace.value}
+                )
 
             # Deploy the contract
             contract = self._deploy_from_source(
@@ -231,15 +261,17 @@ class BaseScenarioRunner(ABC):
                 solc_json=trace.solc_json,
                 args=args,
                 kwargs=kwargs,
-                sender=getattr(trace, 'deployer', None),  # deployment traces use 'deployer'
+                sender=getattr(
+                    trace, "deployer", None
+                ),  # deployment traces use 'deployer'
             )
 
             # Store the deployed contract by its address
-            deployed_addr = getattr(trace, 'deployed_address', None)
+            deployed_addr = getattr(trace, "deployed_address", None)
             if deployed_addr:
                 self.deployed_contracts[deployed_addr] = contract
             # Also store by the contract's address if available
-            contract_addr = getattr(contract, 'address', None)
+            contract_addr = getattr(contract, "address", None)
             if contract_addr:
                 self.deployed_contracts[str(contract_addr)] = contract
 
@@ -252,7 +284,7 @@ class BaseScenarioRunner(ABC):
                 success=True,
                 contract=contract,
                 storage_dump=storage_dump,
-                deployed_address=getattr(trace, 'deployed_address', None),
+                deployed_address=getattr(trace, "deployed_address", None),
             )
 
         except Exception as e:
@@ -267,12 +299,14 @@ class BaseScenarioRunner(ABC):
         try:
             # Get the contract from call_args (trace structure uses call_args.to for target)
             to_address = trace.call_args.get("to")
-            
+
             # Look up contract by address
             contract = self.deployed_contracts.get(to_address)
-                
+
             if not contract:
-                raise ValueError(f"Contract at {to_address} not found in deployed contracts. Available: {list(self.deployed_contracts.keys())}")
+                raise ValueError(
+                    f"Contract at {to_address} not found in deployed contracts. Available: {list(self.deployed_contracts.keys())}"
+                )
 
             # Get method name from function_name or extract from python_args
             method_name = trace.function_name
@@ -284,7 +318,7 @@ class BaseScenarioRunner(ABC):
             if not method_name and (calldata == "" or calldata == "0x"):
                 # Empty calldata - this is a call to __default__
                 method_name = "__default__"
-            
+
             # If we still don't have a method name but have calldata, use message_call
             if not method_name and calldata:
                 # Use low-level message call
@@ -298,8 +332,10 @@ class BaseScenarioRunner(ABC):
             else:
                 # Use high-level method call
                 if not method_name:
-                    raise ValueError(f"No method name available and no calldata for message_call")
-                    
+                    raise ValueError(
+                        f"No method name available and no calldata for message_call"
+                    )
+
                 # Prepare call arguments
                 if use_python_args and trace.python_args:
                     args = trace.python_args.get("args", [])
@@ -353,7 +389,9 @@ class BaseScenarioRunner(ABC):
         """Execute a set_balance trace."""
         self._set_balance(trace.address, trace.value)
 
-    def _execute_clear_transient_storage(self, trace: ClearTransientStorageTrace) -> None:
+    def _execute_clear_transient_storage(
+        self, trace: ClearTransientStorageTrace
+    ) -> None:
         """Execute a clear_transient_storage trace."""
         self._clear_transient_storage()
 
