@@ -185,10 +185,6 @@ class BaseScenarioRunner(ABC):
                     )
                 )
 
-                # Stop if call failed (for consistency with original runner)
-                if not call_result.success:
-                    break
-
             elif isinstance(trace, SetBalanceTrace):
                 # Execute set_balance (no result to record)
                 self._execute_set_balance(trace)
@@ -357,19 +353,9 @@ class BaseScenarioRunner(ABC):
                     sender=trace.call_args.get("sender"),
                 )
 
-            # Convert result to bytes if needed
-            if isinstance(result, (int, bool)):
-                # For simple types, encode as bytes32
-                if isinstance(result, bool):
-                    result = int(result)
-                output = result.to_bytes(32, byteorder="big", signed=(result < 0))
-            elif isinstance(result, bytes):
-                output = result
-            elif result is None:
+            output = result
+            if result is None:
                 output = b""
-            else:
-                # For other types, try to get raw output
-                output = bytes(result) if hasattr(result, "__bytes__") else b""
 
             # Get storage dump if requested
             storage_dump = None
