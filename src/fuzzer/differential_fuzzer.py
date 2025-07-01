@@ -152,6 +152,24 @@ class DifferentialFuzzer:
 
         return mutated_args, mutated_value
 
+    def generate_pragma_lines(self, settings: Any) -> List[str]:
+        """Generate pragma lines from compiler settings."""
+        pragma_lines = []
+        
+        # compiler_version -> # pragma version {version}
+        if settings.compiler_version:
+            pragma_lines.append(f"# pragma version {settings.compiler_version}")
+        
+        # evm_version -> # pragma evm-version {version}
+        if settings.evm_version:
+            pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
+        
+        # enable_decimals or experimental_codegen -> # pragma experimental-codegen
+        if settings.enable_decimals or settings.experimental_codegen:
+            pragma_lines.append("# pragma experimental-codegen")
+        
+        return pragma_lines
+
     def mutate_source_with_compiler_data(
         self, compiler_data: CompilerData
     ) -> Optional[str]:
@@ -168,13 +186,12 @@ class DifferentialFuzzer:
             # Unparse back to source
             result = unparse(mutated_ast)
 
-            # Get original source for pragma check
-            original_source = compiler_data.file_input.contents
-
-            # Preserve pragma version if present in original source
-            if original_source.lstrip().startswith("#pragma"):
-                pragma_line = original_source.split("\n")[0]
-                result = pragma_line + "\n\n" + result
+            # Generate pragma lines from settings
+            pragma_lines = self.generate_pragma_lines(compiler_data.settings)
+            
+            # Add pragma lines at the beginning if any
+            if pragma_lines:
+                result = "\n".join(pragma_lines) + "\n\n" + result
 
             return result
         except Exception as e:
