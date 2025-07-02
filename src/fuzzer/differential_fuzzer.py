@@ -150,102 +150,88 @@ class DifferentialFuzzer:
     def create_mutated_scenario(
         self,
         item: TestItem,
-        enable_mutations: bool,
     ) -> Scenario:
         """Create a scenario from a test item with optional mutations."""
         # Create base scenario using shared utility
-        # TODO python_args should probably set on per-trace basis
+        # TODO use_python_args should probably set on per-trace basis
         scenario = create_scenario_from_item(item, use_python_args=True)
 
-        # Apply mutations if enabled
-        if enable_mutations:
-            # Copy traces for potential mutation
-            mutated_traces = []
-            any_mutation = False
+        # Copy traces for potential mutation
+        mutated_traces = []
 
-            for trace in scenario.traces:
-                if (
-                    isinstance(trace, DeploymentTrace)
-                    and trace.deployment_type == "source"
-                ):
-                    # Check if we should mutate this deployment
-                    mutated_deployment = None
+        for trace in scenario.traces:
+            if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
+                # Check if we should mutate this deployment
+                mutated_deployment = None
 
-                    # Get CompilerData for type information
-                    compiler_data = self.get_compiler_data(trace)
+                # Get CompilerData for type information
+                compiler_data = self.get_compiler_data(trace)
 
-                    # Try to mutate source code using annotated AST
-                    if trace.source_code and compiler_data:
-                        mutated_source = self.mutate_source_with_compiler_data(
-                            compiler_data
-                        )
-                        if mutated_source and mutated_source != trace.source_code:
-                            # Need to create a mutated deployment
-                            mutated_deployment = deepcopy(trace)
-                            mutated_deployment.source_code = mutated_source
-                            any_mutation = True
+                # Try to mutate source code using annotated AST
+                if trace.source_code and compiler_data:
+                    mutated_source = self.mutate_source_with_compiler_data(
+                        compiler_data
+                    )
+                    if mutated_source and mutated_source != trace.source_code:
+                        # Need to create a mutated deployment
+                        mutated_deployment = deepcopy(trace)
+                        mutated_deployment.source_code = mutated_source
 
-                    # Try to mutate deployment args using type information
-                    if trace.python_args and compiler_data:
-                        deploy_args = trace.python_args.get("args", [])
+                if trace.python_args and compiler_data:
+                    deploy_args = trace.python_args.get("args", [])
 
-                        # Get module type and init function
-                        module_t = compiler_data.annotated_vyper_module._metadata[
-                            "type"
-                        ]
-                        init_function = module_t.init_function
+                    # Get module type and init function
+                    module_t = compiler_data.annotated_vyper_module._metadata["type"]
+                    init_function = module_t.init_function
 
-                        mutated_args, mutated_value = (
-                            self.argument_mutator.mutate_deployment_args(
-                                init_function,
-                                deploy_args,
-                                trace.value,
+                    if init_function and deploy_args:
+                        normalized_args = (
+                            self.argument_mutator.normalize_arguments_with_types(
+                                init_function.argument_types, deploy_args
                             )
                         )
+                    else:
+                        normalized_args = deploy_args
 
-                        if mutated_args != deploy_args or mutated_value != trace.value:
-                            # Create or update mutated deployment
-                            if not mutated_deployment:
-                                mutated_deployment = deepcopy(trace)
-
-                            # Update python_args with mutations
-                            mutated_deployment.python_args = deepcopy(trace.python_args)
-                            mutated_deployment.python_args["args"] = mutated_args
-                            mutated_deployment.value = mutated_value
-                            any_mutation = True
-
-                    # Add the appropriate trace
-                    mutated_traces.append(
-                        mutated_deployment if mutated_deployment else trace
+                    mutated_args, mutated_value = (
+                        self.argument_mutator.mutate_deployment_args(
+                            init_function,
+                            normalized_args,
+                            trace.value,
+                        )
                     )
-                else:
-                    # For non-deployment traces, just append
-                    mutated_traces.append(trace)
 
-            # Build a map of deployment addresses to compiler data
-            deployment_compiler_data = {}
-            for trace in mutated_traces:
-                if (
-                    isinstance(trace, DeploymentTrace)
-                    and trace.deployment_type == "source"
-                ):
-                    compiler_data = self.get_compiler_data(trace)
-                    if compiler_data:
-                        deployment_compiler_data[trace.deployed_address] = compiler_data
+                    if not mutated_deployment:
+                        mutated_deployment = deepcopy(trace)
 
-            # Apply trace mutations (calls, etc.) with type information
-            final_traces = self.trace_mutator.mutate_trace_sequence(
-                mutated_traces,
-                deployment_compiler_data=deployment_compiler_data,
-                max_traces=MAX_CALLS,
-            )
+                    mutated_deployment.python_args = deepcopy(trace.python_args)
+                    mutated_deployment.python_args["args"] = mutated_args
+                    mutated_deployment.value = mutated_value
 
-            # Only store if actually mutated
-            if final_traces != scenario.traces:
-                scenario.mutated_traces = final_traces
-            elif any_mutation:
-                # We mutated deployments but trace_mutator didn't change anything else
-                scenario.mutated_traces = mutated_traces
+                # Add the appropriate trace
+                mutated_traces.append(
+                    mutated_deployment if mutated_deployment else trace
+                )
+            else:
+                # For non-deployment traces, just append
+                mutated_traces.append(trace)
+
+        # Build a map of deployment addresses to compiler data
+        deployment_compiler_data = {}
+        for trace in mutated_traces:
+            if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
+                compiler_data = self.get_compiler_data(trace)
+                if compiler_data:
+                    deployment_compiler_data[trace.deployed_address] = compiler_data
+
+        # Apply trace mutations (calls, etc.) with type information
+        final_traces = self.trace_mutator.mutate_trace_sequence(
+            mutated_traces,
+            deployment_compiler_data=deployment_compiler_data,
+            max_traces=MAX_CALLS,
+        )
+
+        scenario.mutated_traces = final_traces
 
         return scenario
 
@@ -277,7 +263,6 @@ class DifferentialFuzzer:
         self,
         test_filter: Optional[TestFilter] = None,
         max_scenarios: int = MAX_SCENARIOS_PER_ITEM,
-        enable_mutations: bool = True,
     ):
         """Main fuzzing loop following the spec structure."""
         # Load and filter exports
@@ -307,7 +292,7 @@ class DifferentialFuzzer:
                 # Run mutation scenarios
                 for scenario_num in range(max_scenarios):
                     # Create scenario with mutations
-                    scenario = self.create_mutated_scenario(item, enable_mutations)
+                    scenario = self.create_mutated_scenario(item)
 
                     # Run in both environments
                     ivy_result = ivy_runner.run(scenario)
@@ -343,13 +328,12 @@ def main():
     # Create test filter - exclude multi-module contracts for now
     test_filter = TestFilter(exclude_multi_module=True)
     # Include tests with certain patterns
-    test_filter.include_path("functional/codegen/calling_convention/test_internal")
-    test_filter.include_name("test_internal_call_kwargs")
+    test_filter.include_path("functional/builtins/codegen/test_concat")
     test_filter.exclude_source(r"\.code")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
-    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=1, enable_mutations=True)
+    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=1)
 
 
 if __name__ == "__main__":
