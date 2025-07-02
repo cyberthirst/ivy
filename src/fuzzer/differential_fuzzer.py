@@ -27,9 +27,9 @@ from .export_utils import (
 from src.unparser.unparser import unparse
 from src.ivy.frontend.loader import loads_from_solc_json
 
-from .scenario import Scenario, create_scenario_from_item
-from .ivy_scenario_runner import IvyScenarioRunner
-from .boa_scenario_runner import BoaScenarioRunner
+from .runner.scenario import Scenario, create_scenario_from_item
+from .runner.ivy_scenario_runner import IvyScenarioRunner
+from .runner.boa_scenario_runner import BoaScenarioRunner
 from .divergence_detector import Divergence, DivergenceDetector
 
 from vyper.compiler.phases import CompilerData
@@ -349,7 +349,7 @@ def main():
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
-    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=2, enable_mutations=True)
+    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=1, enable_mutations=True)
 
 
 if __name__ == "__main__":

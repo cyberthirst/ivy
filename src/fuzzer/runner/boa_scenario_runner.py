@@ -5,7 +5,6 @@ Boa implementation of the scenario runner.
 from typing import Any, Dict, List, Optional
 
 import boa
-from boa.contracts.vyper.vyper_contract import VyperContract
 
 from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from .scenario import Scenario
@@ -58,6 +57,9 @@ class BoaScenarioRunner(BaseScenarioRunner):
             )
             with boa.env.prank(sender):
                 method = getattr(contract, method_name)
+                for arg in args:
+                    if arg == "0x":
+                        pass
                 result = method(*args, **kwargs)
         else:
             method = getattr(contract, method_name)

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from pathlib import Path
 
 from .scenario import Scenario
-from .export_utils import (
+from ..export_utils import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,

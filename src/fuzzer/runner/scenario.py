@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Union, Tuple
 from pathlib import Path
 
-from .export_utils import (
+from ..export_utils import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,

@@ -79,6 +79,9 @@ class IvyScenarioRunner(BaseScenarioRunner):
             method = getattr(contract, method_name)
 
             # Call with args and kwargs
+            for arg in args:
+                if arg == "0x":
+                    pass
             result = method(*args, **kwargs)
             return result
 

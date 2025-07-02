@@ -5,8 +5,8 @@ Divergence detection for differential fuzzing.
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Union
 
-from .scenario import Scenario
-from .base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
+from .runner.scenario import Scenario
+from .runner.base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
 
 
 @dataclass
