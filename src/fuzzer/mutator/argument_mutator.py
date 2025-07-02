@@ -28,6 +28,24 @@ class ArgumentMutator:
         self.rng = rng
         self.value_mutator = value_mutator or ValueMutator(rng)
 
+    def normalize_arguments_with_types(
+        self,
+        arg_types: List[Any],  # VyperType objects
+        args: List[Any],
+    ) -> List[Any]:
+        """
+        Normalize args to ensure boa type compatibility (e.g., converting hex strings to bytes)
+        """
+        normalized_args = args.copy()
+
+        for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
+            # abi encoder in boa requires the bytes to be of bytes type
+            if isinstance(arg_value, str) and isinstance(arg_type, BytesT):
+                assert arg_value.startswith("0x")
+                normalized_args[i] = bytes.fromhex(arg_value.removeprefix("0x"))
+
+        return normalized_args
+
     def mutate_arguments_with_types(
         self,
         arg_types: List[Any],  # VyperType objects
@@ -47,12 +65,6 @@ class ArgumentMutator:
         mutated_args = args.copy()
 
         for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
-            # abi encoder in boa requires the bytes to be of bytes type
-            # we convert here to avoid looping over the args downstream in the runner
-            if isinstance(arg_value, str) and isinstance(arg_type, BytesT):
-                mutated_args[i] = bytes.fromhex(arg_value.removeprefix("0x"))
-                arg_value = mutated_args[i]
-
             if i < len(mutated_args) and self.rng.random() < mutation_prob:
                 if self.rng.random() < 0.2:
                     mutated_args[i] = self.value_mutator.mutate_value(

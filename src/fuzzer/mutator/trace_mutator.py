@@ -188,10 +188,15 @@ class TraceMutator:
                         )
                         current_value = trace.call_args.get("value", 0)
 
-                        # Use argument mutator for consistent mutation
+                        normalized_args = (
+                            self.argument_mutator.normalize_arguments_with_types(
+                                function.argument_types, current_args
+                            )
+                        )
+
                         mutated_args, mutated_value = (
                             self.argument_mutator.mutate_call_args(
-                                function, current_args, current_value
+                                function, normalized_args, current_value
                             )
                         )
 
