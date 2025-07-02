@@ -8,35 +8,31 @@ execution between Ivy and the Vyper compiler (via Boa).
 import logging
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
+from typing import Dict, List, Optional, Any
 import json
 from datetime import datetime
 from copy import deepcopy
 
-from .mutator import AstMutator
-from .value_mutator import ValueMutator
-from .trace_mutator import TraceMutator
+from .mutator.ast_mutator import AstMutator
+from .mutator.value_mutator import ValueMutator
+from .mutator.trace_mutator import TraceMutator
+from .mutator.argument_mutator import ArgumentMutator
 from .export_utils import (
     load_all_exports,
     filter_exports,
     TestFilter,
     TestItem,
     DeploymentTrace,
-    CallTrace,
 )
 from src.unparser.unparser import unparse
 from src.ivy.frontend.loader import loads_from_solc_json
 
 from .scenario import Scenario, create_scenario_from_item
-from .base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
 from .ivy_scenario_runner import IvyScenarioRunner
 from .boa_scenario_runner import BoaScenarioRunner
 from .divergence_detector import Divergence, DivergenceDetector
 
 from vyper.compiler.phases import CompilerData
-from vyper.semantics.types.module import ModuleT
-from vyper.semantics.types.function import ContractFunctionT
 
 
 # Configuration constants from spec
@@ -63,7 +59,10 @@ class DifferentialFuzzer:
             self.rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
         )
         self.value_mutator = ValueMutator(self.rng)
-        self.trace_mutator = TraceMutator(self.rng, self.value_mutator)
+        self.argument_mutator = ArgumentMutator(self.rng, self.value_mutator)
+        self.trace_mutator = TraceMutator(
+            self.rng, self.value_mutator, self.argument_mutator
+        )
         # Cache for CompilerData objects, keyed by id of solc_json
         self._compiler_data_cache: Dict[int, CompilerData] = {}
 
@@ -99,75 +98,22 @@ class DifferentialFuzzer:
             logging.debug(f"Failed to load CompilerData: {e}")
             return None
 
-    def mutate_arguments_with_types(
-        self,
-        arg_types: List[Any],  # VyperType objects
-        args: List[Any],
-        mutation_prob: float = 0.3,
-    ) -> List[Any]:
-        """Mutate arguments based on Vyper types."""
-        mutated_args = args.copy()
-
-        for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
-            if i < len(mutated_args) and self.rng.random() < mutation_prob:
-                if self.rng.random() < 0.2:
-                    mutated_args[i] = self.value_mutator.mutate_value(
-                        arg_value, arg_type
-                    )
-
-        return mutated_args
-
-    def mutate_deployment_args(
-        self,
-        init_function: Optional[ContractFunctionT],
-        deploy_args: List[Any],
-        deploy_value: int,
-    ) -> Tuple[List[Any], int]:
-        """Mutate deployment arguments using init function type info."""
-        mutated_args = deploy_args.copy()
-
-        if init_function and deploy_args:
-            arg_types = init_function.argument_types
-            mutated_args = self.mutate_arguments_with_types(arg_types, deploy_args)
-
-        mutated_value = self.value_mutator.mutate_eth_value(
-            deploy_value, is_payable=init_function.is_payable if init_function else False
-        )
-
-        return mutated_args, mutated_value
-
-    def mutate_call_args(
-        self, function: ContractFunctionT, call_args: List[Any], call_value: int = 0
-    ) -> Tuple[List[Any], int]:
-        """Mutate call arguments using function type info."""
-        mutated_args = call_args.copy()
-
-        if function and call_args:
-            arg_types = function.argument_types
-            mutated_args = self.mutate_arguments_with_types(arg_types, call_args)
-
-        mutated_value = self.value_mutator.mutate_eth_value(
-            call_value, is_payable=function.is_payable
-        )
-
-        return mutated_args, mutated_value
-
     def generate_pragma_lines(self, settings: Any) -> List[str]:
         """Generate pragma lines from compiler settings."""
         pragma_lines = []
-        
+
         # compiler_version -> # pragma version {version}
         if settings.compiler_version:
             pragma_lines.append(f"# pragma version {settings.compiler_version}")
-        
+
         # evm_version -> # pragma evm-version {version}
         if settings.evm_version:
             pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
-        
+
         # enable_decimals or experimental_codegen -> # pragma experimental-codegen
         if settings.enable_decimals or settings.experimental_codegen:
             pragma_lines.append("# pragma experimental-codegen")
-        
+
         return pragma_lines
 
     def mutate_source_with_compiler_data(
@@ -188,7 +134,7 @@ class DifferentialFuzzer:
 
             # Generate pragma lines from settings
             pragma_lines = self.generate_pragma_lines(compiler_data.settings)
-            
+
             # Add pragma lines at the beginning if any
             if pragma_lines:
                 result = "\n".join(pragma_lines) + "\n\n" + result
@@ -208,6 +154,7 @@ class DifferentialFuzzer:
     ) -> Scenario:
         """Create a scenario from a test item with optional mutations."""
         # Create base scenario using shared utility
+        # TODO python_args should probably set on per-trace basis
         scenario = create_scenario_from_item(item, use_python_args=True)
 
         # Apply mutations if enabled
@@ -248,10 +195,12 @@ class DifferentialFuzzer:
                         ]
                         init_function = module_t.init_function
 
-                        mutated_args, mutated_value = self.mutate_deployment_args(
-                            init_function,
-                            deploy_args,
-                            trace.value,
+                        mutated_args, mutated_value = (
+                            self.argument_mutator.mutate_deployment_args(
+                                init_function,
+                                deploy_args,
+                                trace.value,
+                            )
                         )
 
                         if mutated_args != deploy_args or mutated_value != trace.value:

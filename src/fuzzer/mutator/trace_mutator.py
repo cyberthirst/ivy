@@ -12,22 +12,29 @@ import random
 from typing import List, Union, Optional, Dict, Any
 from copy import deepcopy
 
-from .export_utils import (
+from ..export_utils import (
     CallTrace,
     SetBalanceTrace,
     ClearTransientStorageTrace,
 )
 from .value_mutator import ValueMutator
+from .argument_mutator import ArgumentMutator
 
 
 class TraceMutator:
     """Mutates call traces for fuzzing."""
 
     def __init__(
-        self, rng: random.Random, value_mutator: Optional[ValueMutator] = None
+        self,
+        rng: random.Random,
+        value_mutator: Optional[ValueMutator] = None,
+        argument_mutator: Optional[ArgumentMutator] = None,
     ):
         self.rng = rng
         self.value_mutator = value_mutator or ValueMutator(rng)
+        self.argument_mutator = argument_mutator or ArgumentMutator(
+            rng, self.value_mutator
+        )
 
     def mutate_trace_sequence(
         self,
@@ -173,42 +180,20 @@ class TraceMutator:
                             break
 
                     if function:
-                        # Get argument types and current args
-                        arg_types = function.argument_types
+                        # Get current args and value
                         current_args = (
                             trace.python_args.get("args", [])
                             if trace.python_args
                             else []
                         )
+                        current_value = trace.call_args.get("value", 0)
 
-                        # Mutate arguments using type information
-                        mutated_args = []
-                        for i, (arg_type, arg_value) in enumerate(
-                            zip(arg_types, current_args)
-                        ):
-                            if self.rng.random() < 0.3:  # 30% chance to mutate each arg
-                                if self.rng.random() < 0.5:
-                                    # Mutate existing value
-                                    mutated_args.append(
-                                        self.value_mutator.mutate_value(
-                                            arg_value, arg_type
-                                        )
-                                    )
-                                else:
-                                    # Generate new value
-                                    mutated_args.append(
-                                        self.value_mutator.generate_value_for_type(
-                                            arg_type
-                                        )
-                                    )
-                            else:
-                                mutated_args.append(arg_value)
-
-                        # Mutate value with normal integer mutation if payable
-                        mutated_value = trace.call_args.get("value", 0)
-                        if function.is_payable and self.rng.random() < 0.3:
-                            # Use regular integer mutation
-                            mutated_value = self._mutate_value(mutated_value)
+                        # Use argument mutator for consistent mutation
+                        mutated_args, mutated_value = (
+                            self.argument_mutator.mutate_call_args(
+                                function, current_args, current_value
+                            )
+                        )
 
                         # Update the trace
                         if trace.python_args:
