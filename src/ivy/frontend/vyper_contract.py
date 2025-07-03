@@ -233,6 +233,9 @@ class VyperContract:
 
         module = self.compiler_data.annotated_vyper_module
 
+        # touch bytecode to ensure the contract compiles (not all semantic checks are done in the frontend)
+        _ = self.compiler_data.bytecode
+
         address, execution_output = self.env.deploy(
             module=module,
             raw_args=encoded_args,
