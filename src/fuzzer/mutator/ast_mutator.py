@@ -10,6 +10,60 @@ from .value_mutator import ValueMutator
 from src.unparser.unparser import unparse
 
 
+class VyperNodeTransformer:
+    """Base class for transforming Vyper AST nodes.
+
+    Similar to Python's ast.NodeTransformer but adapted for Vyper AST.
+    Visit methods should return the node (possibly modified or replaced).
+    """
+
+    def visit(self, node):
+        """Visit a node and return the transformed node."""
+        if node is None:
+            return None
+
+        method_name = f"visit_{type(node).__name__}"
+        visitor = getattr(self, method_name, self.generic_visit)
+        return visitor(node)
+
+    def generic_visit(self, node):
+        """Called if no explicit visitor method exists for a node."""
+        # Iterate through all fields of this node
+        for field_name in node.get_fields():
+            if not hasattr(node, field_name):
+                continue
+
+            old_value = getattr(node, field_name)
+
+            if isinstance(old_value, list):
+                # Handle list fields (like body, args, etc.)
+                new_values = []
+                for item in old_value:
+                    if isinstance(item, ast.VyperNode):
+                        new_item = self.visit(item)
+                        if new_item is not None:
+                            new_values.append(new_item)
+                    else:
+                        # Not an AST node
+                        # Examples in lists: strings in bases, decorator_list
+                        new_values.append(item)
+                setattr(node, field_name, new_values)
+
+            elif isinstance(old_value, ast.VyperNode):
+                # Handle single node fields - this includes ast.Int, ast.Name, etc.
+                new_value = self.visit(old_value)
+                setattr(node, field_name, new_value)
+
+            # Skip non-AST values like:
+            # - node.id (ast.Name, ast.FunctionDef - identifier string)
+            # - node.attr (ast.Attribute - attribute name string)
+            # - node.value (ast.Int, ast.Str - raw Python int/str value)
+            # - node.op (ast.BinOp, ast.UnaryOp - operator singleton)
+            # - node.name (ast.ImportFrom - module name string)
+
+        return node
+
+
 class FreshNameGenerator:
     """Generates unique variable names with a consistent prefix."""
 
@@ -29,7 +83,7 @@ class Scope:
         self.locals: dict[str, VyperType] = {}
 
 
-class AstMutator:
+class AstMutator(VyperNodeTransformer):
     PROB = {
         ast.Int: 0.4,
         ast.BinOp: 0.3,
@@ -56,19 +110,6 @@ class AstMutator:
         self.name_generator = FreshNameGenerator()
         self.value_mutator = ValueMutator(rng)
 
-    def visit(self, node):
-        method_name = f"visit_{type(node).__name__}"
-        visitor = getattr(self, method_name, self.generic_visit)
-        return visitor(node)
-
-    def generic_visit(self, node):
-        if hasattr(node, "body"):
-            for child in node.body:
-                self.visit(child)
-        elif hasattr(node, "children"):
-            for child in node.children:
-                self.visit(child)
-
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0
         self.current_scope = None
@@ -77,7 +118,8 @@ class AstMutator:
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
 
-        self.visit(new_root)
+        # Visit and get the potentially transformed root
+        new_root = self.visit(new_root)
 
         return new_root
 
@@ -129,14 +171,15 @@ class AstMutator:
                 if typ:
                     self.current_scope.params[arg.arg] = typ
 
-        for stmt in node.body:
-            self.visit(stmt)
+        # Let the base class handle visiting children
+        node = super().generic_visit(node)
 
         self.pop_scope()
+        return node
 
     def visit_Int(self, node: ast.Int):
         if not self.should_mutate(ast.Int):
-            return
+            return node
 
         # Get the type if available
         node_type = getattr(node, "_metadata", {}).get("type")
@@ -157,19 +200,20 @@ class AstMutator:
                 node.value ^= 1 << bit_position
 
         self.mutations_done += 1
+        return node
 
     def visit_BinOp(self, node: ast.BinOp):
-        self.visit(node.left)
-        self.visit(node.right)
+        node.left = self.visit(node.left)
+        node.right = self.visit(node.right)
 
         if not self.should_mutate(ast.BinOp):
-            return
+            return node
 
         left_type = getattr(node.left, "_metadata", {}).get("type")
         right_type = getattr(node.right, "_metadata", {}).get("type")
 
         if left_type is not None and right_type is not None and left_type != right_type:
-            return
+            return node
 
         mutation_type = self.rng.choice(["swap_operands", "change_operator"])
 
@@ -191,21 +235,19 @@ class AstMutator:
                     node.op = ast.Mult()
 
         self.mutations_done += 1
+        return node
 
     def visit_If(self, node: ast.If):
-        self.visit(node.test)
+        node.test = self.visit(node.test)
 
-        for stmt in node.body:
-            self.visit(stmt)
-
-        for stmt in node.orelse:
-            self.visit(stmt)
+        # Visit body and orelse using generic_visit to handle lists properly
+        node = super().generic_visit(node)
 
         if not self.should_mutate(ast.If):
-            return
+            return node
 
         if isinstance(node.test, ast.Call):
-            return
+            return node
 
         mutation_type = self.rng.choice(["negate_condition", "swap_branches"])
 
@@ -256,27 +298,34 @@ class AstMutator:
                 node.test = ast.UnaryOp(op=ast.Not(), operand=node.test)
 
         self.mutations_done += 1
+        return node
 
     def visit_Return(self, node: ast.Return):
-        self.visit(node.value)
+        if node.value:
+            node.value = self.visit(node.value)
 
         if not self.should_mutate(ast.Return):
-            return
+            return node
 
-        if hasattr(node.value, "is_literal_value") and node.value.is_literal_value:
+        if (
+            node.value
+            and hasattr(node.value, "is_literal_value")
+            and node.value.is_literal_value
+        ):
             # TODO
             # In a real implementation, we would use vyper.eval_fold here
             # For this example, we just skip this part as we don't have the actual fold helper
             pass
 
         # self.mutations_done += 1
+        return node
 
     def visit_Assign(self, node: ast.Assign):
-        self.visit(node.target)
-        self.visit(node.value)
+        node.target = self.visit(node.target)
+        node.value = self.visit(node.value)
 
         if not self.should_mutate(ast.Assign):
-            return
+            return node
 
         rhs_type = getattr(node.value, "_metadata", {}).get("type")
 
@@ -299,12 +348,13 @@ class AstMutator:
                     node.value = ast.Int(value=0)
 
         self.mutations_done += 1
+        return node
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
-        self.visit(node.operand)
+        node.operand = self.visit(node.operand)
 
         if not self.should_mutate(ast.UnaryOp):
-            return
+            return node
 
         # Only apply to Int operands that are not already negative
         if isinstance(node.operand, ast.Int) and (
@@ -312,11 +362,9 @@ class AstMutator:
         ):
             # Choose to either drop the unary operator or add one
             if isinstance(node.op, (ast.USub, ast.Invert)):
-                # TODO
-                # Remove the unary operator by replacing with the operand
-                # In a real implementation, we would need to properly replace the node in the parent
-                # For this example, we're just showing the concept
-                pass
+                # Just return the operand, effectively removing the UnaryOp node
+                self.mutations_done += 1
+                return node.operand
             else:
                 # Add a unary operator
                 if node.operand.value >= 0:
@@ -325,14 +373,14 @@ class AstMutator:
                     node.op = op_choice
 
         self.mutations_done += 1
+        return node
 
     def visit_BoolOp(self, node: ast.BoolOp):
         # Visit all values
-        for value in node.values:
-            self.visit(value)
+        node.values = [self.visit(value) for value in node.values]
 
         if not self.should_mutate(ast.BoolOp):
-            return
+            return node
 
         # Check if all operands are boolean typed
         all_bool = True
@@ -348,13 +396,14 @@ class AstMutator:
             node.values[1 - duplicate_idx] = node.values[duplicate_idx]
 
         self.mutations_done += 1
+        return node
 
     def visit_Attribute(self, node: ast.Attribute):
         """Mutate attribute access (e.g., self.foo)"""
-        self.visit(node.value)
+        node.value = self.visit(node.value)
 
         if not self.should_mutate(ast.Attribute):
-            return
+            return node
 
         # For now, we can swap attribute names if we have a mapping
         # This is a simplified implementation
@@ -363,14 +412,15 @@ class AstMutator:
             pass
 
         self.mutations_done += 1
+        return node
 
     def visit_Subscript(self, node: ast.Subscript):
         """Mutate subscript access (e.g., arr[i])"""
-        self.visit(node.value)
-        self.visit(node.slice)
+        node.value = self.visit(node.value)
+        node.slice = self.visit(node.slice)
 
         if not self.should_mutate(ast.Subscript):
-            return
+            return node
 
         # Could mutate the index
         if isinstance(node.slice, ast.Int):
@@ -379,29 +429,31 @@ class AstMutator:
             )
 
         self.mutations_done += 1
+        return node
 
     def visit_For(self, node: ast.For):
         """Mutate for loops"""
-        self.visit(node.target)
-        self.visit(node.iter)
+        node.target = self.visit(node.target)
+        node.iter = self.visit(node.iter)
 
-        for stmt in node.body:
-            self.visit(stmt)
+        # Use generic_visit to handle body list
+        node = super().generic_visit(node)
 
         if not self.should_mutate(ast.For):
-            return
+            return node
 
         # Could swap loop bounds or modify iteration
         # This is a simplified implementation
         # self.mutations_done += 1
+        return node
 
     def visit_Compare(self, node: ast.Compare):
         """Mutate comparison operations"""
-        self.visit(node.left)
-        self.visit(node.right)
+        node.left = self.visit(node.left)
+        node.right = self.visit(node.right)
 
         if not self.should_mutate(ast.Compare):
-            return
+            return node
 
         # Swap comparison operators
         op_swaps = {
@@ -419,6 +471,7 @@ class AstMutator:
             node.op = new_op_type()
 
         self.mutations_done += 1
+        return node
 
     def generate_pragma_lines(self, settings) -> list[str]:
         pragma_lines = []
@@ -429,8 +482,11 @@ class AstMutator:
         if settings.evm_version:
             pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
 
-        if settings.enable_decimals or settings.experimental_codegen:
+        if settings.experimental_codegen:
             pragma_lines.append("# pragma experimental-codegen")
+
+        # TODO we should probably dump settings in traces (maybe just read from solc_json)
+        pragma_lines.append("# pragma enable-decimals")
 
         return pragma_lines
 
