@@ -181,11 +181,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # msg.data doesn't contain bytecode in ivy's case
         args = abi_decode(calldata_args_t, self.msg.data, from_calldata=True)
 
+        self._check_payability(func_t)
         return self._execute_function(func_t, args)
 
     def _min_calldata_size_check(self, min_size):
         if len(self.msg.data) < min_size:
             raise BufferError(f"Provided calldata is too small, min_size is {min_size}")
+
+    def _check_payability(self, func_t):
+        if not func_t.is_payable and self.msg.value != 0:
+            raise PayabilityViolation(f"Function {func_t.name} is not payable")
 
     def dispatch(self):
         try:
@@ -215,10 +220,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             else:
                 raise e
 
-        if not func_t.is_payable:
-            if self.msg.value != 0:
-                raise PayabilityViolation(f"Function {func_t.name} is not payable")
-
+        self._check_payability(func_t)
         self._execute_external_function(func_t, args)
 
     def _execute_external_function(self, func_t, args):
