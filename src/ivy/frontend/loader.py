@@ -141,8 +141,6 @@ def loads_from_solc_json(
     solc_json: Dict[str, Any],
     *args,
     as_blueprint=False,
-    encoded_constructor_args=None,
-    constructor_args=None,
     # TODO we should probably split getting the compiler data to a separate method
     get_compiler_data=False,
     **kwargs,
@@ -197,9 +195,4 @@ def loads_from_solc_json(
     if as_blueprint:
         return d.deploy_as_blueprint(**kwargs)
     else:
-        if encoded_constructor_args is not None:
-            kwargs["encoded_constructor_args"] = encoded_constructor_args
-        elif constructor_args is not None:
-            args = list(args) + constructor_args.get("args", [])
-            kwargs.update(constructor_args.get("kwargs", {}))
         return d.deploy(*args, **kwargs)

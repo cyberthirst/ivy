@@ -98,7 +98,8 @@ class ScenarioResult:
 class BaseScenarioRunner(ABC):
     """Base class for scenario runners that handle all trace types and dependencies."""
 
-    def __init__(self, collect_storage_dumps: bool = False):
+    def __init__(self, env: Any, collect_storage_dumps: bool = False):
+        self.env = env
         self.deployed_contracts: Dict[str, Any] = {}
         self.executed_dependencies: Set[str] = set()
         self.collect_storage_dumps = collect_storage_dumps
@@ -157,6 +158,12 @@ class BaseScenarioRunner(ABC):
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
         """Get storage dump from a contract. Must be implemented by subclasses."""
         pass
+
+    def _get_sender(self, sender: Optional[str]) -> str:
+        """Get the sender address, defaulting to env.eoa if not provided."""
+        if sender:
+            return sender
+        return self.env.eoa
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         """Run a complete scenario including dependencies."""
@@ -322,15 +329,13 @@ class BaseScenarioRunner(ABC):
                     f"Contract at {to_address} not found in deployed contracts. Available: {list(self.deployed_contracts.keys())}"
                 )
 
-            # Get method name from function_name or extract from python_args
             method_name = trace.function_name
-            if not method_name and trace.python_args and "method" in trace.python_args:
-                method_name = trace.python_args["method"]
 
             # Check if we need to use low-level message_call
             calldata = trace.call_args.get("calldata", "")
             if not method_name and (calldata == "" or calldata == "0x"):
                 # Empty calldata - this is a call to __default__
+                # TODO default can't be called directly
                 method_name = "__default__"
 
             # If we still don't have a method name but have calldata, use message_call
@@ -343,12 +348,8 @@ class BaseScenarioRunner(ABC):
                     value=trace.call_args.get("value", 0),
                     sender=trace.call_args.get("sender"),
                 )
-            else:
-                # Use high-level method call
-                if not method_name:
-                    raise ValueError(
-                        "No method name available and no calldata for message_call"
-                    )
+            else:  # Use high-level method call
+                assert method_name is not None
 
                 # Prepare call arguments
                 if use_python_args and trace.python_args:
@@ -358,7 +359,6 @@ class BaseScenarioRunner(ABC):
                     if "value" not in kwargs:
                         kwargs["value"] = trace.call_args.get("value", 0)
                 else:
-                    # Use empty args/kwargs for raw call
                     args = []
                     kwargs = {"value": trace.call_args.get("value", 0)}
 

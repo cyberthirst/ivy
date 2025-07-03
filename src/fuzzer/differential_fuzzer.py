@@ -200,7 +200,8 @@ class DifferentialFuzzer:
         items_processed = 0
 
         # Create runners and detector (with storage dumps enabled for comparison)
-        ivy_runner = IvyScenarioRunner(collect_storage_dumps=True)
+        # Use no_solc_json=True for Ivy to compile mutated source code
+        ivy_runner = IvyScenarioRunner(collect_storage_dumps=True, no_solc_json=True)
         boa_runner = BoaScenarioRunner(collect_storage_dumps=True)
         detector = DivergenceDetector()
 
@@ -256,6 +257,7 @@ def main():
     test_filter.include_path("functional/builtins/codegen/test_concat")
     test_filter.exclude_source(r"\.code")
     test_filter.exclude_name("test_concat_zero_length_side_effects")
+    test_filter.include_name("test_concat_buffer2")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
