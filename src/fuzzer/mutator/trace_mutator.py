@@ -7,7 +7,7 @@ This module provides functions to mutate:
 """
 
 import random
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from copy import deepcopy
 
 from ..export_utils import (
@@ -36,9 +36,11 @@ class TraceMutator:
         )
         self.ast_mutator = ast_mutator or AstMutator(rng)
 
-    def mutate_call_args(
+    # TODO split into 2 funs - mutation and normalization
+    def mutate_and_normalize_call_args(
         self,
         trace: CallTrace,
+        do_mutation: bool,
         deployment_compiler_data: Optional[Dict[str, Any]] = None,
     ) -> CallTrace:
         """Mutate arguments of a single call trace."""
@@ -62,33 +64,33 @@ class TraceMutator:
                             function = func
                             break
 
-                    if function:
-                        # Get current args and value
-                        current_args = (
-                            trace.python_args.get("args", [])
-                            if trace.python_args
-                            else []
-                        )
-                        current_value = trace.call_args.get("value", 0)
+                    assert function is not None
+                    # Get current args and value
+                    current_args = (
+                        trace.python_args.get("args", []) if trace.python_args else []
+                    )
+                    current_value = trace.call_args.get("value", 0)
 
-                        normalized_args = (
-                            self.argument_mutator.normalize_arguments_with_types(
-                                function.argument_types, current_args
-                            )
+                    normalized_args = (
+                        self.argument_mutator.normalize_arguments_with_types(
+                            function.argument_types, current_args
                         )
+                    )
 
+                    mutated_args, mutated_value = (normalized_args, current_value)
+                    if do_mutation:
                         mutated_args, mutated_value = (
                             self.argument_mutator.mutate_call_args(
                                 function, normalized_args, current_value
                             )
                         )
 
-                        # Update the trace
-                        if trace.python_args:
-                            mutated.python_args = deepcopy(trace.python_args)
-                            mutated.python_args["args"] = mutated_args
-                        mutated.call_args["value"] = mutated_value
-                        return mutated
+                    # Update the trace
+                    if trace.python_args:
+                        mutated.python_args = deepcopy(trace.python_args)
+                        mutated.python_args["args"] = mutated_args
+                    mutated.call_args["value"] = mutated_value
+                    return mutated
 
                 except Exception as e:
                     # Log and fall through to no mutation
