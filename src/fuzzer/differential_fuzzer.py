@@ -24,7 +24,6 @@ from .export_utils import (
     TestItem,
     DeploymentTrace,
 )
-from src.unparser.unparser import unparse
 from src.ivy.frontend.loader import loads_from_solc_json
 
 from .runner.scenario import Scenario, create_scenario_from_item
@@ -61,7 +60,7 @@ class DifferentialFuzzer:
         self.value_mutator = ValueMutator(self.rng)
         self.argument_mutator = ArgumentMutator(self.rng, self.value_mutator)
         self.trace_mutator = TraceMutator(
-            self.rng, self.value_mutator, self.argument_mutator
+            self.rng, self.value_mutator, self.argument_mutator, self.ast_mutator
         )
         # Cache for CompilerData objects, keyed by id of solc_json
         self._compiler_data_cache: Dict[int, CompilerData] = {}
@@ -96,55 +95,6 @@ class DifferentialFuzzer:
         # TODO this might be a compiler crash, we should use some filtering
         except Exception as e:
             logging.debug(f"Failed to load CompilerData: {e}")
-            return None
-
-    def generate_pragma_lines(self, settings: Any) -> List[str]:
-        """Generate pragma lines from compiler settings."""
-        pragma_lines = []
-
-        # compiler_version -> # pragma version {version}
-        if settings.compiler_version:
-            pragma_lines.append(f"# pragma version {settings.compiler_version}")
-
-        # evm_version -> # pragma evm-version {version}
-        if settings.evm_version:
-            pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
-
-        # enable_decimals or experimental_codegen -> # pragma experimental-codegen
-        if settings.enable_decimals or settings.experimental_codegen:
-            pragma_lines.append("# pragma experimental-codegen")
-
-        return pragma_lines
-
-    def mutate_source_with_compiler_data(
-        self, compiler_data: CompilerData
-    ) -> Optional[str]:
-        """Mutate source using annotated AST from CompilerData."""
-        try:
-            # Get the annotated AST module
-            annotated_module = compiler_data.annotated_vyper_module
-            logging.debug(f"Got annotated AST module")
-
-            # Mutate the AST
-            mutated_ast = self.ast_mutator.mutate(annotated_module)
-            logging.debug(f"Mutation completed")
-
-            # Unparse back to source
-            result = unparse(mutated_ast)
-
-            # Generate pragma lines from settings
-            pragma_lines = self.generate_pragma_lines(compiler_data.settings)
-
-            # Add pragma lines at the beginning if any
-            if pragma_lines:
-                result = "\n".join(pragma_lines) + "\n\n" + result
-
-            return result
-        except Exception as e:
-            logging.info(f"Failed to mutate source: {e}")
-            import traceback
-
-            logging.debug(traceback.format_exc())
             return None
 
     def create_mutated_scenario(

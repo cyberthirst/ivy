@@ -5,8 +5,10 @@ from typing import Optional, Type, Set
 from vyper.ast import nodes as ast
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
 from vyper.semantics.types import VyperType, IntegerT
+from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
+from src.unparser.unparser import unparse
 
 
 class FreshNameGenerator:
@@ -418,3 +420,41 @@ class AstMutator:
             node.op = new_op_type()
 
         self.mutations_done += 1
+
+    def generate_pragma_lines(self, settings) -> list[str]:
+        pragma_lines = []
+
+        if settings.compiler_version:
+            pragma_lines.append(f"# pragma version {settings.compiler_version}")
+
+        if settings.evm_version:
+            pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
+
+        if settings.enable_decimals or settings.experimental_codegen:
+            pragma_lines.append("# pragma experimental-codegen")
+
+        return pragma_lines
+
+    def mutate_source_with_compiler_data(
+        self, compiler_data: CompilerData
+    ) -> Optional[str]:
+        """Mutate source using annotated AST from CompilerData."""
+        try:
+            annotated_module = compiler_data.annotated_vyper_module
+
+            mutated_ast = self.mutate(annotated_module)
+
+            result = unparse(mutated_ast)
+
+            pragma_lines = self.generate_pragma_lines(compiler_data.settings)
+
+            if pragma_lines:
+                result = "\n".join(pragma_lines) + "\n\n" + result
+
+            return result
+        except Exception as e:
+            import logging
+
+            logging.info(f"Failed to mutate source: {e}")
+            logging.debug("Traceback:", exc_info=True)
+            return None
