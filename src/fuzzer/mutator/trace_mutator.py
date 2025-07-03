@@ -16,9 +16,11 @@ from ..export_utils import (
     CallTrace,
     SetBalanceTrace,
     ClearTransientStorageTrace,
+    DeploymentTrace,
 )
 from .value_mutator import ValueMutator
 from .argument_mutator import ArgumentMutator
+from .ast_mutator import AstMutator
 
 
 class TraceMutator:
@@ -29,12 +31,14 @@ class TraceMutator:
         rng: random.Random,
         value_mutator: Optional[ValueMutator] = None,
         argument_mutator: Optional[ArgumentMutator] = None,
+        ast_mutator: Optional[AstMutator] = None,
     ):
         self.rng = rng
         self.value_mutator = value_mutator or ValueMutator(rng)
         self.argument_mutator = argument_mutator or ArgumentMutator(
             rng, self.value_mutator
         )
+        self.ast_mutator = ast_mutator or AstMutator(rng)
 
     def mutate_trace_sequence(
         self,
@@ -219,3 +223,57 @@ class TraceMutator:
 
         # No mutation - return the copy as-is
         return mutated
+
+    def mutate_deployment_trace(
+        self,
+        trace: DeploymentTrace,
+        compiler_data: Optional[Any] = None,
+    ) -> DeploymentTrace:
+        """
+        This function can mutate:
+        - Source code (using AST mutation)
+        - Deployment arguments (constructor args)
+        - Deployment value
+        """
+        if not (
+            isinstance(trace, DeploymentTrace) and trace.deployment_type == "source"
+        ):
+            return trace
+
+        mutated_deployment = None
+
+        if trace.source_code and compiler_data:
+            mutated_source = self.ast_mutator.mutate_source_with_compiler_data(
+                compiler_data
+            )
+            if mutated_source and mutated_source != trace.source_code:
+                mutated_deployment = deepcopy(trace)
+                mutated_deployment.source_code = mutated_source
+
+        if trace.python_args and compiler_data:
+            deploy_args = trace.python_args.get("args", [])
+
+            module_t = compiler_data.annotated_vyper_module._metadata["type"]
+            init_function = module_t.init_function
+
+            if init_function and deploy_args:
+                normalized_args = self.argument_mutator.normalize_arguments_with_types(
+                    init_function.argument_types, deploy_args
+                )
+            else:
+                normalized_args = deploy_args
+
+            mutated_args, mutated_value = self.argument_mutator.mutate_deployment_args(
+                init_function,
+                normalized_args,
+                trace.value,
+            )
+
+            if not mutated_deployment:
+                mutated_deployment = deepcopy(trace)
+
+            mutated_deployment.python_args = deepcopy(trace.python_args)
+            mutated_deployment.python_args["args"] = mutated_args
+            mutated_deployment.value = mutated_value
+
+        return mutated_deployment if mutated_deployment else trace

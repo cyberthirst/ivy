@@ -111,57 +111,14 @@ class DifferentialFuzzer:
 
         for trace in scenario.traces:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
-                # Check if we should mutate this deployment
-                mutated_deployment = None
-
                 # Get CompilerData for type information
                 compiler_data = self.get_compiler_data(trace)
 
-                # Try to mutate source code using annotated AST
-                if trace.source_code and compiler_data:
-                    mutated_source = self.mutate_source_with_compiler_data(
-                        compiler_data
-                    )
-                    if mutated_source and mutated_source != trace.source_code:
-                        # Need to create a mutated deployment
-                        mutated_deployment = deepcopy(trace)
-                        mutated_deployment.source_code = mutated_source
-
-                if trace.python_args and compiler_data:
-                    deploy_args = trace.python_args.get("args", [])
-
-                    # Get module type and init function
-                    module_t = compiler_data.annotated_vyper_module._metadata["type"]
-                    init_function = module_t.init_function
-
-                    if init_function and deploy_args:
-                        normalized_args = (
-                            self.argument_mutator.normalize_arguments_with_types(
-                                init_function.argument_types, deploy_args
-                            )
-                        )
-                    else:
-                        normalized_args = deploy_args
-
-                    mutated_args, mutated_value = (
-                        self.argument_mutator.mutate_deployment_args(
-                            init_function,
-                            normalized_args,
-                            trace.value,
-                        )
-                    )
-
-                    if not mutated_deployment:
-                        mutated_deployment = deepcopy(trace)
-
-                    mutated_deployment.python_args = deepcopy(trace.python_args)
-                    mutated_deployment.python_args["args"] = mutated_args
-                    mutated_deployment.value = mutated_value
-
-                # Add the appropriate trace
-                mutated_traces.append(
-                    mutated_deployment if mutated_deployment else trace
+                # Mutate the deployment trace
+                mutated_trace = self.trace_mutator.mutate_deployment_trace(
+                    trace, compiler_data
                 )
+                mutated_traces.append(mutated_trace)
             else:
                 # For non-deployment traces, just append
                 mutated_traces.append(trace)
