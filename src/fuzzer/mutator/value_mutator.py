@@ -6,7 +6,7 @@ for both AST mutations and ABI fuzzing.
 """
 
 import random
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 from vyper.semantics.types import (
     AddressT,
     BoolT,

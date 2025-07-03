@@ -347,7 +347,7 @@ class BaseScenarioRunner(ABC):
                 # Use high-level method call
                 if not method_name:
                     raise ValueError(
-                        f"No method name available and no calldata for message_call"
+                        "No method name available and no calldata for message_call"
                     )
 
                 # Prepare call arguments

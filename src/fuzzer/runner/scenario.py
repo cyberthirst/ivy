@@ -3,7 +3,7 @@ Enhanced scenario structure for unified execution.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union, Tuple
+from typing import List, Optional, Union, Tuple
 from pathlib import Path
 
 from ..export_utils import (

@@ -1,9 +1,8 @@
 import copy
 import random
-from typing import Optional, Type, Set
+from typing import Optional, Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.analysis.common import VyperNodeVisitorBase
 from vyper.semantics.types import VyperType, IntegerT
 from vyper.compiler.phases import CompilerData
 

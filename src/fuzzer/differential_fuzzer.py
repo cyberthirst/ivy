@@ -8,7 +8,7 @@ execution between Ivy and the Vyper compiler (via Boa).
 import logging
 import random
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional
 import json
 from datetime import datetime
 from copy import deepcopy
@@ -23,7 +23,9 @@ from .export_utils import (
     TestFilter,
     TestItem,
     DeploymentTrace,
-    CallTrace, SetBalanceTrace, ClearTransientStorageTrace,
+    CallTrace,
+    SetBalanceTrace,
+    ClearTransientStorageTrace,
 )
 from src.ivy.frontend.loader import loads_from_solc_json
 
@@ -233,7 +235,7 @@ class DifferentialFuzzer:
                             f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
                         )
                         if divergence.type == "deployment":
-                            logging.error(f"  Deployment divergence")
+                            logging.error("  Deployment divergence")
                         else:
                             logging.error(
                                 f"  Execution divergence at function {divergence.function}"
