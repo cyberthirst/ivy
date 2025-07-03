@@ -23,6 +23,7 @@ from .export_utils import (
     TestFilter,
     TestItem,
     DeploymentTrace,
+    CallTrace, SetBalanceTrace, ClearTransientStorageTrace,
 )
 from src.ivy.frontend.loader import loads_from_solc_json
 
@@ -37,7 +38,6 @@ from vyper.compiler.phases import CompilerData
 # Configuration constants from spec
 MAX_SCENARIOS_PER_ITEM = 30
 MAX_AST_MUTATIONS = 8
-MAX_CALLS = 12
 TIMEOUT_PER_SCENARIO = 120  # seconds
 LOG_LEVEL = logging.INFO
 
@@ -64,6 +64,11 @@ class DifferentialFuzzer:
         )
         # Cache for CompilerData objects, keyed by id of solc_json
         self._compiler_data_cache: Dict[int, CompilerData] = {}
+
+        # Call trace mutation probabilities
+        self.call_drop_prob = 0.1
+        self.call_mutate_args_prob = 0.3
+        self.call_duplicate_prob = 0.1
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -106,12 +111,12 @@ class DifferentialFuzzer:
         # TODO use_python_args should probably set on per-trace basis
         scenario = create_scenario_from_item(item, use_python_args=True)
 
-        # Copy traces for potential mutation
         mutated_traces = []
+
+        deployment_compiler_data = {}
 
         for trace in scenario.traces:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
-                # Get CompilerData for type information
                 compiler_data = self.get_compiler_data(trace)
 
                 # Mutate the deployment trace
@@ -119,26 +124,38 @@ class DifferentialFuzzer:
                     trace, compiler_data
                 )
                 mutated_traces.append(mutated_trace)
+
+                # Add to deployment compiler data map
+                if compiler_data:
+                    deployment_compiler_data[mutated_trace.deployed_address] = (
+                        compiler_data
+                    )
+
+            elif isinstance(trace, CallTrace):
+                if self.rng.random() < self.call_drop_prob:
+                    continue  # Drop this trace
+
+                # Mutate arguments
+                if self.rng.random() < self.call_mutate_args_prob:
+                    mutated_trace = self.trace_mutator.mutate_call_args(
+                        trace, deployment_compiler_data
+                    )
+                else:
+                    # Append trace as is
+                    mutated_trace = deepcopy(trace)
+
+                mutated_traces.append(mutated_trace)
+
+                # Check if we should duplicate
+                if self.rng.random() < self.call_duplicate_prob:
+                    # Append duplicate as-is (no further mutations)
+                    mutated_traces.append(deepcopy(mutated_trace))
+
             else:
-                # For non-deployment traces, just append
+                assert isinstance(trace, (SetBalanceTrace, ClearTransientStorageTrace))
                 mutated_traces.append(trace)
 
-        # Build a map of deployment addresses to compiler data
-        deployment_compiler_data = {}
-        for trace in mutated_traces:
-            if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
-                compiler_data = self.get_compiler_data(trace)
-                if compiler_data:
-                    deployment_compiler_data[trace.deployed_address] = compiler_data
-
-        # Apply trace mutations (calls, etc.) with type information
-        final_traces = self.trace_mutator.mutate_trace_sequence(
-            mutated_traces,
-            deployment_compiler_data=deployment_compiler_data,
-            max_traces=MAX_CALLS,
-        )
-
-        scenario.mutated_traces = final_traces
+        scenario.mutated_traces = mutated_traces
 
         return scenario
 

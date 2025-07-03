@@ -1,21 +1,17 @@
 """
 Trace mutation utilities for fuzzing.
 
-This module provides functions to mutate call traces including:
-- Reordering traces
-- Duplicating traces
-- Dropping traces
-- Mutating function arguments
+This module provides functions to mutate:
+- Deployment traces (source mutations and constructor args)
+- Call trace arguments
 """
 
 import random
-from typing import List, Union, Optional, Dict, Any
+from typing import Optional, Dict, Any
 from copy import deepcopy
 
 from ..export_utils import (
     CallTrace,
-    SetBalanceTrace,
-    ClearTransientStorageTrace,
     DeploymentTrace,
 )
 from .value_mutator import ValueMutator
@@ -39,123 +35,6 @@ class TraceMutator:
             rng, self.value_mutator
         )
         self.ast_mutator = ast_mutator or AstMutator(rng)
-
-    def mutate_trace_sequence(
-        self,
-        traces: List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace]],
-        max_traces: int = 12,
-        reorder_prob: float = 0.3,
-        duplicate_prob: float = 0.2,
-        drop_prob: float = 0.2,
-        mutate_args_prob: float = 0.5,
-        deployment_compiler_data: Optional[Dict[str, Any]] = None,
-    ) -> List[Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace]]:
-        """
-        Mutate a sequence of traces.
-
-        Note: Only CallTraces are mutated. SetBalanceTrace and ClearTransientStorageTrace
-        are preserved in their original positions.
-
-        Args:
-            traces: Original trace sequence
-            max_traces: Maximum number of traces in the result
-            reorder_prob: Probability of reordering call traces
-            duplicate_prob: Probability of duplicating a call trace
-            drop_prob: Probability of dropping a call trace
-            mutate_args_prob: Probability of mutating call arguments
-
-        Returns:
-            Mutated trace sequence
-        """
-        # Separate call traces from other traces
-        call_traces = []
-        other_traces_with_index = []
-
-        for i, trace in enumerate(traces):
-            if isinstance(trace, CallTrace):
-                call_traces.append((i, trace))
-            else:
-                other_traces_with_index.append((i, trace))
-
-        # If no call traces, return original
-        if not call_traces:
-            return traces.copy()
-
-        # Extract just the call traces for mutation
-        call_trace_list = [trace for _, trace in call_traces]
-
-        # Apply mutations to call traces
-        mutated_calls = self._mutate_call_list(
-            call_trace_list,
-            max_traces - len(other_traces_with_index),  # Leave room for non-call traces
-            reorder_prob,
-            duplicate_prob,
-            drop_prob,
-            mutate_args_prob,
-            deployment_compiler_data,
-        )
-
-        # Reconstruct the full trace list maintaining relative positions
-        # Strategy: Place mutated calls in positions relative to other traces
-        result = []
-        mutated_call_iter = iter(mutated_calls)
-        other_trace_iter = iter(other_traces_with_index)
-
-        next_other = next(other_trace_iter, None)
-        next_call = next(mutated_call_iter, None)
-
-        # Simple strategy: interleave based on original positions
-        for i in range(len(traces) + len(mutated_calls)):
-            if next_other and (not next_call or i == next_other[0]):
-                result.append(next_other[1])
-                next_other = next(other_trace_iter, None)
-            elif next_call:
-                result.append(next_call)
-                next_call = next(mutated_call_iter, None)
-
-        return result[:max_traces]
-
-    def _mutate_call_list(
-        self,
-        calls: List[CallTrace],
-        max_calls: int,
-        reorder_prob: float,
-        duplicate_prob: float,
-        drop_prob: float,
-        mutate_args_prob: float,
-        deployment_compiler_data: Optional[Dict[str, Any]] = None,
-    ) -> List[CallTrace]:
-        """Mutate a list of call traces."""
-        mutated = []
-
-        # Start with a copy of the calls
-        working_calls = calls.copy()
-
-        # Reorder
-        if self.rng.random() < reorder_prob and len(working_calls) > 1:
-            self.rng.shuffle(working_calls)
-
-        # Process each call
-        for call in working_calls:
-            # Drop
-            if self.rng.random() < drop_prob:
-                continue
-
-            # Mutate arguments
-            if self.rng.random() < mutate_args_prob:
-                mutated_call = self.mutate_call_args(call, deployment_compiler_data)
-            else:
-                mutated_call = deepcopy(call)
-
-            mutated.append(mutated_call)
-
-            # Duplicate
-            if self.rng.random() < duplicate_prob and len(mutated) < max_calls:
-                # Mutate the duplicate too
-                dup_call = self.mutate_call_args(mutated_call, deployment_compiler_data)
-                mutated.append(dup_call)
-
-        return mutated[:max_calls]
 
     def mutate_call_args(
         self,
