@@ -9,7 +9,7 @@ import random
 from typing import List, Any, Optional, Tuple
 
 from .value_mutator import ValueMutator
-from vyper.semantics.types import BytesT
+from vyper.semantics.types import BytesT, BytesM_T, VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
 
@@ -30,7 +30,7 @@ class ArgumentMutator:
 
     def normalize_arguments_with_types(
         self,
-        arg_types: List[Any],  # VyperType objects
+        arg_types: List[VyperType],
         args: List[Any],
     ) -> List[Any]:
         """
@@ -40,7 +40,7 @@ class ArgumentMutator:
 
         for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
             # abi encoder in boa requires the bytes to be of bytes type
-            if isinstance(arg_value, str) and isinstance(arg_type, BytesT):
+            if isinstance(arg_value, str) and isinstance(arg_type, (BytesT, BytesM_T)):
                 assert arg_value.startswith("0x")
                 normalized_args[i] = bytes.fromhex(arg_value.removeprefix("0x"))
 
