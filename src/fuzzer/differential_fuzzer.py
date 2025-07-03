@@ -137,14 +137,13 @@ class DifferentialFuzzer:
                 if self.rng.random() < self.call_drop_prob:
                     continue  # Drop this trace
 
-                # Mutate arguments
+                mutate_args = False
                 if self.rng.random() < self.call_mutate_args_prob:
-                    mutated_trace = self.trace_mutator.mutate_call_args(
-                        trace, deployment_compiler_data
-                    )
-                else:
-                    # Append trace as is
-                    mutated_trace = deepcopy(trace)
+                    mutate_args = True
+
+                mutated_trace = self.trace_mutator.mutate_and_normalize_call_args(
+                    trace, mutate_args, deployment_compiler_data
+                )
 
                 mutated_traces.append(mutated_trace)
 
@@ -256,10 +255,11 @@ def main():
     # Include tests with certain patterns
     test_filter.include_path("functional/builtins/codegen/test_concat")
     test_filter.exclude_source(r"\.code")
+    test_filter.exclude_name("test_concat_zero_length_side_effects")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
-    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=1)
+    fuzzer.fuzz_exports(test_filter=test_filter)
 
 
 if __name__ == "__main__":
