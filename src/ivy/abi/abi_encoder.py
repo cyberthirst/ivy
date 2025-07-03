@@ -96,8 +96,6 @@ def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
     if isinstance(value, str):
         # Handle hex string with 0x prefix
         if value.startswith("0x"):
-            if value == "0x":
-                raise EncodeError("Invalid hex string: empty hex value after '0x'")
             hex_value = value.removeprefix("0x")
         else:
             # Handle hex string without 0x prefix

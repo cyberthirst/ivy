@@ -1,17 +1,16 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
-from fuzzer.base_scenario_runner import ScenarioResult
+from fuzzer.runner.base_scenario_runner import ScenarioResult
 from fuzzer.export_utils import (
-    CallTrace,
     TestExport,
     TestFilter,
     load_export,
     load_all_exports,
     filter_exports,
 )
-from fuzzer.scenario import Scenario, create_scenario_from_export
-from fuzzer.ivy_scenario_runner import IvyScenarioRunner
+from fuzzer.runner.scenario import Scenario, create_scenario_from_export
+from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
 
 class TestReplay:
