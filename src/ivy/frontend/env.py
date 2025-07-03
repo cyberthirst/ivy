@@ -253,3 +253,12 @@ class Env:
             self._accounts = saved_accounts
             self.eoa = saved_eoa
             self.interpreter.state._state.accessed_accounts = saved_accessed_accounts
+
+    @contextmanager
+    def prank(self, address: _AddressType):
+        original_eoa = self.eoa
+        self.eoa = Address(address)
+        try:
+            yield
+        finally:
+            self.eoa = original_eoa
