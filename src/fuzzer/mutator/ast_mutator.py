@@ -4,6 +4,7 @@ from typing import Optional, Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, IntegerT
+from vyper.semantics.analysis.base import VarInfo, DataLocation
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
@@ -79,8 +80,7 @@ class FreshNameGenerator:
 
 class Scope:
     def __init__(self):
-        self.params: dict[str, VyperType] = {}
-        self.locals: dict[str, VyperType] = {}
+        self.vars: dict[str, VarInfo] = {}
 
 
 class AstMutator(VyperNodeTransformer):
@@ -109,11 +109,17 @@ class AstMutator(VyperNodeTransformer):
         self.scope_stack = []
         self.name_generator = FreshNameGenerator()
         self.value_mutator = ValueMutator(rng)
+        # Global pool of all variables
+        self.all_vars: dict[str, VarInfo] = {}
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0
-        self.current_scope = None
+        # Reset global variable pool
+        self.all_vars = {}
+        # Initialize with module-level scope
         self.scope_stack = []
+        self.current_scope = Scope()
+        self.scope_stack.append(self.current_scope)  # Module scope stays on stack
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
@@ -128,24 +134,50 @@ class AstMutator(VyperNodeTransformer):
         self.current_scope = Scope()
 
     def pop_scope(self):
+        for var_name in self.current_scope.vars:
+            if var_name in self.all_vars:
+                del self.all_vars[var_name]
+
         self.current_scope = self.scope_stack.pop()
 
+    def _create_var_info(
+        self,
+        typ: VyperType,
+        location: DataLocation = DataLocation.MEMORY,
+        modifiability=None,  # Will use VarInfo's default
+        is_public: bool = False,
+        decl_node: Optional[ast.VyperNode] = None,
+    ) -> VarInfo:
+        kwargs = {
+            "typ": typ,
+            "location": location,
+            "is_public": is_public,
+            "decl_node": decl_node,
+        }
+        if modifiability is not None:
+            kwargs["modifiability"] = modifiability
+
+        return VarInfo(**kwargs)
+
+    def add_variable(self, name: str, var_info: VarInfo):
+        self.current_scope.vars[name] = var_info
+        self.all_vars[name] = var_info
+
     def add_local(self, name: str, typ: VyperType):
-        if self.current_scope:
-            self.current_scope.locals[name] = typ
+        """Convenience method to add a local variable."""
+        var_info = self._create_var_info(typ, DataLocation.MEMORY)
+        self.add_variable(name, var_info)
 
     def pick_var(self, want_type: Optional[VyperType] = None) -> Optional[ast.Name]:
-        if not self.current_scope:
+        """Pick a variable from all accessible variables matching the type."""
+        if not self.all_vars:
             return None
 
         vars_pool = []
 
-        for name, typ in self.current_scope.params.items():
-            if want_type is None or typ == want_type:
-                vars_pool.append(name)
-
-        for name, typ in self.current_scope.locals.items():
-            if want_type is None or typ == want_type:
+        # Check all variables in the global pool
+        for name, var_info in self.all_vars.items():
+            if want_type is None or var_info.typ == want_type:
                 vars_pool.append(name)
 
         if not vars_pool:
@@ -165,11 +197,14 @@ class AstMutator(VyperNodeTransformer):
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.push_scope()
 
-        for arg in node.args.args:
-            if hasattr(arg, "annotation") and hasattr(arg.annotation, "_metadata"):
-                typ = arg.annotation._metadata.get("type")
-                if typ:
-                    self.current_scope.params[arg.arg] = typ
+        # Get function arguments from the function type
+        func_type = node._metadata["func_type"]
+        for arg in func_type.arguments:
+            # Function parameters are in memory
+            param_info = self._create_var_info(
+                typ=arg.typ, location=DataLocation.MEMORY, decl_node=arg.ast_source
+            )
+            self.add_variable(arg.name, param_info)
 
         # Let the base class handle visiting children
         node = super().generic_visit(node)
