@@ -3,12 +3,13 @@ import random
 from typing import Optional, Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT
-from vyper.semantics.analysis.base import VarInfo, DataLocation
+from vyper.semantics.types import VyperType, IntegerT, HashMapT
+from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
 from src.unparser.unparser import unparse
+from src.fuzzer.type_generator import TypeGenerator
 
 
 class VyperNodeTransformer:
@@ -111,6 +112,11 @@ class AstMutator(VyperNodeTransformer):
         self.value_mutator = ValueMutator(rng)
         # Global pool of all variables
         self.all_vars: dict[str, VarInfo] = {}
+        # Type generator for random types
+        self.type_generator = TypeGenerator(rng)
+        # Control how many variables to generate per scope
+        self.min_vars_per_scope = 0
+        self.max_vars_per_scope = 6
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0
@@ -187,12 +193,117 @@ class AstMutator(VyperNodeTransformer):
 
         return ast.Name(id=selected_name)
 
+    @property
+    def is_module_scope(self) -> bool:
+        """Check if we're in module scope (only one scope on the stack)."""
+        return len(self.scope_stack) == 1
+
     def should_mutate(self, node_type: Type) -> bool:
         node_prob = self.PROB.get(node_type, 0)
         return (
             self.mutations_done < self.max_mutations
             and self.rng.random() < self.mutate_prob * node_prob
         )
+
+    def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
+        pass
+
+    def generate_varinfo(self) -> tuple[str, VarInfo]:
+        """Generate a random variable with VarInfo.
+
+        Returns:
+            Tuple of (variable_name, VarInfo)
+        """
+        # Generate a unique name
+        var_name = self.name_generator.generate()
+
+        # Determine location and modifiability based on scope
+        if self.is_module_scope:
+            # Module-level variables can be storage, transient, immutable, or constant
+            location_choices = [
+                (DataLocation.STORAGE, Modifiability.MODIFIABLE, 0.4),
+                (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, 0.2),
+                (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, 0.2),  # immutable
+                (DataLocation.CODE, Modifiability.CONSTANT, 0.2),  # constant
+            ]
+
+            # Choose location based on weights
+            rand = self.rng.random()
+            cumulative = 0
+            for location, modifiability, weight in location_choices:
+                cumulative += weight
+                if rand < cumulative:
+                    selected_location = location
+                    selected_modifiability = modifiability
+                    break
+
+            # Module-level variables can be public
+            is_public = self.rng.choice([True, False])
+
+            # Skip HashMapT for constant and immutable variables
+            skip_types = set()
+            if selected_modifiability in (
+                Modifiability.CONSTANT,
+                Modifiability.RUNTIME_CONSTANT,
+            ):
+                skip_types = {HashMapT}
+
+        else:
+            # Function and block level variables are always in memory and modifiable
+            selected_location = DataLocation.MEMORY
+            selected_modifiability = Modifiability.MODIFIABLE
+            is_public = False
+
+            # HashMapT can't be in memory
+            skip_types = {HashMapT}
+
+        # Generate a random type with appropriate restrictions
+        var_type, _ = self.type_generator.generate_type(nesting=2, skip=skip_types)
+
+        # Create VarInfo
+        var_info = self._create_var_info(
+            typ=var_type,
+            location=selected_location,
+            modifiability=selected_modifiability,
+            is_public=is_public,
+            decl_node=None,  # We won't assign a declaration node as requested
+        )
+
+        return var_name, var_info
+
+    def generate_vardecl(self) -> tuple[ast.VariableDecl, str, VarInfo]:
+        """Generate a random variable declaration AST node.
+
+        Returns:
+            Tuple of (VariableDecl AST node, variable_name, VarInfo)
+        """
+        # First generate the VarInfo
+        var_name, var_info = self.generate_varinfo()
+
+        # Create the AST node
+        var_decl = ast.VariableDecl()
+
+        # Set the target (variable name)
+        var_decl.target = ast.Name(id=var_name)
+
+        # Set the annotation (type) - for now, just use the type name
+        # In a real implementation, this would need to generate proper type annotations
+        var_decl.annotation = ast.Name(id=str(var_info.typ))
+
+        # Set the flags based on VarInfo properties
+        var_decl.is_constant = var_info.modifiability == Modifiability.CONSTANT
+        var_decl.is_immutable = var_info.modifiability == Modifiability.RUNTIME_CONSTANT
+        var_decl.is_transient = var_info.location == DataLocation.TRANSIENT
+        var_decl.is_public = var_info.is_public
+        var_decl.is_reentrant = False
+
+        # Constants need a value, others cannot have one
+        if var_decl.is_constant:
+            var_decl.value = self.generate_random_expr(var_info.typ)
+        else:
+            var_decl.value = None
+
+        return var_decl, var_name, var_info
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.push_scope()
