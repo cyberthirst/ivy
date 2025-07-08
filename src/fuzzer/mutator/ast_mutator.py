@@ -273,49 +273,53 @@ class AstMutator(VyperNodeTransformer):
 
         return var_name, var_info
 
-    def generate_vardecl(self) -> tuple[ast.VariableDecl, str, VarInfo]:
-        """Generate a random variable declaration AST node.
-
-        Returns:
-            Tuple of (VariableDecl AST node, variable_name, VarInfo)
+    def generate_vardecl(
+        self,
+        parent: ast.VyperNode,
+    ) -> tuple[ast.VariableDecl, str, VarInfo]:
         """
-        # First generate the VarInfo
+        Build a random VariableDecl that is *valid* for the Vyper AST.
+
+        Returns
+        -------
+        (var_decl, var_name, var_info)
+        """
         var_name, var_info = self.generate_varinfo()
 
-        # Create the AST node
-        var_decl = ast.VariableDecl()
+        anno: ast.VyperNode = ast.Name(id=str(var_info.typ))
 
-        # Set the target (variable name)
-        var_decl.target = ast.Name(id=var_name)
+        if var_info.modifiability == Modifiability.CONSTANT:
+            anno = ast.Call(func=ast.Name(id="constant"), args=[anno])
+        if var_info.modifiability == Modifiability.RUNTIME_CONSTANT:
+            anno = ast.Call(func=ast.Name(id="immutable"), args=[anno])
 
-        # Set the annotation (type) - for now, just use the type name
-        # In a real implementation, this would need to generate proper type annotations
-        var_decl.annotation = ast.Name(id=str(var_info.typ))
+        if var_info.location == DataLocation.TRANSIENT:
+            anno = ast.Call(func=ast.Name(id="transient"), args=[anno])
 
-        # Set the flags based on VarInfo properties
-        var_decl.is_constant = var_info.modifiability == Modifiability.CONSTANT
-        var_decl.is_immutable = var_info.modifiability == Modifiability.RUNTIME_CONSTANT
-        var_decl.is_transient = var_info.location == DataLocation.TRANSIENT
-        var_decl.is_public = var_info.is_public
-        var_decl.is_reentrant = False
+        if var_info.is_public:
+            anno = ast.Call(func=ast.Name(id="public"), args=[anno])
 
-        # Determine if initialization is needed
-        # Module-level: only constants need initialization
-        # Function/block-level: all variables need initialization
-        needs_init = var_decl.is_constant or not self.is_module_scope
+        needs_init = (
+            var_info.modifiability == Modifiability.CONSTANT
+            or not self.is_module_scope  # inside a function / block
+        )
+        init_val = self.generate_random_expr(var_info.typ) if needs_init else None
 
-        if needs_init:
-            var_decl.value = self.generate_random_expr(var_info.typ)
-        else:
-            var_decl.value = None
+        var_decl = ast.VariableDecl(
+            parent=parent,
+            target=ast.Name(id=var_name),
+            annotation=anno,
+            value=init_val,  # may be None
+        )
 
         return var_decl, var_name, var_info
 
-    def inject_variables(self, body: list) -> None:
+    def inject_variables(self, body: list, parent: ast.VyperNode) -> None:
         """Inject random variable declarations at the beginning of a body list.
 
         Args:
             body: The body list to inject variables into
+            parent: The parent node that contains this body
         """
         if self.rng.random() > self.inject_vars_prob:
             return
@@ -326,12 +330,12 @@ class AstMutator(VyperNodeTransformer):
         num_vars = self.rng.randint(self.min_vars_per_scope, self.max_vars_per_scope)
 
         for i in range(num_vars):
-            var_decl, var_name, var_info = self.generate_vardecl()
+            var_decl, var_name, var_info = self.generate_vardecl(parent)
             body.insert(i, var_decl)
             self.add_variable(var_name, var_info)
 
     def visit_Module(self, node: ast.Module):
-        self.inject_variables(node.body)
+        self.inject_variables(node.body, node)
 
         return super().generic_visit(node)
 
@@ -347,7 +351,7 @@ class AstMutator(VyperNodeTransformer):
             )
             self.add_variable(arg.name, param_info)
 
-        self.inject_variables(node.body)
+        self.inject_variables(node.body, node)
 
         # Let the base class handle visiting children
         node = super().generic_visit(node)
@@ -418,9 +422,9 @@ class AstMutator(VyperNodeTransformer):
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
 
-        self.inject_variables(node.body)
+        self.inject_variables(node.body, node)
         if node.orelse:
-            self.inject_variables(node.orelse)
+            self.inject_variables(node.orelse, node)
 
         node = super().generic_visit(node)
 
@@ -618,7 +622,7 @@ class AstMutator(VyperNodeTransformer):
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
-        self.inject_variables(node.body)
+        self.inject_variables(node.body, node)
 
         # Use generic_visit to handle body list
         node = super().generic_visit(node)
