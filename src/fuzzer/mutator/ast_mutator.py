@@ -8,6 +8,8 @@ from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
+from .context import Context
+from .expr_generator import ExprGenerator
 from src.unparser.unparser import unparse
 from src.fuzzer.type_generator import TypeGenerator
 
@@ -79,11 +81,6 @@ class FreshNameGenerator:
         return name
 
 
-class Scope:
-    def __init__(self):
-        self.vars: dict[str, VarInfo] = {}
-
-
 class AstMutator(VyperNodeTransformer):
     PROB = {
         ast.Int: 0.4,
@@ -106,12 +103,9 @@ class AstMutator(VyperNodeTransformer):
         self.max_mutations = max_mutations
         self.mutate_prob = mutate_prob
         self.mutations_done = 0
-        self.current_scope = None
-        self.scope_stack = []
+        self.context = Context()
         self.name_generator = FreshNameGenerator()
         self.value_mutator = ValueMutator(rng)
-        # Global pool of all variables
-        self.all_vars: dict[str, VarInfo] = {}
         # Type generator for random types
         self.type_generator = TypeGenerator(rng)
         # Control how many variables to generate per scope
@@ -119,15 +113,17 @@ class AstMutator(VyperNodeTransformer):
         self.max_vars_per_scope = 6
         # Probability of injecting variables into a scope
         self.inject_vars_prob = 0.5
+        # Expression generator
+        self.expr_generator = ExprGenerator(self.value_mutator, self.rng)
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0
-        # Reset global variable pool
-        self.all_vars = {}
+        # Reset context
+        self.context = Context()
         # Initialize with module-level scope
-        self.scope_stack = []
-        self.current_scope = Scope()
-        self.scope_stack.append(self.current_scope)  # Module scope stays on stack
+        self.context.scope_stack.append(
+            self.context.current_scope
+        )  # Module scope stays on stack
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
@@ -138,15 +134,10 @@ class AstMutator(VyperNodeTransformer):
         return new_root
 
     def push_scope(self):
-        self.scope_stack.append(self.current_scope)
-        self.current_scope = Scope()
+        self.context.push_scope()
 
     def pop_scope(self):
-        for var_name in self.current_scope.vars:
-            if var_name in self.all_vars:
-                del self.all_vars[var_name]
-
-        self.current_scope = self.scope_stack.pop()
+        self.context.pop_scope()
 
     def _create_var_info(
         self,
@@ -168,23 +159,21 @@ class AstMutator(VyperNodeTransformer):
         return VarInfo(**kwargs)
 
     def add_variable(self, name: str, var_info: VarInfo):
-        self.current_scope.vars[name] = var_info
-        self.all_vars[name] = var_info
+        self.context.add_variable(name, var_info)
 
     def add_local(self, name: str, typ: VyperType):
         """Convenience method to add a local variable."""
-        var_info = self._create_var_info(typ, DataLocation.MEMORY)
-        self.add_variable(name, var_info)
+        self.context.add_local(name, typ)
 
     def pick_var(self, want_type: Optional[VyperType] = None) -> Optional[ast.Name]:
         """Pick a variable from all accessible variables matching the type."""
-        if not self.all_vars:
+        if not self.context.all_vars:
             return None
 
         vars_pool = []
 
         # Check all variables in the global pool
-        for name, var_info in self.all_vars.items():
+        for name, var_info in self.context.all_vars.items():
             if want_type is None or var_info.typ == want_type:
                 vars_pool.append(name)
 
@@ -198,7 +187,7 @@ class AstMutator(VyperNodeTransformer):
     @property
     def is_module_scope(self) -> bool:
         """Check if we're in module scope (only one scope on the stack)."""
-        return len(self.scope_stack) == 1
+        return self.context.is_module_scope
 
     def should_mutate(self, node_type: Type) -> bool:
         node_prob = self.PROB.get(node_type, 0)
@@ -208,9 +197,9 @@ class AstMutator(VyperNodeTransformer):
         )
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
-        pass
+        return self.expr_generator.generate(target_type, self.context, depth=4)
 
-    def generate_varinfo(self) -> tuple[str, VarInfo]:
+    def _generate_varinfo(self) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.
 
         Returns:
@@ -284,7 +273,7 @@ class AstMutator(VyperNodeTransformer):
         -------
         (var_decl, var_name, var_info)
         """
-        var_name, var_info = self.generate_varinfo()
+        var_name, var_info = self._generate_varinfo()
 
         anno: ast.VyperNode = ast.Name(id=str(var_info.typ))
 
