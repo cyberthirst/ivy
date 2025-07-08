@@ -229,22 +229,23 @@ class DifferentialFuzzer:
                         ivy_result, boa_result, scenario
                     )
 
-                    if divergence:
-                        divergence_count += 1
-                        logging.error(
-                            f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
-                        )
-                        if divergence.type == "deployment":
-                            logging.error("  Deployment divergence")
-                        else:
-                            logging.error(
-                                f"  Execution divergence at function {divergence.function}"
-                            )
-
-                        # Save divergence
-                        self.save_divergence(divergence, item_name, scenario_num)
-                    else:
+                    if not divergence:
                         logging.info(f"ok  | item {item_name} | mut#{scenario_num}")
+                        continue
+
+                    divergence_count += 1
+                    logging.error(
+                        f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
+                    )
+                    if divergence.type == "deployment":
+                        logging.error("  Deployment divergence")
+                    else:
+                        logging.error(
+                            f"  Execution divergence at function {divergence.function}"
+                        )
+
+                    # Save divergence
+                    self.save_divergence(divergence, item_name, scenario_num)
 
         logging.info(f"Fuzzing complete. Found {divergence_count} divergences.")
 
