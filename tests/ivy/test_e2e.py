@@ -2885,3 +2885,22 @@ def foo() -> uint256:
     c = get_contract(code)
 
     assert c.foo() == 5
+
+
+def test_constant_assignment_to_other_constant(get_contract):
+    val = [20769187434139310514121985316880385, 36028797018963969, 524287]
+    typ = "uint152[3]"
+
+    code = f"""
+a: constant({typ}) = {val}
+
+b: public(constant({typ})) = a
+
+@external
+def foo() -> {typ}:
+    return b
+    """
+
+    c = get_contract(code)
+
+    assert c.foo() == val

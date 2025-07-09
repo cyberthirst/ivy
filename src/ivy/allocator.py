@@ -15,7 +15,7 @@ class Allocator:
             for location in DataLocation
             if location not in IGNORED_LOCATIONS
         }
-        self.visited = set()
+        self.visited = {}
 
     def _get_allocatable(self, vyper_module: ast.Module) -> list[ast.VyperNode]:
         allocable = (ast.InitializesDecl, ast.VariableDecl)
@@ -42,7 +42,7 @@ class Allocator:
         assert varinfo.is_state_variable
 
         varinfo.position = self._increment_counter(varinfo.location)
-        self.visited.add(varinfo)
+        self.visited[varinfo] = True
 
     def _allocate_r(self, mod: ast.Module):
         nodes = self._get_allocatable(mod)
