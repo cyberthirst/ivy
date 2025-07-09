@@ -15,6 +15,12 @@ def decode_ivy_object(v, typ):
             v = {k: decode_ivy_object(v, typ.value_type) for k, v in v.items()}
     elif isinstance(v, Address):
         v = str(v)
+    elif isinstance(v, tuple):
+        v = list(v)
+        for i, member_typ in enumerate(typ.member_types):
+            if typ_needs_decode(member_typ):
+                v[i] = decode_ivy_object(v[i], member_typ)
+        v = tuple(v)
     # TODO add struct and flag
     return v
 
