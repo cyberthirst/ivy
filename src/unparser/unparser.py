@@ -321,6 +321,34 @@ class Unparser(VyperNodeVisitorBase):
         )
         return f'"{escaped}"'
 
+    def visit_LiteralValue(self, node):
+        """Handle the custom LiteralValue node."""
+        value = node.value
+        typ = node.typ
+
+        # Import types we need
+        from vyper.semantics.types import AddressT, StringT, BytesT, BytesM_T
+
+        # Special cases only
+        if (
+            isinstance(typ, AddressT)
+            and isinstance(value, str)
+            and not value.startswith("0x")
+        ):
+            return f"0x{value}"
+        elif isinstance(typ, StringT):
+            # Handle string escaping
+            if '"' in value and "'" not in value:
+                return f"'{value}'"
+            else:
+                escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+                return f'"{escaped}"'
+        elif isinstance(typ, (BytesT, BytesM_T)) and isinstance(value, bytes):
+            return f"0x{value.hex()}"
+
+        # Default case for everything else
+        return str(value)
+
     def visit_List(self, node):
         elements = [self._expr(e) for e in node.elements]
         return f"[{', '.join(elements)}]"
