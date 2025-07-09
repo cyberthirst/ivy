@@ -199,6 +199,25 @@ class AstMutator(VyperNodeTransformer):
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(target_type, self.context, depth=4)
 
+    def generate_type(
+        self, nesting: int = 3, skip: Optional[set] = None
+    ) -> tuple[VyperType, list[str]]:
+        skip = skip or set()
+
+        # Try to use existing variable type with
+        if self.rng.random() < 0.4:
+            valid_vars = []
+            for var_info in self.context.all_vars.values():
+                if type(var_info.typ) not in skip:
+                    valid_vars.append(var_info)
+
+            if valid_vars:
+                var_info = self.rng.choice(valid_vars)
+                return var_info.typ, []
+
+        # Completely random type
+        return self.type_generator.generate_type(nesting=nesting, skip=skip)
+
     def _generate_varinfo(self) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.
 
@@ -248,8 +267,7 @@ class AstMutator(VyperNodeTransformer):
             # HashMapT can't be in memory
             skip_types = {HashMapT}
 
-        # Generate a random type with appropriate restrictions
-        var_type, _ = self.type_generator.generate_type(nesting=2, skip=skip_types)
+        var_type, _ = self.generate_type(nesting=2, skip=skip_types)
 
         # Create VarInfo
         var_info = self._create_var_info(
