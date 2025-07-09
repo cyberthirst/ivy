@@ -35,6 +35,7 @@ from .runner.boa_scenario_runner import BoaScenarioRunner
 from .divergence_detector import Divergence, DivergenceDetector
 
 from vyper.compiler.phases import CompilerData
+from vyper.exceptions import CompilerPanic, VyperException
 
 
 # Configuration constants from spec
@@ -99,9 +100,19 @@ class DifferentialFuzzer:
             self._compiler_data_cache[cache_key] = compiler_data
 
             return compiler_data
-        # TODO this might be a compiler crash, we should use some filtering
+        except CompilerPanic as e:
+            logging.error(f"Compiler panic: {e}")
+            self.stats.record_compiler_crash()
+            self.save_compiler_crash(trace, e, "CompilerPanic")
+            return None
+        except VyperException as e:
+            logging.debug(f"Compilation failure (VyperException): {e}")
+            self.stats.record_compilation_failure()
+            return None
         except Exception as e:
-            logging.debug(f"Failed to load CompilerData: {e}")
+            logging.error(f"Compiler crash ({type(e).__name__}): {e}")
+            self.stats.record_compiler_crash()
+            self.save_compiler_crash(trace, e, type(e).__name__)
             return None
 
     def create_mutated_scenario(
@@ -183,6 +194,35 @@ class DifferentialFuzzer:
             json.dump(divergence_data, f, indent=2, default=str)
 
         logging.error(f"Divergence saved to {filepath}")
+
+    def save_compiler_crash(
+        self, trace: DeploymentTrace, error: Exception, error_type: str
+    ):
+        reports_dir = (
+            Path("reports") / datetime.now().strftime("%Y-%m-%d") / "compiler_crashes"
+        )
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
+        filename = f"crash_{error_type}_{timestamp}.json"
+        filepath = reports_dir / filename
+
+        crash_data = {
+            "timestamp": datetime.now().isoformat(),
+            "error_type": error_type,
+            "error_message": str(error),
+            "solc_json": trace.solc_json,
+            "reproduction_info": {
+                "seed": self.seed,
+                "item_name": getattr(self, "_current_item_name", "unknown"),
+                "scenario_num": getattr(self, "_current_scenario_num", -1),
+            },
+        }
+
+        with open(filepath, "w") as f:
+            json.dump(crash_data, f, indent=2, default=str)
+
+        logging.error(f"Compiler crash saved to {filepath}")
 
     def fuzz_exports(
         self,
