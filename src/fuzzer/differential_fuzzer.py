@@ -33,6 +33,7 @@ from .runner.scenario import Scenario, create_scenario_from_item
 from .runner.ivy_scenario_runner import IvyScenarioRunner
 from .runner.boa_scenario_runner import BoaScenarioRunner
 from .divergence_detector import Divergence, DivergenceDetector
+from .statistics import FuzzerStatistics
 
 from vyper.compiler.phases import CompilerData
 from vyper.exceptions import CompilerPanic, VyperException
@@ -56,6 +57,7 @@ class DifferentialFuzzer:
         seed: Optional[int] = None,
     ):
         self.exports_dir = exports_dir
+        self.seed = seed
         self.rng = random.Random(seed)
         self.ast_mutator = AstMutator(
             self.rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
@@ -72,6 +74,7 @@ class DifferentialFuzzer:
         self.call_drop_prob = 0.1
         self.call_mutate_args_prob = 0.3
         self.call_duplicate_prob = 0.1
+        self.stats = FuzzerStatistics()
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -236,6 +239,8 @@ class DifferentialFuzzer:
             f"Loaded {sum(len(e.items) for e in exports.values())} test items from {len(exports)} files"
         )
 
+        self.stats.start_timer()
+
         divergence_count = 0
         items_processed = 0
 
@@ -255,14 +260,23 @@ class DifferentialFuzzer:
                 items_processed += 1
                 logging.info(f"Testing {item_name} ({items_processed})")
 
+                # Store current item info for crash reporting
+                self._current_item_name = item_name
+
                 # Run mutation scenarios
                 for scenario_num in range(max_scenarios):
+                    self._current_scenario_num = scenario_num
                     # Create scenario with mutations
                     scenario = self.create_mutated_scenario(item)
 
                     # Run in both environments
                     ivy_result = ivy_runner.run(scenario)
                     boa_result = boa_runner.run(scenario)
+
+                    self.stats.record_scenario()
+                    self.stats.record_item_stats(item_name, "scenario")
+                    self.stats.update_from_scenario_result(ivy_result)
+                    self.stats.update_from_scenario_result(boa_result)
 
                     # Compare results
                     divergence = detector.compare_results(
@@ -274,6 +288,8 @@ class DifferentialFuzzer:
                         continue
 
                     divergence_count += 1
+                    self.stats.record_divergence()
+                    self.stats.record_item_stats(item_name, "divergence")
                     logging.error(
                         f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
                     )
@@ -287,7 +303,8 @@ class DifferentialFuzzer:
                     # Save divergence
                     self.save_divergence(divergence, item_name, scenario_num)
 
-        logging.info(f"Fuzzing complete. Found {divergence_count} divergences.")
+        self.stats.stop_timer()
+        self.stats.print_summary()
 
 
 def main():
