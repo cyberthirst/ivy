@@ -12,6 +12,7 @@ from vyper.semantics.types import (
     SelfT,
     EventT,
     _BytestringT,
+    BytesT,
 )
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.function import (
@@ -236,6 +237,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         if typ is None:
             assert ret is None
             return None
+
+        if func_t.do_raw_return:
+            assert isinstance(typ, BytesT)
+            assert isinstance(ret, bytes)
+            self.current_context.execution_output.output = ret
+            return None
+
         typ = calculate_type_for_external_return(typ)
         # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
         output = (ret,) if (not isinstance(ret, tuple) or len(ret) <= 1) else ret
