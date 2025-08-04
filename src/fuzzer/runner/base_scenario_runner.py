@@ -316,38 +316,35 @@ class BaseScenarioRunner(ABC):
     ) -> CallResult:
         """Execute a call trace."""
         try:
-            # Get the contract from call_args (trace structure uses call_args.to for target)
+            # Get the target address from call_args
             to_address = trace.call_args.get("to")
 
             # Look up contract by address
             contract = self.deployed_contracts.get(to_address)
 
-            if not contract:
-                raise ValueError(
-                    f"Contract at {to_address} not found in deployed contracts. Available: {list(self.deployed_contracts.keys())}"
-                )
-
             method_name = trace.function_name
-
-            # Check if we need to use low-level message_call
             calldata = trace.call_args.get("calldata", "")
-            if not method_name and (calldata == "" or calldata == "0x"):
-                # Empty calldata - this is a call to __default__
-                # TODO default can't be called directly
-                method_name = "__default__"
 
-            # If we still don't have a method name but have calldata, use message_call
-            if not method_name and calldata:
+            # Determine if we should use low-level message call:
+            # 1. No deployed contract at address
+            # 2. No method name
+            if not contract or not method_name:
                 # Use low-level message call
-                calldata_bytes = bytes.fromhex(calldata.replace("0x", ""))
+                if calldata and calldata != "" and calldata != "0x":
+                    calldata_bytes = bytes.fromhex(calldata.replace("0x", ""))
+                else:
+                    calldata_bytes = b""
+
                 result = self._message_call(
                     to_address=to_address,
                     data=calldata_bytes,
                     value=trace.call_args.get("value", 0),
                     sender=trace.env.tx.origin if trace.env else None,
                 )
-            else:  # Use high-level method call
+            else:
+                # High-level method call to a contract with a specific method
                 assert method_name is not None
+                assert calldata != "" and calldata != "0x"
 
                 # Prepare call arguments
                 if use_python_args and trace.python_args:
