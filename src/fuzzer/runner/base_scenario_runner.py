@@ -282,9 +282,7 @@ class BaseScenarioRunner(ABC):
                 solc_json=trace.solc_json,
                 args=args,
                 kwargs=kwargs,
-                sender=getattr(
-                    trace, "deployer", None
-                ),  # deployment traces use 'deployer'
+                sender=trace.env.tx.origin if hasattr(trace, "env") else None,
             )
 
             # Store the deployed contract by its address
@@ -346,7 +344,7 @@ class BaseScenarioRunner(ABC):
                     to_address=to_address,
                     data=calldata_bytes,
                     value=trace.call_args.get("value", 0),
-                    sender=trace.call_args.get("sender"),
+                    sender=trace.env.tx.origin if trace.env else None,
                 )
             else:  # Use high-level method call
                 assert method_name is not None
@@ -368,7 +366,7 @@ class BaseScenarioRunner(ABC):
                     method_name=method_name,
                     args=args,
                     kwargs=kwargs,
-                    sender=trace.call_args.get("sender"),
+                    sender=trace.env.tx.origin if trace.env else None,
                 )
 
             output = result

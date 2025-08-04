@@ -7,7 +7,7 @@ This module provides functions to mutate:
 """
 
 import random
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any
 from copy import deepcopy
 
 from ..export_utils import (

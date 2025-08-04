@@ -13,10 +13,33 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class Tx:
+    origin: str
+    gas: int
+    gas_price: int
+    blob_hashes: List[str]
+
+
+@dataclass
+class Block:
+    number: int
+    timestamp: int
+    gas_limit: int
+    excess_blob_gas: Optional[int]
+
+
+@dataclass
+class Env:
+    """Represents environment data for a trace."""
+
+    tx: Tx
+    block: Block
+
+
+@dataclass
 class DeploymentTrace:
     """Represents a contract deployment trace."""
 
-    deployer: str
     deployment_type: str  # "source", "ir", "blueprint", "raw_bytecode"
     contract_abi: List[Dict[str, Any]]
     initcode: str
@@ -30,6 +53,7 @@ class DeploymentTrace:
     deployed_address: str
     runtime_bytecode: str
     deployment_succeeded: bool
+    env: Env
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
 
 
@@ -40,6 +64,7 @@ class CallTrace:
     output: Optional[str]
     call_args: Dict[str, Any]
     call_succeeded: Optional[bool] = None
+    env: Optional[Env] = None
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
     function_name: Optional[str] = None
 
@@ -264,6 +289,27 @@ class TestFilter:
         return False
 
 
+def _create_env_from_data(env_data: Dict[str, Any]) -> Env:
+    tx_data = env_data["tx"]
+    block_data = env_data["block"]
+
+    tx = Tx(
+        origin=tx_data["origin"],
+        gas=tx_data["gas"],
+        gas_price=tx_data["gas_price"],
+        blob_hashes=tx_data["blob_hashes"],
+    )
+
+    block = Block(
+        number=block_data["number"],
+        timestamp=block_data["timestamp"],
+        gas_limit=block_data["gas_limit"],
+        excess_blob_gas=block_data.get("excess_blob_gas"),
+    )
+
+    return Env(tx=tx, block=block)
+
+
 def load_export(export_path: Union[str, Path]) -> TestExport:
     """Load test export from JSON file."""
     path = Path(export_path)
@@ -276,8 +322,9 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
         traces = []
         for trace_data in item_data["traces"]:
             if trace_data["trace_type"] == "deployment":
+                env = _create_env_from_data(trace_data["env"])
+
                 trace = DeploymentTrace(
-                    deployer=trace_data["deployer"],
                     deployment_type=trace_data["deployment_type"],
                     contract_abi=trace_data["contract_abi"],
                     initcode=trace_data["initcode"],
@@ -293,13 +340,20 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     deployed_address=trace_data["deployed_address"],
                     runtime_bytecode=trace_data["runtime_bytecode"],
                     deployment_succeeded=trace_data["deployment_succeeded"],
+                    env=env,
                     python_args=trace_data.get("python_args"),
                 )
             elif trace_data["trace_type"] == "call":
+                # Create Env object from trace data if present
+                env = None
+                if "env" in trace_data:
+                    env = _create_env_from_data(trace_data["env"])
+
                 trace = CallTrace(
                     output=trace_data.get("output"),
                     call_args=trace_data["call_args"],
                     call_succeeded=trace_data.get("call_succeeded"),
+                    env=env,
                     python_args=trace_data.get("python_args"),
                     function_name=trace_data.get("function_name"),
                 )
