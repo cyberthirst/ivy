@@ -347,6 +347,11 @@ class AstMutator(VyperNodeTransformer):
         return super().generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
+        # Interface functions are just signatures so we skip them
+        parent = node.get_ancestor()
+        if parent and isinstance(parent, ast.InterfaceDef):
+            return node
+
         self.push_scope()
 
         # Get function arguments from the function type
