@@ -328,7 +328,14 @@ class BaseScenarioRunner(ABC):
             # Determine if we should use low-level message call:
             # 1. No deployed contract at address
             # 2. No method name
-            if not contract or not method_name:
+            # 3. Contract exists but doesn't have the method (e.g. proxy pattern)
+            use_message_call = (
+                not contract
+                or not method_name
+                or (contract and method_name and not hasattr(contract, method_name))
+            )
+
+            if use_message_call:
                 # Use low-level message call
                 if calldata and calldata != "" and calldata != "0x":
                     calldata_bytes = bytes.fromhex(calldata.replace("0x", ""))
@@ -344,7 +351,6 @@ class BaseScenarioRunner(ABC):
             else:
                 # High-level method call to a contract with a specific method
                 assert method_name is not None
-                assert calldata != "" and calldata != "0x"
 
                 # Prepare call arguments
                 if use_python_args and trace.python_args:
