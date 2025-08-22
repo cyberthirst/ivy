@@ -82,12 +82,12 @@ class StatementGenerator:
                 return var_info.typ
 
         typ, fragments = self.type_generator.generate_type(nesting=nesting, skip=skip)
-        
+
         if fragments:
             for fragment in fragments:
                 if fragment not in self.source_fragments:
                     self.source_fragments.append(fragment)
-        
+
         return typ
 
     def _generate_varinfo(self, context) -> tuple[str, VarInfo]:

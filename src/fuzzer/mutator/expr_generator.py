@@ -1,7 +1,7 @@
 import random
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT, BoolT, AddressT
+from vyper.semantics.types import VyperType, IntegerT, BoolT, AddressT, StructT
 
 from .value_mutator import ValueMutator
 from .context import Context
@@ -19,6 +19,11 @@ class ExprGenerator:
     def generate(
         self, target_type: VyperType, context: Context, depth: int = 3
     ) -> ast.VyperNode:
+
+        # TODO we probably need a special case also for tuples
+        if isinstance(target_type, StructT):
+            return self._generate_struct(target_type, context, depth)
+
         if depth == 0:
             return self._generate_terminal(target_type, context)
 
@@ -54,6 +59,9 @@ class ExprGenerator:
     def _generate_terminal(
         self, target_type: VyperType, context: Context
     ) -> ast.VyperNode:
+        if isinstance(target_type, StructT):
+            return self._generate_struct(target_type, context, depth=0)
+
         matching_vars = self._find_matching_variables(target_type, context)
 
         if matching_vars and self.rng.random() < 0.5:
@@ -137,3 +145,18 @@ class ExprGenerator:
         node = ast.UnaryOp(op=ast.USub(), operand=operand)
         node._metadata["type"] = target_type
         return node
+
+    def _generate_struct(self, target_type, context: Context, depth: int) -> ast.Call:
+        assert isinstance(target_type, StructT)
+
+        # Create the struct constructor call
+        call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
+
+        for field_name, field_type in target_type.members.items():
+            field_expr = self.generate(field_type, context, max(0, depth - 1))
+
+            keyword = ast.keyword(arg=field_name, value=field_expr)
+            call_node.keywords.append(keyword)
+
+        call_node._metadata["type"] = target_type
+        return call_node

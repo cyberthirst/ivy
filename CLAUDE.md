@@ -14,7 +14,7 @@
 
 # Coding Guidelines
 - Minimal changes, no unnecessary abstractions. Reuse existing code where possible.
-- Write concise, readable code. Comments only for non-obvious logic. Don't write docs.
+- Write concise, readable code. Comments only for non-obvious logic. Don't write docs for modules and functions.
 - Prioritize throughput but not at the expense of readability.
 - Focus strictly on compiler correctness bugs, not lexer/parser bugs.
 

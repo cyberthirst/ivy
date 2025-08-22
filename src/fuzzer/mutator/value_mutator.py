@@ -36,9 +36,10 @@ class ValueMutator:
             )
 
         if isinstance(vyper_type, StructT):
-            return tuple(
-                self.generate_value_for_type(t) for t in vyper_type.tuple_members()
-            )
+            struct_values = {}
+            for field_name, field_type in vyper_type.members.items():
+                struct_values[field_name] = self.generate_value_for_type(field_type)
+            return struct_values
 
         if isinstance(vyper_type, SArrayT):
             return [

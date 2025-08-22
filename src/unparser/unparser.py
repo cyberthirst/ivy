@@ -2,6 +2,7 @@ import contextlib
 
 from vyper.exceptions import SyntaxException
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
+from vyper.semantics.types import AddressT, StringT, BytesT, BytesM_T, StructT
 
 import vyper.ast as ast
 
@@ -326,8 +327,14 @@ class Unparser(VyperNodeVisitorBase):
         value = node.value
         typ = node.typ
 
-        # Import types we need
-        from vyper.semantics.types import AddressT, StringT, BytesT, BytesM_T
+        if isinstance(typ, StructT):
+            assert isinstance(value, dict)
+            kwargs = []
+            for field_name, field_value in value.items():
+                field_str = self.visit_LiteralValue(field_value)
+                kwargs.append(f"{field_name}={field_str}")
+
+            return f"{typ._id}({', '.join(kwargs)})"
 
         # Special cases only
         if (

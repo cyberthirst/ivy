@@ -132,6 +132,7 @@ class AstMutator(VyperNodeTransformer):
         self.context.scope_stack.append(
             self.context.current_scope
         )  # Module scope stays on stack
+        self.stmt_generator.source_fragments = []
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
@@ -206,7 +207,6 @@ class AstMutator(VyperNodeTransformer):
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(target_type, self.context, depth=4)
-
 
     def visit_Module(self, node: ast.Module):
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
@@ -583,12 +583,22 @@ class AstMutator(VyperNodeTransformer):
 
             pragma_lines = self.generate_pragma_lines(compiler_data.settings)
 
+            # Build final source with pragmas, type declarations, and code
+            parts = []
             if pragma_lines:
-                result = "\n".join(pragma_lines) + "\n\n" + result
+                parts.append("\n".join(pragma_lines))
 
-            print(result)
+            # Add all source fragments (struct declarations, etc.)
+            if self.stmt_generator.source_fragments:
+                parts.append("\n\n".join(self.stmt_generator.source_fragments))
+
+            parts.append(result)
+
+            final_result = "\n\n".join(parts)
+
+            print(final_result)
             print("===============")
-            return result
+            return final_result
         except Exception as e:
             import logging
             import traceback
