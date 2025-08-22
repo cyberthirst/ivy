@@ -38,9 +38,10 @@ class ExprGenerator:
             strategies.append(
                 lambda: self._generate_arithmetic(target_type, context, depth - 1)
             )
-            strategies.append(
-                lambda: self._generate_unary_minus(target_type, context, depth - 1)
-            )
+            if target_type.is_signed:
+                strategies.append(
+                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
+                )
 
         if isinstance(target_type, BoolT):
             strategies.append(lambda: self._generate_comparison(context, depth - 1))
