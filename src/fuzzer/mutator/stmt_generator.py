@@ -22,6 +22,8 @@ class StatementGenerator:
         self.type_generator = type_generator
         self.rng = rng
         self.name_generator = FreshNameGenerator()
+        # Collect source fragments from type generation
+        self.source_fragments = []
 
         self.max_depth = 5
         self.nest_decay = 0.7
@@ -61,6 +63,32 @@ class StatementGenerator:
     def add_local(self, context, name: str, typ: VyperType):
         """Convenience method to add a local variable."""
         context.add_local(name, typ)
+
+    def generate_type(
+        self, context, nesting: int = 3, skip: Optional[set] = None
+    ) -> VyperType:
+        """Generate a type, biasing towards existing types in context."""
+        skip = skip or set()
+
+        # Bias towards existing variable types to enable compatible expressions
+        if self.rng.random() < 0.4 and context.all_vars:
+            valid_vars = []
+            for var_info in context.all_vars.values():
+                if type(var_info.typ) not in skip:
+                    valid_vars.append(var_info)
+
+            if valid_vars:
+                var_info = self.rng.choice(valid_vars)
+                return var_info.typ
+
+        typ, fragments = self.type_generator.generate_type(nesting=nesting, skip=skip)
+        
+        if fragments:
+            for fragment in fragments:
+                if fragment not in self.source_fragments:
+                    self.source_fragments.append(fragment)
+        
+        return typ
 
     def _generate_varinfo(self, context) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.
@@ -111,7 +139,7 @@ class StatementGenerator:
             # HashMapT can't be in memory
             skip_types = {HashMapT}
 
-        var_type, _ = self.type_generator.generate_type(nesting=2, skip=skip_types)
+        var_type = self.generate_type(context, nesting=2, skip=skip_types)
 
         # Create VarInfo
         var_info = self._create_var_info(

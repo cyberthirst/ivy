@@ -207,24 +207,6 @@ class AstMutator(VyperNodeTransformer):
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(target_type, self.context, depth=4)
 
-    def generate_type(
-        self, nesting: int = 3, skip: Optional[set] = None
-    ) -> tuple[VyperType, list[str]]:
-        skip = skip or set()
-
-        # Try to use existing variable type with
-        if self.rng.random() < 0.4:
-            valid_vars = []
-            for var_info in self.context.all_vars.values():
-                if type(var_info.typ) not in skip:
-                    valid_vars.append(var_info)
-
-            if valid_vars:
-                var_info = self.rng.choice(valid_vars)
-                return var_info.typ, []
-
-        # Completely random type
-        return self.type_generator.generate_type(nesting=nesting, skip=skip)
 
     def visit_Module(self, node: ast.Module):
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
