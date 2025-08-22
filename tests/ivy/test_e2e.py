@@ -2931,3 +2931,36 @@ flag Action:
     input_bundle = make_input_bundle({"lib1.vy": lib1})
     c = get_contract(code, input_bundle=input_bundle)
     assert c.foo() == 1  # BUY
+
+
+def test_struct_storage_dump(get_contract):
+    src = """
+struct MyStruct:
+    member1: uint256
+    member2: DynArray[String[10], 5]
+
+my_struct: MyStruct
+
+@external
+def setup():
+    self.my_struct.member1 = 42
+    self.my_struct.member2 = ["hello", "world", "test"]
+
+@external
+def get_struct() -> MyStruct:
+    return self.my_struct
+    """
+
+    c = get_contract(src)
+    c.setup()
+
+    # Test that struct is returned correctly
+    result = c.get_struct()
+    assert result == (42, ["hello", "world", "test"])
+
+    # Test storage dump returns struct as dict
+    dump = c.storage_dump()
+    assert "my_struct" in dump
+    assert isinstance(dump["my_struct"], dict)
+    assert dump["my_struct"]["member1"] == 42
+    assert dump["my_struct"]["member2"] == ["hello", "world", "test"]
