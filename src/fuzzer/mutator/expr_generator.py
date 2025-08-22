@@ -97,7 +97,7 @@ class ExprGenerator:
     def _generate_arithmetic(
         self, target_type: IntegerT, context: Context, depth: int
     ) -> ast.BinOp:
-        op_classes = [ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod]
+        op_classes = [ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod]
         op_class = self.rng.choice(op_classes)
 
         left = self.generate(target_type, context, depth)
