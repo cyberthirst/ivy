@@ -3,13 +3,14 @@ import random
 from typing import Optional, Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT, HashMapT
-from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
+from vyper.semantics.types import VyperType, IntegerT
+from vyper.semantics.analysis.base import VarInfo, DataLocation
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
 from .context import Context
 from .expr_generator import ExprGenerator
+from .stmt_generator import StatementGenerator
 from src.unparser.unparser import unparse
 from src.fuzzer.type_generator import TypeGenerator
 
@@ -115,6 +116,13 @@ class AstMutator(VyperNodeTransformer):
         self.inject_vars_prob = 0.5
         # Expression generator
         self.expr_generator = ExprGenerator(self.value_mutator, self.rng)
+        # Statement generator
+        self.stmt_generator = StatementGenerator(
+            self.expr_generator, self.type_generator, self.rng
+        )
+        # Control statement injection
+        self.inject_statements_prob = 0.3
+        self.max_injection_depth = 4
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.mutations_done = 0
@@ -218,131 +226,8 @@ class AstMutator(VyperNodeTransformer):
         # Completely random type
         return self.type_generator.generate_type(nesting=nesting, skip=skip)
 
-    def _generate_varinfo(self) -> tuple[str, VarInfo]:
-        """Generate a random variable with VarInfo.
-
-        Returns:
-            Tuple of (variable_name, VarInfo)
-        """
-        # Generate a unique name
-        var_name = self.name_generator.generate()
-
-        # Determine location and modifiability based on scope
-        if self.is_module_scope:
-            # Module-level variables can be storage, transient, immutable, or constant
-            location_choices = [
-                (DataLocation.STORAGE, Modifiability.MODIFIABLE, 0.4),
-                (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, 0.2),
-                (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, 0.2),  # immutable
-                (DataLocation.CODE, Modifiability.CONSTANT, 0.2),  # constant
-            ]
-
-            # Choose location based on weights
-            rand = self.rng.random()
-            cumulative = 0
-            for location, modifiability, weight in location_choices:
-                cumulative += weight
-                if rand < cumulative:
-                    selected_location = location
-                    selected_modifiability = modifiability
-                    break
-
-            # Module-level variables can be public
-            is_public = self.rng.choice([True, False])
-
-            # Skip HashMapT for constant and immutable variables
-            skip_types = set()
-            if selected_modifiability in (
-                Modifiability.CONSTANT,
-                Modifiability.RUNTIME_CONSTANT,
-            ):
-                skip_types = {HashMapT}
-
-        else:
-            # Function and block level variables are always in memory and modifiable
-            selected_location = DataLocation.MEMORY
-            selected_modifiability = Modifiability.MODIFIABLE
-            is_public = False
-
-            # HashMapT can't be in memory
-            skip_types = {HashMapT}
-
-        var_type, _ = self.generate_type(nesting=2, skip=skip_types)
-
-        # Create VarInfo
-        var_info = self._create_var_info(
-            typ=var_type,
-            location=selected_location,
-            modifiability=selected_modifiability,
-            is_public=is_public,
-            decl_node=None,  # We won't assign a declaration node as requested
-        )
-
-        return var_name, var_info
-
-    def generate_vardecl(
-        self,
-        parent: ast.VyperNode,
-    ) -> tuple[ast.VariableDecl, str, VarInfo]:
-        """
-        Build a random VariableDecl that is *valid* for the Vyper AST.
-
-        Returns
-        -------
-        (var_decl, var_name, var_info)
-        """
-        var_name, var_info = self._generate_varinfo()
-
-        anno: ast.VyperNode = ast.Name(id=str(var_info.typ))
-
-        if var_info.modifiability == Modifiability.CONSTANT:
-            anno = ast.Call(func=ast.Name(id="constant"), args=[anno])
-        if var_info.modifiability == Modifiability.RUNTIME_CONSTANT:
-            anno = ast.Call(func=ast.Name(id="immutable"), args=[anno])
-
-        if var_info.location == DataLocation.TRANSIENT:
-            anno = ast.Call(func=ast.Name(id="transient"), args=[anno])
-
-        if var_info.is_public:
-            anno = ast.Call(func=ast.Name(id="public"), args=[anno])
-
-        needs_init = (
-            var_info.modifiability == Modifiability.CONSTANT
-            or not self.is_module_scope  # inside a function / block
-        )
-        init_val = self.generate_random_expr(var_info.typ) if needs_init else None
-
-        var_decl = ast.VariableDecl(
-            parent=parent,
-            target=ast.Name(id=var_name),
-            annotation=anno,
-            value=init_val,  # may be None
-        )
-
-        return var_decl, var_name, var_info
-
-    def inject_variables(self, body: list, parent: ast.VyperNode) -> None:
-        """Inject random variable declarations at the beginning of a body list.
-
-        Args:
-            body: The body list to inject variables into
-            parent: The parent node that contains this body
-        """
-        if self.rng.random() > self.inject_vars_prob:
-            return
-
-        if self.max_vars_per_scope == 0:
-            return
-
-        num_vars = self.rng.randint(self.min_vars_per_scope, self.max_vars_per_scope)
-
-        for i in range(num_vars):
-            var_decl, var_name, var_info = self.generate_vardecl(parent)
-            body.insert(i, var_decl)
-            self.add_variable(var_name, var_info)
-
     def visit_Module(self, node: ast.Module):
-        self.inject_variables(node.body, node)
+        self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
 
         return super().generic_visit(node)
 
@@ -363,7 +248,8 @@ class AstMutator(VyperNodeTransformer):
             )
             self.add_variable(arg.name, param_info)
 
-        self.inject_variables(node.body, node)
+        # Use statement generator to inject statements
+        self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
 
         # Let the base class handle visiting children
         node = super().generic_visit(node)
@@ -434,9 +320,18 @@ class AstMutator(VyperNodeTransformer):
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
 
-        self.inject_variables(node.body, node)
+        # Push scope for if body
+        self.push_scope()
+        self.stmt_generator.inject_statements(node.body, self.context, node, depth=1)
+        self.pop_scope()
+
         if node.orelse:
-            self.inject_variables(node.orelse, node)
+            # Push scope for else body
+            self.push_scope()
+            self.stmt_generator.inject_statements(
+                node.orelse, self.context, node, depth=1
+            )
+            self.pop_scope()
 
         node = super().generic_visit(node)
 
@@ -634,10 +529,13 @@ class AstMutator(VyperNodeTransformer):
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
-        self.inject_variables(node.body, node)
+        self.push_scope()
+        self.stmt_generator.inject_statements(node.body, self.context, node, depth=1)
 
         # Use generic_visit to handle body list
         node = super().generic_visit(node)
+
+        self.pop_scope()
 
         if not self.should_mutate(ast.For):
             return node
@@ -706,10 +604,14 @@ class AstMutator(VyperNodeTransformer):
             if pragma_lines:
                 result = "\n".join(pragma_lines) + "\n\n" + result
 
+            print(result)
+            print("===============")
             return result
         except Exception as e:
             import logging
+            import traceback
 
             logging.info(f"Failed to mutate source: {e}")
             logging.debug("Traceback:", exc_info=True)
+            traceback.print_exc()
             return None
