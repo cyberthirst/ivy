@@ -2904,3 +2904,30 @@ def foo() -> {typ}:
     c = get_contract(code)
 
     assert c.foo() == val
+
+
+@pytest.mark.xfail(reason="Compilation failure when accessing flag in pure")
+def test_internal_pure_accessing_flag(get_contract, make_input_bundle):
+    """Test flag accesses in internal pure functions"""
+    code = """
+import lib1
+
+@pure
+def bar() -> lib1.Action:
+    return lib1.Action.BUY
+
+@pure
+@external
+def foo() -> lib1.Action:
+    return self.bar()
+
+    """
+    lib1 = """
+flag Action:
+    BUY
+    SELL
+    """
+
+    input_bundle = make_input_bundle({"lib1.vy": lib1})
+    c = get_contract(code, input_bundle=input_bundle)
+    assert c.foo() == 1  # BUY
