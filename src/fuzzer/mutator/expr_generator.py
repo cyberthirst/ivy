@@ -19,7 +19,6 @@ class ExprGenerator:
     def generate(
         self, target_type: VyperType, context: Context, depth: int = 3
     ) -> ast.VyperNode:
-
         # TODO we probably need a special case also for tuples
         if isinstance(target_type, StructT):
             return self._generate_struct(target_type, context, depth)

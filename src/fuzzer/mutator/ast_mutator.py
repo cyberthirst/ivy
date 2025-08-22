@@ -4,8 +4,9 @@ from typing import Optional, Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, IntegerT
-from vyper.semantics.analysis.base import VarInfo, DataLocation
+from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
+from vyper.semantics.namespace import get_namespace
 
 from .value_mutator import ValueMutator
 from .context import Context
@@ -148,25 +149,6 @@ class AstMutator(VyperNodeTransformer):
     def pop_scope(self):
         self.context.pop_scope()
 
-    def _create_var_info(
-        self,
-        typ: VyperType,
-        location: DataLocation = DataLocation.MEMORY,
-        modifiability=None,  # Will use VarInfo's default
-        is_public: bool = False,
-        decl_node: Optional[ast.VyperNode] = None,
-    ) -> VarInfo:
-        kwargs = {
-            "typ": typ,
-            "location": location,
-            "is_public": is_public,
-            "decl_node": decl_node,
-        }
-        if modifiability is not None:
-            kwargs["modifiability"] = modifiability
-
-        return VarInfo(**kwargs)
-
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
 
@@ -223,12 +205,9 @@ class AstMutator(VyperNodeTransformer):
 
         # Get function arguments from the function type
         func_type = node._metadata["func_type"]
+        ns = get_namespace()
         for arg in func_type.arguments:
-            # Function parameters are in memory
-            param_info = self._create_var_info(
-                typ=arg.typ, location=DataLocation.MEMORY, decl_node=arg.ast_source
-            )
-            self.add_variable(arg.name, param_info)
+            self.add_variable(arg.name, ns[arg.name])
 
         # Use statement generator to inject statements
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)

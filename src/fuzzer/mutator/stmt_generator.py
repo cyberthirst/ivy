@@ -267,17 +267,20 @@ class StatementGenerator:
 
         return if_node
 
+    def get_modifiable_variables(self, context) -> list[tuple[str, VarInfo]]:
+        modifiable_vars = []
+        for name, var_info in context.all_vars.items():
+            if var_info.modifiability == Modifiability.MODIFIABLE:
+                modifiable_vars.append((name, var_info))
+        return modifiable_vars
+
     def generate_assign(
         self, context, parent: Optional[ast.VyperNode]
     ) -> Optional[ast.Assign]:
         if not context.all_vars:
             return None
 
-        modifiable_vars = []
-        for name, var_info in context.all_vars.items():
-            if var_info.modifiability == Modifiability.MODIFIABLE:
-                modifiable_vars.append((name, var_info))
-
+        modifiable_vars = self.get_modifiable_variables(context)
         if not modifiable_vars:
             return None
 
