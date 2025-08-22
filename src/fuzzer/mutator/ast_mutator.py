@@ -4,7 +4,7 @@ from typing import Optional, Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, IntegerT
-from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
+from vyper.semantics.analysis.base import VarInfo
 from vyper.compiler.phases import CompilerData
 from vyper.semantics.namespace import get_namespace
 
