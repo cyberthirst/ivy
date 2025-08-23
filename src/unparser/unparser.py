@@ -286,6 +286,13 @@ class Unparser(VyperNodeVisitorBase):
         if hasattr(node, "_metadata") and "varinfo" in node._metadata:
             var_info = node._metadata["varinfo"]
             if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
+                parent = node.get_ancestor()
+                if (
+                    parent
+                    and isinstance(parent, ast.VariableDecl)
+                    and parent.target == node
+                ):
+                    return node.id
                 return f"self.{node.id}"
         return node.id
 
