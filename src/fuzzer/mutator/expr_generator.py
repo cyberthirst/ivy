@@ -91,7 +91,9 @@ class ExprGenerator:
 
     def _generate_variable_ref(self, name: str, context: Context) -> ast.Name:
         node = ast.Name(id=name)
-        node._metadata["type"] = context.all_vars[name].typ
+        var_info = context.all_vars[name]
+        node._metadata["type"] = var_info.typ
+        node._metadata["varinfo"] = var_info
         return node
 
     def _generate_arithmetic(

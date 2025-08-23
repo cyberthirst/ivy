@@ -171,14 +171,16 @@ class AstMutator(VyperNodeTransformer):
         # Check all variables in the global pool
         for name, var_info in self.context.all_vars.items():
             if want_type is None or var_info.typ == want_type:
-                vars_pool.append(name)
+                vars_pool.append((name, var_info))
 
         if not vars_pool:
             return None
 
-        selected_name = self.rng.choice(vars_pool)
+        selected_name, selected_var_info = self.rng.choice(vars_pool)
 
-        return ast.Name(id=selected_name)
+        node = ast.Name(id=selected_name)
+        node._metadata = {"type": selected_var_info.typ, "varinfo": selected_var_info}
+        return node
 
     @property
     def is_module_scope(self) -> bool:

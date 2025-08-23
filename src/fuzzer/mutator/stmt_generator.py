@@ -287,6 +287,7 @@ class StatementGenerator:
         var_name, var_info = self.rng.choice(modifiable_vars)
 
         target = ast.Name(id=var_name)
+        target._metadata = {"type": var_info.typ, "varinfo": var_info}
         value = self.expr_generator.generate(var_info.typ, context, depth=3)
 
         return ast.Assign(targets=[target], value=value)
