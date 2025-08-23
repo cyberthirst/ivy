@@ -1,20 +1,42 @@
 import random
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT, BoolT, AddressT, StructT
+from vyper.semantics.types import (
+    VyperType,
+    IntegerT,
+    BoolT,
+    AddressT,
+    StructT,
+    BytesM_T,
+    BytesT,
+    StringT,
+    SArrayT,
+    DArrayT,
+    TupleT,
+)
 
 from .value_mutator import ValueMutator
 from .context import Context
-
-
-class LiteralValue(ast.VyperNode):
-    __slots__ = ("value", "typ")
 
 
 class ExprGenerator:
     def __init__(self, value_mutator: ValueMutator, rng: random.Random):
         self.value_mutator = value_mutator
         self.rng = rng
+
+        # Build dispatch table for efficient type-to-AST conversion
+        self._ast_builders = {
+            IntegerT: self._int_to_ast,
+            BoolT: self._bool_to_ast,
+            AddressT: self._address_to_ast,
+            BytesM_T: self._bytesm_to_ast,
+            BytesT: self._bytes_to_ast,
+            StringT: self._string_to_ast,
+            SArrayT: self._array_to_ast,
+            DArrayT: self._array_to_ast,
+            TupleT: self._tuple_to_ast,
+            StructT: self._struct_to_ast,
+        }
 
     def generate(
         self, target_type: VyperType, context: Context, depth: int = 3
@@ -70,13 +92,81 @@ class ExprGenerator:
 
     def _generate_literal(
         self, target_type: VyperType, context: Context
-    ) -> LiteralValue:
+    ) -> ast.VyperNode:
+        """Generate AST node for a literal value of the given type."""
         value = self.value_mutator.generate_value_for_type(target_type)
-        node = LiteralValue()
-        node.value = value
-        node.typ = target_type
-        node._metadata["type"] = target_type
+        return self._value_to_ast(value, target_type)
+
+    def _value_to_ast(self, value, typ: VyperType) -> ast.VyperNode:
+        """Convert a Python value to an AST node"""
+        builder = self._ast_builders.get(type(typ))
+        if builder:
+            return builder(value, typ)
+        raise NotImplementedError(
+            f"Value to AST conversion not implemented for {type(typ).__name__}"
+        )
+
+    def _int_to_ast(self, value: int, typ: IntegerT) -> ast.Int:
+        node = ast.Int(value=value)
+        node._metadata["type"] = typ
         return node
+
+    def _bool_to_ast(self, value: bool, typ: BoolT) -> ast.NameConstant:
+        node = ast.NameConstant(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _address_to_ast(self, value: str, typ: AddressT) -> ast.Hex:
+        # Hex node expects string value
+        if not value.startswith("0x"):
+            value = f"0x{value}"
+        node = ast.Hex(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.HexBytes:
+        # HexBytes expects bytes value
+        node = ast.HexBytes(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _bytes_to_ast(self, value: bytes, typ: BytesT) -> ast.Bytes:
+        # Bytes expects bytes value
+        node = ast.Bytes(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _string_to_ast(self, value: str, typ: StringT) -> ast.Str:
+        node = ast.Str(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _array_to_ast(self, value: list, typ) -> ast.List:
+        """Handle both SArrayT and DArrayT - elements must be AST nodes."""
+        elements = [self._value_to_ast(v, typ.value_type) for v in value]
+        node = ast.List(elements=elements)
+        node._metadata["type"] = typ
+        return node
+
+    def _tuple_to_ast(self, value: tuple, typ: TupleT) -> ast.Tuple:
+        """Handle TupleT - elements must be AST nodes."""
+        elements = [self._value_to_ast(v, t) for v, t in zip(value, typ.member_types)]
+        node = ast.Tuple(elements=elements)
+        node._metadata["type"] = typ
+        return node
+
+    def _struct_to_ast(self, value: dict, typ: StructT) -> ast.Call:
+        """Generate struct constructor call from dict value."""
+        call_node = ast.Call(func=ast.Name(id=typ._id), args=[], keywords=[])
+
+        for field_name, field_value in value.items():
+            field_type = typ.members[field_name]
+            field_expr = self._value_to_ast(field_value, field_type)
+            keyword = ast.keyword(arg=field_name, value=field_expr)
+            call_node.keywords.append(keyword)
+
+        call_node._metadata["type"] = typ
+        return call_node
 
     def _find_matching_variables(
         self, target_type: VyperType, context: Context
