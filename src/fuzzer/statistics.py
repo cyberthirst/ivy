@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
 import time
 
+from vyper.exceptions import VyperException, VyperInternalException
+
 
 @dataclass
 class FuzzerStatistics:
@@ -52,7 +54,18 @@ class FuzzerStatistics:
 
     def update_from_scenario_result(self, result: Any):
         for trace_idx, deployment_result in result.get_deployment_results():
-            self.record_deployment(deployment_result.success)
+            # Check if this is a compilation failure vs runtime deployment failure
+            if not deployment_result.success and deployment_result.error:
+                if isinstance(deployment_result.error, VyperInternalException):
+                    # Compiler crash (CompilerPanic, CodegenPanic, etc.)
+                    self.record_compiler_crash()
+                elif isinstance(deployment_result.error, VyperException):
+                    # Normal compilation failure (syntax, type errors, etc.)
+                    self.record_compilation_failure()
+                else:
+                    self.record_deployment(False)
+            else:
+                self.record_deployment(deployment_result.success)
 
         for trace_idx, call_result in result.get_call_results():
             self.record_call(call_result.success)
