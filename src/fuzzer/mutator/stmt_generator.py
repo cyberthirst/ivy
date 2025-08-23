@@ -106,7 +106,7 @@ class StatementGenerator:
                 (DataLocation.STORAGE, Modifiability.MODIFIABLE, 0.4),
                 (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, 0.2),
                 (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, 0.2),  # immutable
-                (DataLocation.CODE, Modifiability.CONSTANT, 0.2),  # constant
+                (DataLocation.UNSET, Modifiability.CONSTANT, 0.2),  # constant
             ]
 
             # Choose location based on weights

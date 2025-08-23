@@ -140,6 +140,9 @@ class AstMutator(VyperNodeTransformer):
         # Visit and get the potentially transformed root
         new_root = self.visit(new_root)
 
+        # Handle immutables initialization after mutation
+        self._ensure_init_with_immutables(new_root)
+
         return new_root
 
     def push_scope(self):
@@ -543,6 +546,42 @@ class AstMutator(VyperNodeTransformer):
 
         self.mutations_done += 1
         return node
+
+    def _ensure_init_with_immutables(self, module: ast.Module):
+        if not self.context.immutables_to_init:
+            return
+
+        # Find existing __init__ function
+        init_func = None
+        for node in module.body:
+            if isinstance(node, ast.FunctionDef) and node.name == "__init__":
+                init_func = node
+                break
+
+        # Create __init__ if it doesn't exist
+        if init_func is None:
+            deploy_decorator = ast.Name(id="deploy")
+
+            init_func = ast.FunctionDef(
+                name="__init__",
+                args=ast.arguments(args=[], defaults=[]),
+                body=[],
+                decorator_list=[deploy_decorator],
+                returns=None,
+            )
+            module.body.append(init_func)
+
+        # Generate assignment statements for each immutable
+        for name, var_info in self.context.immutables_to_init:
+            value_expr = self.expr_generator.generate(
+                var_info.typ, self.context, depth=3
+            )
+
+            assign = ast.Assign(targets=[ast.Name(id=name)], value=value_expr)
+
+            init_func.body.append(assign)
+
+        assert init_func.body
 
     def generate_pragma_lines(self, settings) -> list[str]:
         pragma_lines = []

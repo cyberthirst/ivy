@@ -15,6 +15,7 @@ class Context:
     current_scope: Scope = field(default_factory=Scope)
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
+    immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
 
     def push_scope(self) -> None:
         self.scope_stack.append(self.current_scope)
@@ -29,6 +30,13 @@ class Context:
     def add_variable(self, name: str, var_info: VarInfo) -> None:
         self.current_scope.vars[name] = var_info
         self.all_vars[name] = var_info
+
+        # Track immutables that need initialization in __init__
+        if (
+            var_info.location == DataLocation.CODE
+            and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
+        ):
+            self.immutables_to_init.append((name, var_info))
 
     # TODO probably remove this
     def add_local(self, name: str, typ: VyperType) -> None:
