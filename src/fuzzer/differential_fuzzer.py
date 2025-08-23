@@ -9,8 +9,6 @@ import logging
 import random
 from pathlib import Path
 from typing import Dict, Optional
-import json
-from datetime import datetime
 from copy import deepcopy
 
 from .mutator.ast_mutator import AstMutator
@@ -32,8 +30,8 @@ from src.ivy.frontend.loader import loads_from_solc_json
 from .runner.scenario import Scenario, create_scenario_from_item
 from .runner.ivy_scenario_runner import IvyScenarioRunner
 from .runner.boa_scenario_runner import BoaScenarioRunner
-from .divergence_detector import Divergence, DivergenceDetector
-from .statistics import FuzzerStatistics
+from .divergence_detector import DivergenceDetector
+from .reporter import FuzzerReporter
 
 from vyper.compiler.phases import CompilerData
 from vyper.exceptions import CompilerPanic, VyperException
@@ -74,7 +72,7 @@ class DifferentialFuzzer:
         self.call_drop_prob = 0.1
         self.call_mutate_args_prob = 0.3
         self.call_duplicate_prob = 0.1
-        self.stats = FuzzerStatistics()
+        self.reporter = FuzzerReporter(seed=seed)
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -105,17 +103,15 @@ class DifferentialFuzzer:
             return compiler_data
         except CompilerPanic as e:
             logging.error(f"Compiler panic: {e}")
-            self.stats.record_compiler_crash()
-            self.save_compiler_crash(trace, e, "CompilerPanic")
+            self.reporter.record_compiler_crash()
             return None
         except VyperException as e:
             logging.debug(f"Compilation failure (VyperException): {e}")
-            self.stats.record_compilation_failure()
+            self.reporter.record_compilation_failure()
             return None
         except Exception as e:
             logging.error(f"Compiler crash ({type(e).__name__}): {e}")
-            self.stats.record_compiler_crash()
-            self.save_compiler_crash(trace, e, type(e).__name__)
+            self.reporter.record_compiler_crash()
             return None
 
     def create_mutated_scenario(
@@ -174,59 +170,6 @@ class DifferentialFuzzer:
 
         return scenario
 
-    def save_divergence(
-        self, divergence: Divergence, item_name: str, scenario_num: int
-    ):
-        """Save divergence to file."""
-        # Create reports directory with date
-        reports_dir = Path("reports") / datetime.now().strftime("%Y-%m-%d")
-        reports_dir.mkdir(parents=True, exist_ok=True)
-
-        # Create filename
-        filename = f"{item_name.replace('::', '_')}_{scenario_num}.divergence"
-        filepath = reports_dir / filename
-
-        # Convert to dict and add metadata
-        divergence_data = divergence.to_dict()
-        divergence_data["timestamp"] = datetime.now().isoformat()
-        divergence_data["item_name"] = item_name
-        divergence_data["scenario_num"] = scenario_num
-
-        # Write to file
-        with open(filepath, "w") as f:
-            json.dump(divergence_data, f, indent=2, default=str)
-
-        logging.error(f"Divergence saved to {filepath}")
-
-    def save_compiler_crash(
-        self, trace: DeploymentTrace, error: Exception, error_type: str
-    ):
-        reports_dir = (
-            Path("reports") / datetime.now().strftime("%Y-%m-%d") / "compiler_crashes"
-        )
-        reports_dir.mkdir(parents=True, exist_ok=True)
-
-        timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
-        filename = f"crash_{error_type}_{timestamp}.json"
-        filepath = reports_dir / filename
-
-        crash_data = {
-            "timestamp": datetime.now().isoformat(),
-            "error_type": error_type,
-            "error_message": str(error),
-            "solc_json": trace.solc_json,
-            "reproduction_info": {
-                "seed": self.seed,
-                "item_name": getattr(self, "_current_item_name", "unknown"),
-                "scenario_num": getattr(self, "_current_scenario_num", -1),
-            },
-        }
-
-        with open(filepath, "w") as f:
-            json.dump(crash_data, f, indent=2, default=str)
-
-        logging.error(f"Compiler crash saved to {filepath}")
-
     def fuzz_exports(
         self,
         test_filter: Optional[TestFilter] = None,
@@ -239,7 +182,7 @@ class DifferentialFuzzer:
             f"Loaded {sum(len(e.items) for e in exports.values())} test items from {len(exports)} files"
         )
 
-        self.stats.start_timer()
+        self.reporter.start_timer()
 
         divergence_count = 0
         items_processed = 0
@@ -260,12 +203,13 @@ class DifferentialFuzzer:
                 items_processed += 1
                 logging.info(f"Testing {item_name} ({items_processed})")
 
-                # Store current item info for crash reporting
-                self._current_item_name = item_name
+                # Set context for reporting
+                self.reporter.set_context(item_name, 0, self.seed)
 
                 # Run mutation scenarios
                 for scenario_num in range(max_scenarios):
-                    self._current_scenario_num = scenario_num
+                    # Update context for this scenario
+                    self.reporter.set_context(item_name, scenario_num, self.seed)
                     # Create scenario with mutations
                     scenario = self.create_mutated_scenario(item)
 
@@ -273,10 +217,10 @@ class DifferentialFuzzer:
                     ivy_result = ivy_runner.run(scenario)
                     boa_result = boa_runner.run(scenario)
 
-                    self.stats.record_scenario()
-                    self.stats.record_item_stats(item_name, "scenario")
-                    self.stats.update_from_scenario_result(ivy_result)
-                    self.stats.update_from_scenario_result(boa_result)
+                    self.reporter.record_scenario()
+                    self.reporter.record_item_stats(item_name, "scenario")
+                    self.reporter.update_from_scenario_result(ivy_result)
+                    self.reporter.update_from_scenario_result(boa_result)
 
                     # Compare results
                     divergence = detector.compare_results(
@@ -288,8 +232,8 @@ class DifferentialFuzzer:
                         continue
 
                     divergence_count += 1
-                    self.stats.record_divergence()
-                    self.stats.record_item_stats(item_name, "divergence")
+                    self.reporter.record_divergence()
+                    self.reporter.record_item_stats(item_name, "divergence")
                     logging.error(
                         f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
                     )
@@ -300,11 +244,12 @@ class DifferentialFuzzer:
                             f"  Execution divergence at function {divergence.function}"
                         )
 
-                    # Save divergence
-                    self.save_divergence(divergence, item_name, scenario_num)
+                    # Save divergence using reporter
+                    self.reporter.save_divergence(divergence)
 
-        self.stats.stop_timer()
-        self.stats.print_summary()
+        self.reporter.stop_timer()
+        self.reporter.print_summary()
+        self.reporter.save_statistics()
 
 
 def main():
@@ -312,14 +257,13 @@ def main():
     # Create test filter - exclude multi-module contracts for now
     test_filter = TestFilter(exclude_multi_module=True)
     # Include tests with certain patterns
-    test_filter.include_path("functional/builtins/codegen/test_concat")
+    test_filter.include_path("functional/builtins/codegen/test_slice")
     test_filter.exclude_source(r"\.code")
-    test_filter.exclude_name("test_concat_zero_length_side_effects")
-    test_filter.include_name("test_concat_buffer2")
+    test_filter.exclude_name("zero_length_side_effects")
 
     # Create and run fuzzer
     fuzzer = DifferentialFuzzer()
-    fuzzer.fuzz_exports(test_filter=test_filter)
+    fuzzer.fuzz_exports(test_filter=test_filter, max_scenarios=20)
 
 
 if __name__ == "__main__":

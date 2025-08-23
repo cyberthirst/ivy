@@ -31,6 +31,7 @@ class DeploymentResult:
     deployed_address: Optional[str] = (
         None  # Expected address where contract was deployed
     )
+    source_code: Optional[str] = None  # Source code that was attempted to deploy
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -307,7 +308,9 @@ class BaseScenarioRunner(ABC):
             )
 
         except Exception as e:
-            return DeploymentResult(success=False, error=e)
+            return DeploymentResult(
+                success=False, error=e, source_code=source_to_deploy
+            )
 
     def _execute_call(
         self,
