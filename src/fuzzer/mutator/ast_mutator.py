@@ -4,9 +4,8 @@ from typing import Optional, Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, IntegerT
-from vyper.semantics.analysis.base import VarInfo
+from vyper.semantics.analysis.base import VarInfo, DataLocation
 from vyper.compiler.phases import CompilerData
-from vyper.semantics.namespace import get_namespace
 
 from .value_mutator import ValueMutator
 from .context import Context
@@ -205,9 +204,22 @@ class AstMutator(VyperNodeTransformer):
 
         # Get function arguments from the function type
         func_type = node._metadata["func_type"]
-        ns = get_namespace()
+
         for arg in func_type.arguments:
-            self.add_variable(arg.name, ns[arg.name])
+            if func_type.is_external:
+                location = DataLocation.CALLDATA
+            else:
+                assert func_type.is_internal, (
+                    f"Expected internal function, got {func_type}"
+                )
+                location = DataLocation.MEMORY
+
+            var_info = VarInfo(
+                typ=arg.typ,
+                location=location,
+                decl_node=arg.ast_source if hasattr(arg, "ast_source") else None,
+            )
+            self.add_variable(arg.name, var_info)
 
         # Use statement generator to inject statements
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
