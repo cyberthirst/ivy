@@ -132,7 +132,10 @@ class AstMutator(VyperNodeTransformer):
         self.context.scope_stack.append(
             self.context.current_scope
         )  # Module scope stays on stack
+        self.name_generator.counter = 0
+        self.type_generator.struct_counter = 0
         self.stmt_generator.source_fragments = []
+        self.stmt_generator.name_generator.counter = 0
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
