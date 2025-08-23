@@ -2,7 +2,6 @@ import contextlib
 
 from vyper.exceptions import SyntaxException
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
-from vyper.semantics.types import AddressT, StringT, BytesT, BytesM_T, StructT
 from vyper.semantics.analysis.base import DataLocation
 
 import vyper.ast as ast
@@ -320,8 +319,9 @@ class Unparser(VyperNodeVisitorBase):
 
     def visit_Bytes(self, node):
         if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code.replace("0X", "0x")
-        return f"0x{node.value.hex()}"
+            return node.node_source_code
+        # Bytes (dynamic) uses b'...' format, not hex
+        return repr(node.value)
 
     def visit_Str(self, node):
         if hasattr(node, "node_source_code") and node.node_source_code:
@@ -333,40 +333,6 @@ class Unparser(VyperNodeVisitorBase):
             node.value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
         )
         return f'"{escaped}"'
-
-    def visit_LiteralValue(self, node):
-        """Handle the custom LiteralValue node."""
-        value = node.value
-        typ = node.typ
-
-        if isinstance(typ, StructT):
-            assert isinstance(value, dict)
-            kwargs = []
-            for field_name, field_value in value.items():
-                field_str = self.visit_LiteralValue(field_value)
-                kwargs.append(f"{field_name}={field_str}")
-
-            return f"{typ._id}({', '.join(kwargs)})"
-
-        # Special cases only
-        if (
-            isinstance(typ, AddressT)
-            and isinstance(value, str)
-            and not value.startswith("0x")
-        ):
-            return f"0x{value}"
-        elif isinstance(typ, StringT):
-            # Handle string escaping
-            if '"' in value and "'" not in value:
-                return f"'{value}'"
-            else:
-                escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-                return f'"{escaped}"'
-        elif isinstance(typ, (BytesT, BytesM_T)) and isinstance(value, bytes):
-            return f"0x{value.hex()}"
-
-        # Default case for everything else
-        return str(value)
 
     def visit_List(self, node):
         elements = [self._expr(e) for e in node.elements]
