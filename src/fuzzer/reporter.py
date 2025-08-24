@@ -37,6 +37,7 @@ class FuzzerReporter:
     current_scenario_num: Optional[int] = None
     seed: Optional[int] = None
     reports_dir: Path = field(default_factory=lambda: Path("reports"))
+    _file_counter: int = 0
 
     def record_compilation_failure(self):
         self.compilation_failures += 1
@@ -249,7 +250,8 @@ class FuzzerReporter:
         item_name = self.current_item_name or "unknown"
         scenario_num = self.current_scenario_num or 0
 
-        filename = f"{item_name.replace('::', '_')}_{scenario_num}.divergence"
+        self._file_counter += 1
+        filename = f"divergence_{self._file_counter}.json"
         filepath = reports_dir / filename
 
         divergence_data = divergence.to_dict()
