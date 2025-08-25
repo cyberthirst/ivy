@@ -13,6 +13,7 @@ from vyper.semantics.types import (
     SArrayT,
     DArrayT,
     TupleT,
+    DecimalT,
 )
 
 from .value_mutator import ValueMutator
@@ -37,6 +38,7 @@ class ExprGenerator:
             DArrayT: self._array_to_ast,
             TupleT: self._tuple_to_ast,
             StructT: self._struct_to_ast,
+            DecimalT: self._decimal_to_ast,
         }
 
     def generate(
@@ -139,6 +141,11 @@ class ExprGenerator:
 
     def _string_to_ast(self, value: str, typ: StringT) -> ast.Str:
         node = ast.Str(value=value)
+        node._metadata["type"] = typ
+        return node
+
+    def _decimal_to_ast(self, value, typ: DecimalT) -> ast.Decimal:
+        node = ast.Decimal(value=value)
         node._metadata["type"] = typ
         return node
 
