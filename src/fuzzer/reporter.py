@@ -260,6 +260,25 @@ class FuzzerReporter:
         divergence_data["scenario_num"] = scenario_num
         divergence_data["seed"] = self.seed
 
+        # Convert any bytes keys/values to hex strings for JSON serialization
+        # Slow, but divergences are rare
+        def convert_bytes(obj):
+            if isinstance(obj, dict):
+                result = {}
+                for k, v in obj.items():
+                    if isinstance(k, bytes):
+                        k = "0x" + k.hex()
+                    result[k] = convert_bytes(v)
+                return result
+            elif isinstance(obj, list):
+                return [convert_bytes(item) for item in obj]
+            elif isinstance(obj, bytes):
+                return "0x" + obj.hex()
+            else:
+                return obj
+
+        divergence_data = convert_bytes(divergence_data)
+
         with open(filepath, "w") as f:
             json.dump(divergence_data, f, indent=2, default=str)
 
