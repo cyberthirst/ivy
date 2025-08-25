@@ -403,23 +403,16 @@ class AstMutator(VyperNodeTransformer):
 
         rhs_type = getattr(node.value, "_metadata", {}).get("type")
 
-        mutation_type = self.rng.choice(["swap_rhs", "insert_new_local"])
+        mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
 
-        if mutation_type == "swap_rhs" and rhs_type is not None:
+        if mutation_type == "use_var_as_rhs" and rhs_type is not None:
             other_var = self.pick_var(rhs_type)
             if other_var:
                 node.value = other_var
 
-        elif mutation_type == "insert_new_local" and isinstance(node.target, ast.Name):
-            new_name = self.name_generator.generate()
-
-            # For simplicity, we're assuming uint256 type with value 0
-            if rhs_type:
-                self.add_local(new_name, rhs_type)
-                node.target.id = new_name
-                # For uint256, initialize to 0
-                if "uint" in str(rhs_type):
-                    node.value = ast.Int(value=0)
+        elif mutation_type == "generate_new_expr" and rhs_type is not None:
+            new_expr = self.expr_generator.generate(rhs_type, self.context, depth=2)
+            node.value = new_expr
 
         self.mutations_done += 1
         return node

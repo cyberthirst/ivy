@@ -199,12 +199,10 @@ class StatementGenerator:
             weights.append(self.statement_weights["vardecl"])
         else:
             # Inside functions/blocks we can add various statements
+            # Don't generate vardecl here - only via inject_statements at the beginning
             if context.all_vars:
                 choices.append("assign")
                 weights.append(self.statement_weights["assign"])
-
-            choices.append("vardecl")
-            weights.append(self.statement_weights["vardecl"])
 
             choices.append("if")
             weights.append(self.statement_weights["if"] * nest_prob)
@@ -232,7 +230,8 @@ class StatementGenerator:
         if context.all_vars and self.rng.random() < 0.6:
             return self.generate_assign(context, parent)
         else:
-            return self.create_vardecl_and_register(context, parent)
+            # TODO return pass
+            return None
 
     def generate_if(
         self, context, parent: Optional[ast.VyperNode], depth: int
@@ -243,11 +242,7 @@ class StatementGenerator:
 
         context.push_scope()
 
-        num_body_stmts = self.rng.randint(1, 3)
-        for _ in range(num_body_stmts):
-            stmt = self.generate_statement(context, if_node, depth + 1)
-            if stmt:
-                if_node.body.append(stmt)
+        self.inject_statements(if_node.body, context, if_node, depth + 1)
 
         if not if_node.body:
             if_node.body.append(ast.Pass())
@@ -256,12 +251,7 @@ class StatementGenerator:
 
         if self.rng.random() < 0.4:
             context.push_scope()
-
-            num_else_stmts = self.rng.randint(1, 2)
-            for _ in range(num_else_stmts):
-                stmt = self.generate_statement(context, if_node, depth + 1)
-                if stmt:
-                    if_node.orelse.append(stmt)
+            self.inject_statements(if_node.orelse, context, if_node, depth + 1)
 
             context.pop_scope()
 
@@ -286,7 +276,11 @@ class StatementGenerator:
 
         var_name, var_info = self.rng.choice(modifiable_vars)
 
-        target = ast.Name(id=var_name)
+        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
+            target = ast.Attribute(value=ast.Name(id="self"), attr=var_name)
+        else:
+            target = ast.Name(id=var_name)
+
         target._metadata = {"type": var_info.typ, "varinfo": var_info}
         value = self.expr_generator.generate(var_info.typ, context, depth=3)
 
