@@ -190,7 +190,7 @@ class StatementGenerator:
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
         return_type: Optional[VyperType] = None,
-    ) -> Optional[ast.VyperNode]:
+    ) -> ast.VyperNode:
         if depth >= self.max_depth:
             return self._generate_simple_statement(context, parent)
 
@@ -214,7 +214,7 @@ class StatementGenerator:
             weights.append(self.statement_weights["if"] * nest_prob)
 
         if not choices:
-            return None
+            return ast.Pass()
 
         total = sum(weights)
         weights = [w / total for w in weights]
@@ -224,20 +224,24 @@ class StatementGenerator:
         if choice == "if":
             return self.generate_if(context, parent, depth)
         elif choice == "assign":
-            return self.generate_assign(context, parent)
+            assign = self.generate_assign(context, parent)
+            if assign is not None:
+                return assign
+            return ast.Pass()
         elif choice == "vardecl":
             return self.create_vardecl_and_register(context, parent)
 
-        return None
+        # Should never reach here, but just in case
+        return ast.Pass()
 
     def _generate_simple_statement(
         self, context, parent: Optional[ast.VyperNode]
-    ) -> Optional[ast.VyperNode]:
+    ) -> ast.VyperNode:
         if context.all_vars and self.rng.random() < 0.6:
-            return self.generate_assign(context, parent)
-        else:
-            # TODO return pass
-            return None
+            assign = self.generate_assign(context, parent)
+            if assign is not None:
+                return assign
+        return ast.Pass()
 
     def generate_if(
         self, context, parent: Optional[ast.VyperNode], depth: int
