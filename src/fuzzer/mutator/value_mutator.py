@@ -7,6 +7,7 @@ for both AST mutations and ABI fuzzing.
 
 import random
 from typing import Any, List, Optional
+from eth_utils import to_checksum_address
 from vyper.semantics.types import (
     AddressT,
     BoolT,
@@ -141,12 +142,12 @@ class ValueMutator:
 
         elif isinstance(vyper_type, AddressT):
             return [
-                "0x0000000000000000000000000000000000000000",
-                "0x0000000000000000000000000000000000000001",
-                "0x0000000000000000000000000000000000000002",
-                "0x0000000000000000000000000000000000000003",
-                "0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF",
-                "0xdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeF",
+                to_checksum_address("0x0000000000000000000000000000000000000000"),
+                to_checksum_address("0x0000000000000000000000000000000000000001"),
+                to_checksum_address("0x0000000000000000000000000000000000000002"),
+                to_checksum_address("0x0000000000000000000000000000000000000003"),
+                to_checksum_address("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
+                to_checksum_address("0xdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeF"),
             ]
 
         elif isinstance(vyper_type, BoolT):
@@ -225,7 +226,7 @@ class ValueMutator:
         if self.rng.random() < 0.7:
             return self.rng.choice(boundary_addresses)
         else:
-            return f"0x{self.rng.randbytes(20).hex()}"
+            return to_checksum_address(f"0x{self.rng.randbytes(20).hex()}")
 
     def _mutate_address(self, value: str) -> str:
         """Mutate an address value."""
@@ -238,7 +239,7 @@ class ValueMutator:
             # Flip a random byte
             idx = self.rng.randint(0, 19)
             byte_array[idx] ^= self.rng.randint(1, 255)
-            return f"0x{byte_array.hex()}"
+            return to_checksum_address(f"0x{byte_array.hex()}")
 
     def _generate_string(self, max_length: int) -> str:
         """Generate a string value."""
