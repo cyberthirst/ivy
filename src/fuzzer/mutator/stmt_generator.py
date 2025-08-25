@@ -175,7 +175,13 @@ class StatementGenerator:
         num_other_stmts = self.rng.randint(self.min_stmts, self.max_stmts)
         for _ in range(num_other_stmts):
             stmt = self.generate_statement(context, parent, depth)
-            insert_pos = self.rng.randint(num_vars, len(body) - 1)
+            # Insert before the last statement to avoid inserting after return
+            # If body is empty or only has vars, append at the end
+            max_pos = max(num_vars, len(body) - 1)
+            if num_vars <= max_pos:
+                insert_pos = self.rng.randint(num_vars, max_pos)
+            else:
+                insert_pos = num_vars
             body.insert(insert_pos, stmt)
 
     def generate_statement(
