@@ -1,5 +1,6 @@
 from typing import Union, Dict, Any, Optional, TypeVar, Generic
 import copy
+from decimal import Decimal
 
 from eth_utils import to_canonical_address, to_checksum_address
 from eth_typing.evm import Address as EthAddress
@@ -176,7 +177,14 @@ class VyperDecimal:
         return self.value <= other.value
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, VyperDecimal) and self.value == other.value
+        if isinstance(other, VyperDecimal):
+            return self.value == other.value
+
+        if isinstance(other, Decimal):
+            self_as_decimal = Decimal(str(self))
+            return self_as_decimal == other
+
+        return False
 
     def __ne__(self, other: object) -> bool:
         return not self == other
