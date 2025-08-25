@@ -2,7 +2,6 @@ import contextlib
 
 from vyper.exceptions import SyntaxException
 from vyper.semantics.analysis.common import VyperNodeVisitorBase
-from vyper.semantics.analysis.base import DataLocation
 
 import vyper.ast as ast
 
@@ -282,17 +281,6 @@ class Unparser(VyperNodeVisitorBase):
         return str(node.value)
 
     def visit_Name(self, node):
-        if hasattr(node, "_metadata") and "varinfo" in node._metadata:
-            var_info = node._metadata["varinfo"]
-            if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
-                parent = node.get_ancestor()
-                if (
-                    parent
-                    and isinstance(parent, ast.VariableDecl)
-                    and parent.target == node
-                ):
-                    return node.id
-                return f"self.{node.id}"
         return node.id
 
     def visit_Int(self, node):

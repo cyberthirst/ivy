@@ -17,6 +17,7 @@ from vyper.semantics.types import (
 
 from .value_mutator import ValueMutator
 from .context import Context
+from vyper.semantics.analysis.base import DataLocation
 
 
 class ExprGenerator:
@@ -179,9 +180,14 @@ class ExprGenerator:
                 matches.append(name)
         return matches
 
-    def _generate_variable_ref(self, name: str, context: Context) -> ast.Name:
-        node = ast.Name(id=name)
+    def _generate_variable_ref(self, name: str, context: Context) -> ast.VyperNode:
         var_info = context.all_vars[name]
+
+        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
+            node = ast.Attribute(value=ast.Name(id="self"), attr=name)
+        else:
+            node = ast.Name(id=name)
+
         node._metadata["type"] = var_info.typ
         node._metadata["varinfo"] = var_info
         return node
