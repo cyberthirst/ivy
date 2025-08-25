@@ -4,7 +4,7 @@ from typing import Optional, Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, IntegerT
-from vyper.semantics.analysis.base import VarInfo, DataLocation
+from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
@@ -216,15 +216,18 @@ class AstMutator(VyperNodeTransformer):
         for arg in func_type.arguments:
             if func_type.is_external:
                 location = DataLocation.CALLDATA
+                modifiability = Modifiability.RUNTIME_CONSTANT
             else:
                 assert func_type.is_internal, (
                     f"Expected internal function, got {func_type}"
                 )
                 location = DataLocation.MEMORY
+                modifiability = Modifiability.MODIFIABLE
 
             var_info = VarInfo(
                 typ=arg.typ,
                 location=location,
+                modifiability=modifiability,
                 decl_node=arg.ast_source if hasattr(arg, "ast_source") else None,
             )
             self.add_variable(arg.name, var_info)
