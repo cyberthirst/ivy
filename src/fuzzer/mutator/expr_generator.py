@@ -216,7 +216,22 @@ class ExprGenerator:
         op_classes = [ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq]
         op_class = self.rng.choice(op_classes)
 
-        comparable_types = [IntegerT(True, 256), IntegerT(True, 128), AddressT()]
+        # For equality/inequality, we can use more types
+        # TODO parametrize typeclasses so we don't always get the same size
+        if isinstance(op_class(), (ast.Eq, ast.NotEq)):
+            comparable_types = [
+                IntegerT(True, 256),
+                IntegerT(True, 128),
+                AddressT(),
+                BytesT(32),
+                BytesM_T(32),
+                StringT(100),
+                BoolT(),
+            ]
+        else:
+            # For ordering comparisons, only use numeric
+            comparable_types = [IntegerT(True, 256), IntegerT(True, 128)]
+
         comparable_type = self.rng.choice(comparable_types)
 
         left = self.generate(comparable_type, context, depth)

@@ -3,7 +3,11 @@ import random
 from typing import Optional, Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT
+from vyper.semantics.types import (
+    VyperType,
+    IntegerT,
+)
+from vyper.semantics.types.primitives import NumericT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -530,22 +534,24 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(ast.Compare):
             return node
 
-        # Swap comparison operators
-        op_swaps = {
-            ast.Lt: [ast.LtE, ast.Gt, ast.Eq],
-            ast.LtE: [ast.Lt, ast.GtE, ast.Eq],
-            ast.Gt: [ast.GtE, ast.Lt, ast.Eq],
-            ast.GtE: [ast.Gt, ast.LtE, ast.Eq],
-            ast.Eq: [ast.NotEq, ast.Lt, ast.Gt],
-            ast.NotEq: [ast.Eq, ast.Lt, ast.Gt],
-        }
+        typ = node._metadata.get("type", None)
+        typ = typ if typ else node.left._metadata.get("type", None)
 
-        op_type = type(node.op)
-        if op_type in op_swaps:
-            new_op_type = self.rng.choice(op_swaps[op_type])
+        if typ and isinstance(typ, NumericT):
+            # For numeric types, any comparison operator is valid
+            # TODO add mutations for other operators (shifting etc)
+            ops = [ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq]
+            new_op_type = self.rng.choice(ops)
             node.op = new_op_type()
+        else:
+            # For non-numeric types, only eq/neq are valid
+            # TODO add mutations for other operators
+            if isinstance(node.op, ast.Eq):
+                node.op = ast.NotEq()
+            elif isinstance(node.op, ast.NotEq):
+                node.op = ast.Eq()
+            self.mutations_done += 1
 
-        self.mutations_done += 1
         return node
 
     def _ensure_init_with_immutables(self, module: ast.Module):
