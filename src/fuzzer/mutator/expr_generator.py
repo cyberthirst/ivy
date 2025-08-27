@@ -1,5 +1,7 @@
 import random
 
+from typing import Optional
+
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -18,6 +20,7 @@ from vyper.semantics.types import (
 
 from .value_mutator import ValueMutator
 from .context import Context
+from .function_registry import FunctionRegistry
 from vyper.semantics.analysis.base import DataLocation
 
 
@@ -247,6 +250,8 @@ class ExprGenerator:
             call_node.keywords.append(keyword)
 
         call_node._metadata["type"] = target_type
+        return call_node
+
     def _get_strategies(
         self, target_type: VyperType, context: Context, depth: int
     ) -> list:
@@ -305,4 +310,55 @@ class ExprGenerator:
 
         # This should never happen as literal should always work
         raise RuntimeError("All expression generation strategies failed")
+
+    def _generate_func_call(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> Optional[ast.Call]:
+        """Generate a function call, either to existing or new function."""
+        if not self.function_registry:
+            return None
+
+        current_func = self.function_registry.current_function
+        assert current_func is not None
+
+        compatible_func = self.function_registry.get_compatible_function(
+            target_type, current_func
+        )
+
+        # Try to use existing function with 90% probability
+        if compatible_func and self.rng.random() < 0.9:
+            func_t = compatible_func
+            func_name = func_t.name
+        else:
+            # Create a new function (returns ast.FunctionDef or None)
+            func_def = self.function_registry.create_new_function(
+                return_type=target_type, type_generator=self.type_generator, max_args=2
+            )
+            if func_def is None:
+                # Can't create more functions
+                return None
+            # Get the ContractFunctionT from metadata
+            func_t = func_def._metadata["type"]
+            func_name = func_def.name
+
+        # Generate the call
+        func_node = ast.Name(id=func_name)
+
+        # Generate arguments
+        args = []
+        for pos_arg in func_t.positional_args:
+            if pos_arg.typ:
+                arg_expr = self.generate(pos_arg.typ, context, max(0, depth))
+                args.append(arg_expr)
+
+        # Create the call node
+        call_node = ast.Call(func=func_node, args=args, keywords=[])
+        call_node._metadata["type"] = func_t.return_type
+
+        # Record the call in the call graph
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function, func_name
+            )
+
         return call_node
