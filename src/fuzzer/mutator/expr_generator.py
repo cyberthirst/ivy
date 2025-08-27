@@ -22,9 +22,17 @@ from vyper.semantics.analysis.base import DataLocation
 
 
 class ExprGenerator:
-    def __init__(self, value_mutator: ValueMutator, rng: random.Random):
+    def __init__(
+        self,
+        value_mutator: ValueMutator,
+        rng: random.Random,
+        function_registry: FunctionRegistry = None,
+        type_generator=None,
+    ):
         self.value_mutator = value_mutator
         self.rng = rng
+        self.function_registry = function_registry
+        self.type_generator = type_generator
 
         # Build dispatch table for efficient type-to-AST conversion
         self._ast_builders = {
@@ -51,34 +59,10 @@ class ExprGenerator:
         if depth == 0:
             return self._generate_terminal(target_type, context)
 
-        strategies = []
+        # Build list of available strategies
+        strategies = self._get_strategies(target_type, context, depth)
 
-        strategies.append(lambda: self._generate_literal(target_type, context))
-
-        matching_vars = self._find_matching_variables(target_type, context)
-        if matching_vars:
-            strategies.append(
-                lambda: self._generate_variable_ref(
-                    self.rng.choice(matching_vars), context
-                )
-            )
-
-        if isinstance(target_type, IntegerT):
-            strategies.append(
-                lambda: self._generate_arithmetic(target_type, context, depth - 1)
-            )
-            if target_type.is_signed:
-                strategies.append(
-                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
-                )
-
-        if isinstance(target_type, BoolT):
-            strategies.append(lambda: self._generate_comparison(context, depth - 1))
-            strategies.append(lambda: self._generate_boolean_op(context, depth - 1))
-            strategies.append(lambda: self._generate_not(context, depth - 1))
-
-        strategy = self.rng.choice(strategies)
-        return strategy()
+        return self._try_strategies_with_retry(strategies)
 
     def _generate_terminal(
         self, target_type: VyperType, context: Context
@@ -263,4 +247,62 @@ class ExprGenerator:
             call_node.keywords.append(keyword)
 
         call_node._metadata["type"] = target_type
+    def _get_strategies(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> list:
+        """Build list of available strategies for generating expressions."""
+        strategies = []
+
+        strategies.append(lambda: self._generate_literal(target_type, context))
+
+        matching_vars = self._find_matching_variables(target_type, context)
+        if matching_vars:
+            strategies.append(
+                lambda: self._generate_variable_ref(
+                    self.rng.choice(matching_vars), context
+                )
+            )
+
+        # Type-specific strategies
+        if isinstance(target_type, IntegerT):
+            strategies.append(
+                lambda: self._generate_arithmetic(target_type, context, depth - 1)
+            )
+            if target_type.is_signed:
+                strategies.append(
+                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
+                )
+
+        if isinstance(target_type, BoolT):
+            strategies.append(lambda: self._generate_comparison(context, depth - 1))
+            strategies.append(lambda: self._generate_boolean_op(context, depth - 1))
+            strategies.append(lambda: self._generate_not(context, depth - 1))
+
+        if self.function_registry:
+            strategies.append(
+                lambda: self._generate_func_call(target_type, context, depth - 1)
+            )
+
+        return strategies
+
+    def _try_strategies_with_retry(self, strategies: list) -> ast.VyperNode:
+        """Try strategies with retry mechanism, removing failed ones."""
+        available_strategies = strategies.copy()
+
+        while available_strategies:
+            idx = self.rng.randrange(len(available_strategies))
+            strategy_func = available_strategies[idx]
+
+            try:
+                result = strategy_func()
+                if result is not None:
+                    return result
+            except:
+                pass  # Strategy failed, will be removed
+
+            # Remove failed strategy and try again
+            available_strategies.pop(idx)
+
+        # This should never happen as literal should always work
+        raise RuntimeError("All expression generation strategies failed")
         return call_node
