@@ -1,5 +1,7 @@
 import random
 
+from typing import Optional
+
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -18,13 +20,22 @@ from vyper.semantics.types import (
 
 from .value_mutator import ValueMutator
 from .context import Context
+from .function_registry import FunctionRegistry
 from vyper.semantics.analysis.base import DataLocation
 
 
 class ExprGenerator:
-    def __init__(self, value_mutator: ValueMutator, rng: random.Random):
+    def __init__(
+        self,
+        value_mutator: ValueMutator,
+        rng: random.Random,
+        function_registry: FunctionRegistry = None,
+        type_generator=None,
+    ):
         self.value_mutator = value_mutator
         self.rng = rng
+        self.function_registry = function_registry
+        self.type_generator = type_generator
 
         # Build dispatch table for efficient type-to-AST conversion
         self._ast_builders = {
@@ -51,34 +62,10 @@ class ExprGenerator:
         if depth == 0:
             return self._generate_terminal(target_type, context)
 
-        strategies = []
+        # Build list of available strategies
+        strategies = self._get_strategies(target_type, context, depth)
 
-        strategies.append(lambda: self._generate_literal(target_type, context))
-
-        matching_vars = self._find_matching_variables(target_type, context)
-        if matching_vars:
-            strategies.append(
-                lambda: self._generate_variable_ref(
-                    self.rng.choice(matching_vars), context
-                )
-            )
-
-        if isinstance(target_type, IntegerT):
-            strategies.append(
-                lambda: self._generate_arithmetic(target_type, context, depth - 1)
-            )
-            if target_type.is_signed:
-                strategies.append(
-                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
-                )
-
-        if isinstance(target_type, BoolT):
-            strategies.append(lambda: self._generate_comparison(context, depth - 1))
-            strategies.append(lambda: self._generate_boolean_op(context, depth - 1))
-            strategies.append(lambda: self._generate_not(context, depth - 1))
-
-        strategy = self.rng.choice(strategies)
-        return strategy()
+        return self._try_strategies_with_retry(strategies)
 
     def _generate_terminal(
         self, target_type: VyperType, context: Context
@@ -278,4 +265,115 @@ class ExprGenerator:
             call_node.keywords.append(keyword)
 
         call_node._metadata["type"] = target_type
+        return call_node
+
+    def _get_strategies(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> list:
+        """Build list of available strategies for generating expressions."""
+        strategies = []
+
+        strategies.append(lambda: self._generate_literal(target_type, context))
+
+        matching_vars = self._find_matching_variables(target_type, context)
+        if matching_vars:
+            strategies.append(
+                lambda: self._generate_variable_ref(
+                    self.rng.choice(matching_vars), context
+                )
+            )
+
+        # Type-specific strategies
+        if isinstance(target_type, IntegerT):
+            strategies.append(
+                lambda: self._generate_arithmetic(target_type, context, depth - 1)
+            )
+            if target_type.is_signed:
+                strategies.append(
+                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
+                )
+
+        if isinstance(target_type, BoolT):
+            strategies.append(lambda: self._generate_comparison(context, depth - 1))
+            strategies.append(lambda: self._generate_boolean_op(context, depth - 1))
+            strategies.append(lambda: self._generate_not(context, depth - 1))
+
+        if self.function_registry:
+            strategies.append(
+                lambda: self._generate_func_call(target_type, context, depth - 1)
+            )
+
+        return strategies
+
+    def _try_strategies_with_retry(self, strategies: list) -> ast.VyperNode:
+        """Try strategies with retry mechanism, removing failed ones."""
+        available_strategies = strategies.copy()
+
+        while available_strategies:
+            idx = self.rng.randrange(len(available_strategies))
+            strategy_func = available_strategies[idx]
+
+            try:
+                result = strategy_func()
+                if result is not None:
+                    return result
+            except:
+                pass  # Strategy failed, will be removed
+
+            # Remove failed strategy and try again
+            available_strategies.pop(idx)
+
+        # This should never happen as literal should always work
+        raise RuntimeError("All expression generation strategies failed")
+
+    def _generate_func_call(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> Optional[ast.Call]:
+        """Generate a function call, either to existing or new function."""
+        if not self.function_registry:
+            return None
+
+        current_func = self.function_registry.current_function
+        assert current_func is not None
+
+        compatible_func = self.function_registry.get_compatible_function(
+            target_type, current_func
+        )
+
+        # Try to use existing function with 90% probability
+        if compatible_func and self.rng.random() < 0.9:
+            func_t = compatible_func
+            func_name = func_t.name
+        else:
+            # Create a new function (returns ast.FunctionDef or None)
+            func_def = self.function_registry.create_new_function(
+                return_type=target_type, type_generator=self.type_generator, max_args=2
+            )
+            if func_def is None:
+                # Can't create more functions
+                return None
+            # Get the ContractFunctionT from metadata
+            func_t = func_def._metadata["type"]
+            func_name = func_def.name
+
+        # Generate the call
+        func_node = ast.Name(id=func_name)
+
+        # Generate arguments
+        args = []
+        for pos_arg in func_t.positional_args:
+            if pos_arg.typ:
+                arg_expr = self.generate(pos_arg.typ, context, max(0, depth))
+                args.append(arg_expr)
+
+        # Create the call node
+        call_node = ast.Call(func=func_node, args=args, keywords=[])
+        call_node._metadata["type"] = func_t.return_type
+
+        # Record the call in the call graph
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function, func_name
+            )
+
         return call_node

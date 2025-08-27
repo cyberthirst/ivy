@@ -159,6 +159,10 @@ class StatementGenerator:
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
     ) -> None:
+        """
+        Inject statements into body. Doesn't inject functions, those are generated lazily
+        based on call_expr demand
+        """
         if depth > self.max_depth:
             return
 
@@ -170,6 +174,9 @@ class StatementGenerator:
         for i in range(num_vars):
             var_decl = self.create_vardecl_and_register(context, parent)
             body.insert(i, var_decl)
+
+        if context.is_module_scope:
+            return
 
         # Generate other statements
         num_other_stmts = self.rng.randint(self.min_stmts, self.max_stmts)

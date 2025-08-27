@@ -118,8 +118,12 @@ class AstMutator(VyperNodeTransformer):
         self.max_vars_per_scope = 6
         # Probability of injecting variables into a scope
         self.inject_vars_prob = 0.5
-        # Expression generator
-        self.expr_generator = ExprGenerator(self.value_mutator, self.rng)
+        # Function registry for tracking and generating functions
+        self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
+        # Expression generator with function registry
+        self.expr_generator = ExprGenerator(
+            self.value_mutator, self.rng, self.function_registry, self.type_generator
+        )
         # Statement generator
         self.stmt_generator = StatementGenerator(
             self.expr_generator, self.type_generator, self.rng
@@ -202,15 +206,60 @@ class AstMutator(VyperNodeTransformer):
         return self.expr_generator.generate(target_type, self.context, depth=4)
 
     def visit_Module(self, node: ast.Module):
+        # Preprocess: register all existing functions and module-level variables
+        self._preprocess_module(node)
+
+        # inject before visiting, more variable will be available
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
 
-        return super().generic_visit(node)
+        # Visit all existing nodes first
+        node = super().generic_visit(node)
+
+        while True:
+            pending_funcs = self.function_registry.get_pending_implementations()
+            if not pending_funcs:
+                break
+
+            for func in pending_funcs:
+                if func.ast_def:
+                    # Visit the function to fill its body
+                    self.visit_FunctionDef(func.ast_def)
+                    node.body.append(func.ast_def)
+
+        return node
+
+    def _preprocess_module(self, node: ast.Module):
+        """Register all existing functions and module-level variables."""
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                # Register existing function in the registry
+                func_type = item._metadata.get("type")
+                if func_type and isinstance(func_type, ContractFunctionT):
+                    self.function_registry.register_function(func_type)
+
+            elif isinstance(item, ast.VariableDecl):
+                # Register module-level variable
+                var_info = item._metadata.get("varinfo")
+                if (
+                    var_info
+                    and hasattr(item, "target")
+                    and isinstance(item.target, ast.Name)
+                ):
+                    self.context.add_variable(item.target.id, var_info)
+
+    def visit_VariableDecl(self, node: ast.VariableDecl):
+        """Skip processing variable declarations - they're handled in preprocessing."""
+        # Don't visit children or mutate - already registered in preprocessing
+        return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Interface functions are just signatures so we skip them
         parent = node.get_ancestor()
         if parent and isinstance(parent, ast.InterfaceDef):
             return node
+
+        # Set current function for cycle detection
+        self.function_registry.set_current_function(node.name)
 
         self.push_scope()
 
@@ -237,12 +286,17 @@ class AstMutator(VyperNodeTransformer):
             self.add_variable(arg.name, var_info)
 
         # Use statement generator to inject statements
+        # TODO is this the right place for injection - we don't need mutation
+        # of this freshly generatred code
         self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
 
         # Let the base class handle visiting children
         node = super().generic_visit(node)
 
         self.pop_scope()
+
+        self.function_registry.set_current_function(None)
+
         return node
 
     def visit_Int(self, node: ast.Int):
