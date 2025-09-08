@@ -3,15 +3,13 @@ import random
 from typing import Optional, Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import (
-    VyperType,
-    IntegerT,
-)
+from vyper.semantics.types import VyperType, IntegerT, ContractFunctionT
 from vyper.semantics.types.primitives import NumericT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
+from src.fuzzer.mutator.function_registry import FunctionRegistry
 from .context import Context
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
@@ -224,6 +222,7 @@ class AstMutator(VyperNodeTransformer):
                 if func.ast_def:
                     # Visit the function to fill its body
                     self.visit_FunctionDef(func.ast_def)
+                    assert func.ast_def.body
                     node.body.append(func.ast_def)
 
         return node
@@ -286,9 +285,17 @@ class AstMutator(VyperNodeTransformer):
             self.add_variable(arg.name, var_info)
 
         # Use statement generator to inject statements
-        # TODO is this the right place for injection - we don't need mutation
-        # of this freshly generatred code
-        self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
+        # For generated functions with empty bodies, ensure they get statements
+        if not node.body:
+            n_stmts = self.rng.randint(1, 5)
+            self.stmt_generator.inject_statements(
+                node.body, self.context, node, depth=0, n_stmts=n_stmts
+            )
+        else:
+            # For existing functions, use normal probability-based injection
+            self.stmt_generator.inject_statements(
+                node.body, self.context, node, depth=0
+            )
 
         # Let the base class handle visiting children
         node = super().generic_visit(node)

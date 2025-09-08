@@ -6,14 +6,13 @@ from vyper.semantics.types.function import (
     FunctionVisibility,
     StateMutability,
     PositionalArg,
-    KeywordArg,
 )
 from vyper.builtins.functions import DISPATCH_TABLE
 from vyper.ast import nodes as ast
 
 
 class FreshFunctionNameGenerator:
-    def __init__(self, prefix: str = "generated_func"):
+    def __init__(self, prefix: str = "gen_func"):
         self.prefix = prefix
         self.counter = 0
 
@@ -170,7 +169,7 @@ class FunctionRegistry:
             ]
         )
 
-        # Choose state mutability (same choices for all visibilities)
+        # Choose state mutability
         state_mutability = self.rng.choice(
             [
                 StateMutability.PURE,
@@ -219,7 +218,6 @@ class FunctionRegistry:
             ast_def=func_def,
         )
 
-        # Set the type in the AST node's metadata
         func_def._metadata["func_type"] = func_t
 
         self.register_function(func_t)

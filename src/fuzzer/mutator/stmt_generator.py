@@ -158,16 +158,18 @@ class StatementGenerator:
         context,
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
+        n_stmts: Optional[int] = None,
     ) -> None:
         """
         Inject statements into body. Doesn't inject functions, those are generated lazily
-        based on call_expr demand
+        based on call_expr demand.
         """
         if depth > self.max_depth:
             return
 
-        if self.rng.random() > self.inject_prob:
-            return
+        if n_stmts is None:
+            if self.rng.random() > self.inject_prob:
+                return
 
         # Generate variables first and insert at beginning
         num_vars = self.rng.randint(0, 2)
@@ -179,7 +181,11 @@ class StatementGenerator:
             return
 
         # Generate other statements
-        num_other_stmts = self.rng.randint(self.min_stmts, self.max_stmts)
+        if n_stmts is not None:
+            num_other_stmts = n_stmts
+        else:
+            num_other_stmts = self.rng.randint(self.min_stmts, self.max_stmts)
+
         for _ in range(num_other_stmts):
             stmt = self.generate_statement(context, parent, depth)
             # Insert before the last statement to avoid inserting after return
