@@ -18,6 +18,7 @@ from ..export_utils import (
     ClearTransientStorageTrace,
     load_export,
 )
+from vyper.exceptions import VyperException, VyperInternalException
 
 
 @dataclass
@@ -105,7 +106,7 @@ class TraceResult:
     result: Optional[Union[DeploymentResult, CallResult]] = (
         None  # None for set_balance/clear_transient
     )
-    compilation_xfail: bool = False  # For deployment traces
+    compilation_xfail: Optional[bool] = None  # For deployment traces
     runtime_xfail: Optional[bool] = None  # For both deployment and call traces
 
 

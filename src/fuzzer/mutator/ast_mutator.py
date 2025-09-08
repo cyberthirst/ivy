@@ -23,7 +23,9 @@ from src.fuzzer.type_generator import TypeGenerator
 @dataclass
 class MutationResult:
     source: str
-    compilation_xfail: bool = False  # True/False - enforce both success and failure
+    compilation_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't check, False = must not fail
+    )
     runtime_xfail: Optional[bool] = (
         None  # True = must fail, None = don't know, False = must not fail (future)
     )

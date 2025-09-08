@@ -16,8 +16,12 @@ class Context:
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
     immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
-    compilation_xfail: bool = False  # True/False - enforce both success and failure
-    runtime_xfail: Optional[bool] = None  # True = must fail, None = don't know, False = must not fail (future)
+    compilation_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't check, False = must not fail
+    )
+    runtime_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't know, False = must not fail (future)
+    )
 
     def push_scope(self) -> None:
         self.scope_stack.append(self.current_scope)

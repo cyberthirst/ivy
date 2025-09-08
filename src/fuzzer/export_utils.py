@@ -55,8 +55,12 @@ class DeploymentTrace:
     deployment_succeeded: bool
     env: Env
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}
-    compilation_xfail: bool = False  # True/False - enforce both success and failure
-    runtime_xfail: Optional[bool] = None  # True = must fail, None = don't know, False = must not fail
+    compilation_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't check, False = must not fail
+    )
+    runtime_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't know, False = must not fail
+    )
 
 
 @dataclass
@@ -69,7 +73,9 @@ class CallTrace:
     env: Optional[Env] = None
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
     function_name: Optional[str] = None
-    runtime_xfail: Optional[bool] = None  # True = must fail, None = don't know, False = must not fail
+    runtime_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't know, False = must not fail
+    )
 
 
 @dataclass

@@ -117,6 +117,45 @@ class DivergenceDetector:
                     f"Boa has {boa_trace_result.trace_index}"
                 )
 
+            # Check xfail flags for both Ivy and Boa results
+            for trace_result, runner_name in [
+                (ivy_trace_result, "ivy"),
+                (boa_trace_result, "boa"),
+            ]:
+                # Check compilation_xfail for deployment traces
+                deployment_result = trace_result.result
+                if (
+                    isinstance(deployment_result, DeploymentResult)
+                    and trace_result.compilation_xfail is not None
+                ):
+                    if (
+                        trace_result.compilation_xfail
+                        != deployment_result.is_compilation_failure
+                    ):
+                        return Divergence(
+                            type="xfail",
+                            step=trace_result.trace_index,
+                            scenario=scenario,
+                            xfail_type="compilation_xfail",
+                            xfail_expected=trace_result.compilation_xfail,
+                            xfail_actual=f"{runner_name}: {'compilation_failure' if deployment_result.is_compilation_failure else ('success' if deployment_result.success else 'runtime_failure')}",
+                        )
+
+                # Check runtime_xfail for both deployment and call traces
+                if trace_result.runtime_xfail is not None:
+                    exec_result = trace_result.result
+                    if exec_result and (
+                        trace_result.runtime_xfail != exec_result.is_runtime_failure
+                    ):
+                        return Divergence(
+                            type="xfail",
+                            step=trace_result.trace_index,
+                            scenario=scenario,
+                            xfail_type="runtime_xfail",
+                            xfail_expected=trace_result.runtime_xfail,
+                            xfail_actual=f"{runner_name}: {'runtime_failure' if exec_result.is_runtime_failure else ('success' if exec_result.success else 'compilation_failure')}",
+                        )
+
             # Compare deployment results
             if ivy_trace_result.trace_type == "deployment":
                 if not self._compare_deployment_results(
