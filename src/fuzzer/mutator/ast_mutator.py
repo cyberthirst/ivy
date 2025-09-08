@@ -10,7 +10,7 @@ from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
 from src.fuzzer.mutator.function_registry import FunctionRegistry
-from .context import Context
+from .context import Context, ScopeType
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
 from src.unparser.unparser import unparse
@@ -155,12 +155,6 @@ class AstMutator(VyperNodeTransformer):
 
         return new_root
 
-    def push_scope(self):
-        self.context.push_scope()
-
-    def pop_scope(self):
-        self.context.pop_scope()
-
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
 
@@ -188,11 +182,6 @@ class AstMutator(VyperNodeTransformer):
         node = ast.Name(id=selected_name)
         node._metadata = {"type": selected_var_info.typ, "varinfo": selected_var_info}
         return node
-
-    @property
-    def is_module_scope(self) -> bool:
-        """Check if we're in module scope (only one scope on the stack)."""
-        return self.context.is_module_scope
 
     def should_mutate(self, node_type: Type) -> bool:
         node_prob = self.PROB.get(node_type, 0)
@@ -261,47 +250,44 @@ class AstMutator(VyperNodeTransformer):
         # Set current function for cycle detection
         self.function_registry.set_current_function(node.name)
 
-        self.push_scope()
+        with self.context.new_scope(ScopeType.FUNCTION):
+            # Get function arguments from the function type
+            func_type = node._metadata["func_type"]
 
-        # Get function arguments from the function type
-        func_type = node._metadata["func_type"]
+            for arg in func_type.arguments:
+                if func_type.is_external:
+                    location = DataLocation.CALLDATA
+                    modifiability = Modifiability.RUNTIME_CONSTANT
+                else:
+                    assert func_type.is_internal, (
+                        f"Expected internal function, got {func_type}"
+                    )
+                    location = DataLocation.MEMORY
+                    modifiability = Modifiability.MODIFIABLE
 
-        for arg in func_type.arguments:
-            if func_type.is_external:
-                location = DataLocation.CALLDATA
-                modifiability = Modifiability.RUNTIME_CONSTANT
-            else:
-                assert func_type.is_internal, (
-                    f"Expected internal function, got {func_type}"
+                var_info = VarInfo(
+                    typ=arg.typ,
+                    location=location,
+                    modifiability=modifiability,
+                    decl_node=arg.ast_source if hasattr(arg, "ast_source") else None,
                 )
-                location = DataLocation.MEMORY
-                modifiability = Modifiability.MODIFIABLE
+                self.add_variable(arg.name, var_info)
 
-            var_info = VarInfo(
-                typ=arg.typ,
-                location=location,
-                modifiability=modifiability,
-                decl_node=arg.ast_source if hasattr(arg, "ast_source") else None,
-            )
-            self.add_variable(arg.name, var_info)
+            # Use statement generator to inject statements
+            # For generated functions with empty bodies, ensure they get statements
+            if not node.body:
+                n_stmts = self.rng.randint(1, 5)
+                self.stmt_generator.inject_statements(
+                    node.body, self.context, node, depth=0, n_stmts=n_stmts
+                )
+            else:
+                # For existing functions, use normal probability-based injection
+                self.stmt_generator.inject_statements(
+                    node.body, self.context, node, depth=0
+                )
 
-        # Use statement generator to inject statements
-        # For generated functions with empty bodies, ensure they get statements
-        if not node.body:
-            n_stmts = self.rng.randint(1, 5)
-            self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=0, n_stmts=n_stmts
-            )
-        else:
-            # For existing functions, use normal probability-based injection
-            self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=0
-            )
-
-        # Let the base class handle visiting children
-        node = super().generic_visit(node)
-
-        self.pop_scope()
+            # Let the base class handle visiting children
+            node = super().generic_visit(node)
 
         self.function_registry.set_current_function(None)
 
@@ -371,17 +357,17 @@ class AstMutator(VyperNodeTransformer):
         node.test = self.visit(node.test)
 
         # Push scope for if body
-        self.push_scope()
-        self.stmt_generator.inject_statements(node.body, self.context, node, depth=1)
-        self.pop_scope()
+        with self.context.new_scope(ScopeType.IF):
+            self.stmt_generator.inject_statements(
+                node.body, self.context, node, depth=1
+            )
 
         if node.orelse:
             # Push scope for else body
-            self.push_scope()
-            self.stmt_generator.inject_statements(
-                node.orelse, self.context, node, depth=1
-            )
-            self.pop_scope()
+            with self.context.new_scope(ScopeType.IF):
+                self.stmt_generator.inject_statements(
+                    node.orelse, self.context, node, depth=1
+                )
 
         node = super().generic_visit(node)
 
@@ -572,13 +558,13 @@ class AstMutator(VyperNodeTransformer):
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
-        self.push_scope()
-        self.stmt_generator.inject_statements(node.body, self.context, node, depth=1)
+        with self.context.new_scope(ScopeType.FOR):
+            self.stmt_generator.inject_statements(
+                node.body, self.context, node, depth=1
+            )
 
-        # Use generic_visit to handle body list
-        node = super().generic_visit(node)
-
-        self.pop_scope()
+            # Use generic_visit to handle body list
+            node = super().generic_visit(node)
 
         if not self.should_mutate(ast.For):
             return node

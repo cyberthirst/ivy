@@ -4,6 +4,8 @@ from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, BoolT, HashMapT
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
+from src.fuzzer.mutator.context import Context, ScopeType
+
 
 class FreshNameGenerator:
     def __init__(self, prefix: str = "gen_var"):
@@ -90,7 +92,7 @@ class StatementGenerator:
 
         return typ
 
-    def _generate_varinfo(self, context) -> tuple[str, VarInfo]:
+    def _generate_varinfo(self, context: Context) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.
 
         Returns:
@@ -155,7 +157,7 @@ class StatementGenerator:
     def inject_statements(
         self,
         body: list,
-        context,
+        context: Context,
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
         n_stmts: Optional[int] = None,
@@ -257,26 +259,21 @@ class StatementGenerator:
         return ast.Pass()
 
     def generate_if(
-        self, context, parent: Optional[ast.VyperNode], depth: int
+        self, context: Context, parent: Optional[ast.VyperNode], depth: int
     ) -> ast.If:
         test_expr = self.expr_generator.generate(BoolT(), context, depth=2)
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
 
-        context.push_scope()
+        with context.new_scope(ScopeType.IF):
+            self.inject_statements(if_node.body, context, if_node, depth + 1)
 
-        self.inject_statements(if_node.body, context, if_node, depth + 1)
-
-        if not if_node.body:
-            if_node.body.append(ast.Pass())
-
-        context.pop_scope()
+            if not if_node.body:
+                if_node.body.append(ast.Pass())
 
         if self.rng.random() < 0.4:
-            context.push_scope()
-            self.inject_statements(if_node.orelse, context, if_node, depth + 1)
-
-            context.pop_scope()
+            with context.new_scope(ScopeType.IF):
+                self.inject_statements(if_node.orelse, context, if_node, depth + 1)
 
         return if_node
 
