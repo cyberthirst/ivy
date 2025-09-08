@@ -1,4 +1,4 @@
-from typing import Dict, List
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -26,6 +26,12 @@ class Context:
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
     immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
+    compilation_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't check, False = must not fail
+    )
+    runtime_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't know, False = must not fail (future)
+    )
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
