@@ -145,7 +145,10 @@ class FunctionRegistry:
     def create_new_function(
         self, return_type: VyperType, type_generator, max_args: int = 3
     ) -> Optional[ast.FunctionDef]:
-        """Create a new function with empty body and ContractFunctionT in metadata."""
+        """Create a new function with empty body and ContractFunctionT in metadata.
+        The body is created later, once we have more information. That allows
+        e.g. calls to other functions which are yet to be registered
+        """
         # Check if we've reached the limit
         if self.generated_count >= self.max_generated_functions:
             return None
@@ -239,3 +242,14 @@ class FunctionRegistry:
     def can_generate_more_functions(self) -> bool:
         """Check if more functions can be generated."""
         return self.generated_count < self.max_generated_functions
+    
+    def reset(self):
+        """Reset the registry state for a new mutation."""
+        self.functions.clear()
+        self.functions_by_return_type.clear()
+        self.call_graph.clear()
+        self.current_function = None
+        self.name_generator.counter = 0
+        self.generated_count = 0
+        # Re-initialize builtins
+        self._initialize_builtins()

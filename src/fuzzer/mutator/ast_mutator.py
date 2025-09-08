@@ -142,6 +142,7 @@ class AstMutator(VyperNodeTransformer):
         self.type_generator.struct_counter = 0
         self.stmt_generator.source_fragments = []
         self.stmt_generator.name_generator.counter = 0
+        self.function_registry.reset()
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
