@@ -74,37 +74,25 @@ class FuzzerReporter:
 
     def update_from_scenario_result(self, result: Any):
         for trace_idx, deployment_result in result.get_deployment_results():
-            # Check if this is a compilation failure vs runtime deployment failure
-            if not deployment_result.success and deployment_result.error:
-                if isinstance(deployment_result.error, VyperInternalException):
-                    # Compiler crash (CompilerPanic, CodegenPanic, etc.)
-                    self.record_compiler_crash()
-                    # Save the crash if source code is available
-                    if (
-                        hasattr(deployment_result, "source_code")
-                        and deployment_result.source_code
-                    ):
-                        self.save_compiler_crash(
-                            deployment_result.source_code,
-                            deployment_result.error,
-                            type(deployment_result.error).__name__,
-                        )
-                elif isinstance(deployment_result.error, VyperException):
-                    # Normal compilation failure (syntax, type errors, etc.)
-                    self.record_compilation_failure()
-                    # Save the compilation failure if source code is available
-                    if (
-                        hasattr(deployment_result, "source_code")
-                        and deployment_result.source_code
-                    ):
-                        self.save_compilation_failure(
-                            deployment_result.source_code,
-                            deployment_result.error,
-                            type(deployment_result.error).__name__,
-                        )
-                else:
-                    # Actual runtime deployment failure (constructor failed)
-                    self.record_deployment(False)
+            if deployment_result.is_compiler_crash:
+                # Compiler crash (CompilerPanic, CodegenPanic, etc.)
+                self.record_compiler_crash()
+                self.save_compiler_crash(
+                    deployment_result.source_code,
+                    deployment_result.error,
+                    type(deployment_result.error).__name__,
+                )
+            elif deployment_result.is_compilation_failure:
+                # Normal compilation failure (syntax, type errors, etc.)
+                self.record_compilation_failure()
+                self.save_compilation_failure(
+                    deployment_result.source_code,
+                    deployment_result.error,
+                    type(deployment_result.error).__name__,
+                )
+            elif deployment_result.is_runtime_failure:
+                # Actual runtime deployment failure (constructor failed)
+                self.record_deployment(False)
             else:
                 self.record_deployment(deployment_result.success)
 

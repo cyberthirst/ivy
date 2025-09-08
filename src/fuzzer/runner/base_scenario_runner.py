@@ -21,45 +21,79 @@ from ..export_utils import (
 
 
 @dataclass
-class DeploymentResult:
-    """Result of deploying a contract."""
+class BaseResult:
+    """Base result class with common fields."""
 
     success: bool
-    contract: Optional[Any] = None  # Contract instance (VyperContract)
     error: Optional[Exception] = None
     storage_dump: Optional[Dict[str, Any]] = None
-    deployed_address: Optional[str] = (
-        None  # Expected address where contract was deployed
-    )
-    source_code: Optional[str] = None  # Source code that was attempted to deploy
+
+    @property
+    def is_runtime_failure(self) -> bool:
+        """Check if this is a runtime failure (not compilation-related)."""
+        if self.success:
+            return False
+        # Runtime failure if error exists and is NOT a Vyper compilation error
+        return self.error is not None and not isinstance(self.error, VyperException)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "success": self.success,
             "error": str(self.error) if self.error else None,
-            "address": str(getattr(self.contract, "address", self.contract))
-            if self.success
-            else None,
             "storage_dump": self.storage_dump,
         }
 
 
 @dataclass
-class CallResult:
-    """Result of a single function call."""
+class DeploymentResult(BaseResult):
+    """Result of deploying a contract."""
 
-    success: bool
-    output: Any = None
-    error: Optional[Exception] = None
-    storage_dump: Optional[Dict[str, Any]] = None
+    contract: Optional[Any] = None  # Contract instance (VyperContract)
+    deployed_address: Optional[str] = (
+        None  # Expected address where contract was deployed
+    )
+    source_code: Optional[str] = None  # Source code that was attempted to deploy
+
+    @property
+    def is_compilation_failure(self) -> bool:
+        """Check if this is a compilation failure (not runtime)."""
+        if self.success:
+            return False
+
+        return (
+            self.error is not None
+            and isinstance(self.error, VyperException)
+            and not isinstance(self.error, VyperInternalException)
+        )
+
+    @property
+    def is_compiler_crash(self) -> bool:
+        """Check if this is a compiler crash (internal error)."""
+        if self.success:
+            return False
+
+        return self.error is not None and isinstance(self.error, VyperInternalException)
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "success": self.success,
-            "output": self.output if self.output else None,
-            "error": str(self.error) if self.error else None,
-            "storage_dump": self.storage_dump,
-        }
+        result = super().to_dict()
+        result["address"] = (
+            str(getattr(self.contract, "address", self.contract))
+            if self.success
+            else None
+        )
+        return result
+
+
+@dataclass
+class CallResult(BaseResult):
+    """Result of a single function call."""
+
+    output: Any = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = super().to_dict()
+        result["output"] = self.output if self.output else None
+        return result
 
 
 @dataclass
@@ -71,6 +105,8 @@ class TraceResult:
     result: Optional[Union[DeploymentResult, CallResult]] = (
         None  # None for set_balance/clear_transient
     )
+    compilation_xfail: bool = False  # For deployment traces
+    runtime_xfail: Optional[bool] = None  # For both deployment and call traces
 
 
 @dataclass
@@ -192,6 +228,8 @@ class BaseScenarioRunner(ABC):
                         trace_type="deployment",
                         trace_index=trace_index,
                         result=deployment_result,
+                        compilation_xfail=trace.compilation_xfail,
+                        runtime_xfail=trace.runtime_xfail,
                     )
                 )
 
@@ -208,6 +246,7 @@ class BaseScenarioRunner(ABC):
                         trace_type="call",
                         trace_index=trace_index,
                         result=call_result,
+                        runtime_xfail=trace.runtime_xfail,
                     )
                 )
 
