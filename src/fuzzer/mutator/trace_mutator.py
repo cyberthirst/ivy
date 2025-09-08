@@ -124,12 +124,14 @@ class TraceMutator:
         mutated_deployment = None
 
         if trace.source_code and compiler_data:
-            mutated_source = self.ast_mutator.mutate_source_with_compiler_data(
+            mutation_result = self.ast_mutator.mutate_source_with_compiler_data(
                 compiler_data
             )
-            if mutated_source and mutated_source != trace.source_code:
+            if mutation_result and mutation_result.source != trace.source_code:
                 mutated_deployment = deepcopy(trace)
-                mutated_deployment.source_code = mutated_source
+                mutated_deployment.source_code = mutation_result.source
+                mutated_deployment.compilation_xfail = mutation_result.compilation_xfail
+                mutated_deployment.runtime_xfail = mutation_result.runtime_xfail
 
         if trace.python_args and compiler_data:
             deploy_args = trace.python_args.get("args", [])

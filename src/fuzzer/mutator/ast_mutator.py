@@ -1,6 +1,7 @@
 import copy
 import random
 from typing import Optional, Type
+from dataclasses import dataclass
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -17,6 +18,15 @@ from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
 from src.unparser.unparser import unparse
 from src.fuzzer.type_generator import TypeGenerator
+
+
+@dataclass
+class MutationResult:
+    source: str
+    compilation_xfail: bool = False  # True/False - enforce both success and failure
+    runtime_xfail: Optional[bool] = (
+        None  # True = must fail, None = don't know, False = must not fail (future)
+    )
 
 
 class VyperNodeTransformer:
@@ -635,7 +645,11 @@ class AstMutator(VyperNodeTransformer):
 
             print(final_result)
             print("===============")
-            return final_result
+            return MutationResult(
+                source=final_result,
+                compilation_xfail=self.context.compilation_xfail,
+                runtime_xfail=self.context.runtime_xfail,
+            )
         except Exception as e:
             import logging
             import traceback
