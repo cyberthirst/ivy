@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, Optional
 from copy import deepcopy
 
-from .mutator.ast_mutator import AstMutator
+from .mutator.ast_mutator import AstMutator, MutationResult
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
@@ -131,7 +131,7 @@ class DifferentialFuzzer:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
                 compiler_data = self.get_compiler_data(trace)
 
-                # Mutate the deployment trace
+                # Mutate the deployment trace, xfail flags are set on the trace
                 mutated_trace = self.trace_mutator.mutate_deployment_trace(
                     trace, compiler_data
                 )

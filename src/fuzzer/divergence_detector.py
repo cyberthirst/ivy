@@ -13,12 +13,15 @@ from .runner.base_scenario_runner import ScenarioResult, DeploymentResult, CallR
 class Divergence:
     """Represents a divergence between two runners."""
 
-    type: str  # "deployment" or "execution"
+    type: str  # "deployment", "execution", or "xfail"
     step: int  # 0 for deployment, 1+ for calls
     scenario: Scenario
     ivy_result: Optional[Union[DeploymentResult, CallResult]] = None
     boa_result: Optional[Union[DeploymentResult, CallResult]] = None
     function: Optional[str] = None  # For execution divergences
+    xfail_type: Optional[str] = None  # "compilation_xfail" or "runtime_xfail"
+    xfail_expected: Optional[Union[bool, None]] = None  # What we expected
+    xfail_actual: Optional[str] = None  # What actually happened
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -40,7 +43,11 @@ class Divergence:
             if self.scenario.mutated_traces:
                 result["has_mutations"] = True
 
-        if self.type == "deployment":
+        if self.type == "xfail":
+            result["xfail_type"] = self.xfail_type
+            result["xfail_expected"] = self.xfail_expected
+            result["xfail_actual"] = self.xfail_actual
+        elif self.type == "deployment":
             if self.ivy_result:
                 result["ivy_deployment"] = self.ivy_result.to_dict()
             if self.boa_result:

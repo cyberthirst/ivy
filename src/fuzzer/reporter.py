@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import time
 import json
 import logging
@@ -24,6 +24,9 @@ class FuzzerReporter:
     # Overall statistics
     total_scenarios: int = 0
     divergences: int = 0
+
+    # Xfail validation statistics
+    xfail_violations: int = 0  # Count of xfail expectation violations
 
     # Per-item statistics
     item_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
