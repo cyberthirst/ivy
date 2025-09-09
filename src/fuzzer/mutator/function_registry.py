@@ -1,6 +1,6 @@
 import random
 from typing import Optional, Dict, List, Set
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, HashMapT
 from vyper.semantics.types.function import (
     ContractFunctionT,
     FunctionVisibility,
@@ -160,7 +160,7 @@ class FunctionRegistry:
         num_args = self.rng.randint(0, max_args)
         positional_args = []
         for i in range(num_args):
-            arg_type, _ = type_generator.generate_type(nesting=1)
+            arg_type, _ = type_generator.generate_type(skip={HashMapT}, nesting=1)
             arg_name = f"arg{i}"
             positional_args.append(PositionalArg(arg_name, arg_type))
 
