@@ -353,9 +353,9 @@ class ExprGenerator:
     ) -> list[str]:
         matches = []
         for name, var_info in context.all_vars.items():
-            if target_type.compare_type(var_info.typ) or var_info.typ.compare_type(
-                target_type
-            ):
+            # Directional assignability: a value of var_info.typ must be assignable
+            # to a expr of target_type
+            if target_type.compare_type(var_info.typ):
                 matches.append(name)
         return matches
 
