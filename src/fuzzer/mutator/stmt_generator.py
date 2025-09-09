@@ -5,6 +5,12 @@ from vyper.semantics.types import VyperType, BoolT, HashMapT
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from src.fuzzer.mutator.context import Context, ScopeType
+from src.fuzzer.mutator.strategy import (
+    Strategy,
+    StrategyRegistry,
+    StrategySelector,
+    StrategyExecutor,
+)
 
 
 class FreshNameGenerator:
@@ -39,6 +45,78 @@ class StatementGenerator:
             "assign": 0.3,
             "if": 0.3,
         }
+
+        self._strategy_registry = StrategyRegistry()
+        self._strategy_selector = StrategySelector(self.rng)
+        self._strategy_executor = StrategyExecutor(self._strategy_selector)
+        self._register_strategies()
+
+    def _register_strategies(self) -> None:
+        # Variable declaration: only applicable in module scope
+        self._strategy_registry.register(
+            Strategy(
+                name="stmt.vardecl",
+                tags=frozenset({"stmt", "terminal"}),
+                is_applicable=self._is_vardecl_applicable,
+                weight=self._weight_vardecl,
+                run=self._run_stmt_vardecl,
+            )
+        )
+
+        # Assignment: only inside functions/blocks and if there are modifiable vars.
+        self._strategy_registry.register(
+            Strategy(
+                name="stmt.assign",
+                tags=frozenset({"stmt", "terminal"}),
+                is_applicable=self._is_assign_applicable,
+                weight=self._weight_assign,
+                run=self._run_stmt_assign,
+            )
+        )
+
+        # If-statement: recursive; only inside functions/blocks.
+        self._strategy_registry.register(
+            Strategy(
+                name="stmt.if",
+                tags=frozenset({"stmt", "recursive"}),
+                is_applicable=self._is_if_applicable,
+                weight=self._weight_if,
+                run=self._run_stmt_if,
+            )
+        )
+
+    def _is_vardecl_applicable(self, **ctx) -> bool:
+        context: Context = ctx["context"]
+        return bool(context.is_module_scope)
+
+    def _is_assign_applicable(self, **ctx) -> bool:
+        context: Context = ctx["context"]
+        if context.is_module_scope:
+            return False
+        return bool(self.get_modifiable_variables(context))
+
+    def _is_if_applicable(self, **ctx) -> bool:
+        context: Context = ctx["context"]
+        return not context.is_module_scope
+
+    def _weight_vardecl(self, **ctx) -> float:
+        return float(self.statement_weights.get("vardecl", 1.0))
+
+    def _weight_assign(self, **ctx) -> float:
+        return float(self.statement_weights.get("assign", 1.0))
+
+    def _weight_if(self, **ctx) -> float:
+        return float(self.statement_weights.get("if", 1.0))
+
+    def _run_stmt_vardecl(self, **ctx):
+        return self.create_vardecl_and_register(ctx["context"], ctx.get("parent"))
+
+    def _run_stmt_assign(self, **ctx):
+        return self.generate_assign(ctx["context"], ctx.get("parent"))
+
+    def _run_stmt_if(self, **ctx):
+        depth = ctx.get("depth", 0)
+        return self.generate_if(ctx["context"], ctx.get("parent"), depth)
 
     def _create_var_info(
         self,
@@ -209,45 +287,31 @@ class StatementGenerator:
         if depth >= self.max_depth:
             return self._generate_simple_statement(context, parent)
 
-        nest_prob = self.nest_decay**depth
+        # Collect available statement strategies and execute with retry
+        strategies = self._strategy_registry.collect(
+            include_tags=("stmt",),
+            context={
+                "context": context,
+                "parent": parent,
+                "depth": depth,
+                "return_type": return_type,
+                "rng": self.rng,
+            },
+        )
 
-        weights = []
-        choices = []
-
-        # In module scope, we can only add variable declarations
-        if context.is_module_scope:
-            choices.append("vardecl")
-            weights.append(self.statement_weights["vardecl"])
-        else:
-            # Inside functions/blocks we can add various statements
-            # Don't generate vardecl here - only via inject_statements at the beginning
-            if context.all_vars:
-                choices.append("assign")
-                weights.append(self.statement_weights["assign"])
-
-            choices.append("if")
-            weights.append(self.statement_weights["if"] * nest_prob)
-
-        if not choices:
-            return ast.Pass()
-
-        total = sum(weights)
-        weights = [w / total for w in weights]
-
-        choice = self.rng.choices(choices, weights=weights)[0]
-
-        if choice == "if":
-            return self.generate_if(context, parent, depth)
-        elif choice == "assign":
-            assign = self.generate_assign(context, parent)
-            if assign is not None:
-                return assign
-            return ast.Pass()
-        elif choice == "vardecl":
-            return self.create_vardecl_and_register(context, parent)
-
-        # Should never reach here, but just in case
-        return ast.Pass()
+        return self._strategy_executor.execute_with_retry(
+            strategies,
+            policy="weighted_random",
+            fallback=lambda: ast.Pass(),
+            context={
+                "context": context,
+                "parent": parent,
+                "depth": depth,
+                "return_type": return_type,
+                "rng": self.rng,
+                "nest_decay": self.nest_decay,
+            },
+        )
 
     def _generate_simple_statement(
         self, context, parent: Optional[ast.VyperNode]

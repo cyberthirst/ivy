@@ -21,6 +21,7 @@ from vyper.semantics.types import (
 from .value_mutator import ValueMutator
 from .context import Context
 from .function_registry import FunctionRegistry
+from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
 from vyper.semantics.analysis.base import DataLocation
 
 
@@ -52,6 +53,12 @@ class ExprGenerator:
             DecimalT: self._decimal_to_ast,
         }
 
+        self._strategy_registry = StrategyRegistry()
+        self._strategy_selector = StrategySelector(self.rng)
+        self._strategy_executor = StrategyExecutor(self._strategy_selector)
+
+        self._register_strategies()
+
     def generate(
         self, target_type: VyperType, context: Context, depth: int = 3
     ) -> ast.VyperNode:
@@ -62,10 +69,187 @@ class ExprGenerator:
         if depth == 0:
             return self._generate_terminal(target_type, context)
 
-        # Build list of available strategies
-        strategies = self._get_strategies(target_type, context, depth)
+        # Collect strategies via registry and execute with retry
+        strategies = self._strategy_registry.collect(
+            type_class=type(target_type),
+            include_tags=("expr",),
+            context={
+                "target_type": target_type,
+                "context": context,
+                "depth": depth,
+                "rng": self.rng,
+                "gen": self,
+                "function_registry": self.function_registry,
+            },
+        )
 
-        return self._try_strategies_with_retry(strategies)
+        # Always include literal as a safe fallback if not already in the set
+        # (Registry likely contains it already, but make sure.)
+        # Execution context is passed through executor.
+        def _fallback_literal():
+            return self._generate_literal(target_type, context)
+
+        return self._strategy_executor.execute_with_retry(
+            strategies,
+            policy="weighted_random",
+            fallback=_fallback_literal,
+            context={
+                "target_type": target_type,
+                "context": context,
+                "depth": depth - 1,  # recursive strategies consume depth
+                "rng": self.rng,
+                "gen": self,
+                "function_registry": self.function_registry,
+            },
+        )
+
+    def _register_strategies(self) -> None:
+        # Base literal (terminal; always applicable)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.literal",
+                tags=frozenset({"expr", "terminal"}),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 1.0,
+                run=self._run_literal,
+            )
+        )
+
+        # Variable reference (terminal)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.var_ref",
+                tags=frozenset({"expr", "terminal"}),
+                is_applicable=self._is_var_ref_applicable,
+                weight=self._weight_var_ref,
+                run=self._run_var_ref,
+            )
+        )
+
+        # Integer arithmetic (recursive)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.arithmetic",
+                tags=frozenset({"expr", "recursive"}),
+                type_classes=(IntegerT,),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 1.0,
+                run=self._run_arithmetic,
+            )
+        )
+
+        # Unary minus for signed integers (recursive)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.unary_minus",
+                tags=frozenset({"expr", "recursive"}),
+                type_classes=(IntegerT,),
+                is_applicable=self._is_unary_minus_applicable,
+                weight=lambda **_: 1.0,
+                run=self._run_unary_minus,
+            )
+        )
+
+        # Boolean ops and comparisons (recursive targeting BoolT)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.comparison",
+                tags=frozenset({"expr", "recursive"}),
+                type_classes=(BoolT,),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 1.0,
+                run=self._run_comparison,
+            )
+        )
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.boolean_op",
+                tags=frozenset({"expr", "recursive"}),
+                type_classes=(BoolT,),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 1.0,
+                run=self._run_boolean_op,
+            )
+        )
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.not",
+                tags=frozenset({"expr", "recursive"}),
+                type_classes=(BoolT,),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 1.0,
+                run=self._run_not,
+            )
+        )
+
+        # Function calls (recursive)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.func_call",
+                tags=frozenset({"expr", "recursive"}),
+                is_applicable=self._is_func_call_applicable,
+                weight=lambda **_: 1.0,
+                run=self._run_func_call,
+            )
+        )
+
+    # Applicability/weight helpers
+
+    def _is_var_ref_applicable(self, **ctx) -> bool:
+        target_type: VyperType = ctx["target_type"]
+        context: Context = ctx["context"]
+        return bool(self._find_matching_variables(target_type, context))
+
+    def _weight_var_ref(self, **ctx) -> float:
+        # Slightly bias towards var refs when there are many
+        target_type: VyperType = ctx["target_type"]
+        context: Context = ctx["context"]
+        n = len(self._find_matching_variables(target_type, context))
+        return 1.0 if n == 0 else min(2.0, 0.5 + 0.1 * n)
+
+    def _is_unary_minus_applicable(self, **ctx) -> bool:
+        target_type: VyperType = ctx["target_type"]
+        return isinstance(target_type, IntegerT) and target_type.is_signed
+
+    def _is_func_call_applicable(self, **ctx) -> bool:
+        return self.function_registry is not None
+
+    # Runner helpers (consume context kwargs)
+
+    def _run_literal(self, **ctx):
+        return self._generate_literal(ctx["target_type"], ctx["context"])
+
+    def _run_var_ref(self, **ctx):
+        target_type: VyperType = ctx["target_type"]
+        context: Context = ctx["context"]
+        matches = self._find_matching_variables(target_type, context)
+        if not matches:
+            return None
+        return self._generate_variable_ref(self.rng.choice(matches), context)
+
+    def _run_arithmetic(self, **ctx):
+        return self._generate_arithmetic(
+            ctx["target_type"], ctx["context"], ctx["depth"]
+        )
+
+    def _run_unary_minus(self, **ctx):
+        return self._generate_unary_minus(
+            ctx["target_type"], ctx["context"], ctx["depth"]
+        )
+
+    def _run_comparison(self, **ctx):
+        return self._generate_comparison(ctx["context"], ctx["depth"])
+
+    def _run_boolean_op(self, **ctx):
+        return self._generate_boolean_op(ctx["context"], ctx["depth"])
+
+    def _run_not(self, **ctx):
+        return self._generate_not(ctx["context"], ctx["depth"])
+
+    def _run_func_call(self, **ctx):
+        return self._generate_func_call(
+            ctx["target_type"], ctx["context"], ctx["depth"]
+        )
 
     def _generate_terminal(
         self, target_type: VyperType, context: Context
@@ -266,65 +450,6 @@ class ExprGenerator:
 
         call_node._metadata["type"] = target_type
         return call_node
-
-    def _get_strategies(
-        self, target_type: VyperType, context: Context, depth: int
-    ) -> list:
-        """Build list of available strategies for generating expressions."""
-        strategies = []
-
-        strategies.append(lambda: self._generate_literal(target_type, context))
-
-        matching_vars = self._find_matching_variables(target_type, context)
-        if matching_vars:
-            strategies.append(
-                lambda: self._generate_variable_ref(
-                    self.rng.choice(matching_vars), context
-                )
-            )
-
-        # Type-specific strategies
-        if isinstance(target_type, IntegerT):
-            strategies.append(
-                lambda: self._generate_arithmetic(target_type, context, depth - 1)
-            )
-            if target_type.is_signed:
-                strategies.append(
-                    lambda: self._generate_unary_minus(target_type, context, depth - 1)
-                )
-
-        if isinstance(target_type, BoolT):
-            strategies.append(lambda: self._generate_comparison(context, depth - 1))
-            strategies.append(lambda: self._generate_boolean_op(context, depth - 1))
-            strategies.append(lambda: self._generate_not(context, depth - 1))
-
-        if self.function_registry:
-            strategies.append(
-                lambda: self._generate_func_call(target_type, context, depth - 1)
-            )
-
-        return strategies
-
-    def _try_strategies_with_retry(self, strategies: list) -> ast.VyperNode:
-        """Try strategies with retry mechanism, removing failed ones."""
-        available_strategies = strategies.copy()
-
-        while available_strategies:
-            idx = self.rng.randrange(len(available_strategies))
-            strategy_func = available_strategies[idx]
-
-            try:
-                result = strategy_func()
-                if result is not None:
-                    return result
-            except:
-                pass  # Strategy failed, will be removed
-
-            # Remove failed strategy and try again
-            available_strategies.pop(idx)
-
-        # This should never happen as literal should always work
-        raise RuntimeError("All expression generation strategies failed")
 
     def _generate_func_call(
         self, target_type: VyperType, context: Context, depth: int
