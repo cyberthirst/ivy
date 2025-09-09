@@ -213,7 +213,9 @@ class ExprGenerator:
         return isinstance(target_type, IntegerT) and target_type.is_signed
 
     def _is_func_call_applicable(self, **ctx) -> bool:
-        return self.function_registry is not None
+        # TODO do we allow constant folding of some builtins?
+        # if yes, we'd want to drop this restriction
+        return not ctx["context"].is_module_scope
 
     # Runner helpers (consume context kwargs)
 
