@@ -277,6 +277,15 @@ class StatementGenerator:
                 insert_pos = num_vars
             body.insert(insert_pos, stmt)
 
+        # Ensure function scope terminates with a return when required.
+        if isinstance(parent, ast.FunctionDef):
+            func_type = getattr(parent, "_metadata", {}).get("func_type")
+            return_type = getattr(func_type, "return_type", None)
+
+            if return_type is not None and not self.scope_is_terminated(body):
+                ret_expr = self.expr_generator.generate(return_type, context, depth=2)
+                body.append(ast.Return(value=ret_expr))
+
     def generate_statement(
         self,
         context,
@@ -340,6 +349,14 @@ class StatementGenerator:
                 self.inject_statements(if_node.orelse, context, if_node, depth + 1)
 
         return if_node
+
+    # TODO add current scope - what if it's module scope
+    def scope_is_terminated(self, body: list) -> bool:
+        if not body:
+            return False
+
+        last_stmt = body[-1]
+        return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
 
     def get_modifiable_variables(self, context) -> list[tuple[str, VarInfo]]:
         modifiable_vars = []
