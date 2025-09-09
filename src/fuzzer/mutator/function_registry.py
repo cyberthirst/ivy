@@ -242,7 +242,7 @@ class FunctionRegistry:
     def can_generate_more_functions(self) -> bool:
         """Check if more functions can be generated."""
         return self.generated_count < self.max_generated_functions
-    
+
     def reset(self):
         """Reset the registry state for a new mutation."""
         self.functions.clear()

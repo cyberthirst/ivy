@@ -23,6 +23,7 @@ from .context import Context
 from .function_registry import FunctionRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
 from vyper.semantics.analysis.base import DataLocation
+from vyper.semantics.types.function import StateMutability
 
 
 class ExprGenerator:
@@ -478,11 +479,19 @@ class ExprGenerator:
                 # Can't create more functions
                 return None
             # Get the ContractFunctionT from metadata
-            func_t = func_def._metadata["type"]
+            func_t = func_def._metadata["func_type"]
             func_name = func_def.name
 
-        # Generate the call
-        func_node = ast.Name(id=func_name)
+        if func_t.is_external:
+            func_node = ast.Name(id=func_name)
+        else:
+            assert func_t.is_internal, (
+                f"Expected internal or external function, got {func_t}"
+            )
+            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_name)
+
+        func_node._metadata = getattr(func_node, "_metadata", {})
+        func_node._metadata["type"] = func_t
 
         # Generate arguments
         args = []
@@ -495,10 +504,24 @@ class ExprGenerator:
         call_node = ast.Call(func=func_node, args=args, keywords=[])
         call_node._metadata["type"] = func_t.return_type
 
+        # Wrap external calls using ExtCall/StaticCall
+        if func_t.is_external:
+            if not hasattr(func_t, "state_mutability"):
+                pass
+            if func_t.mutability in (StateMutability.PURE, StateMutability.VIEW):
+                wrapped = ast.StaticCall(value=call_node)
+            else:
+                wrapped = ast.ExtCall(value=call_node)
+            wrapped._metadata = getattr(wrapped, "_metadata", {})
+            wrapped._metadata["type"] = func_t.return_type
+            result_node = wrapped
+        else:
+            result_node = call_node
+
         # Record the call in the call graph
         if self.function_registry.current_function:
             self.function_registry.add_call(
                 self.function_registry.current_function, func_name
             )
 
-        return call_node
+        return result_node
