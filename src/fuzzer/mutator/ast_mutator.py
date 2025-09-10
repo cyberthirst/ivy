@@ -138,6 +138,30 @@ class AstMutator(VyperNodeTransformer):
         self.stmt_generator = StatementGenerator(
             self.expr_generator, self.type_generator, self.rng
         )
+
+    def _negate_condition(self, expr: ast.VyperNode) -> ast.VyperNode:
+        """Return a logically negated version of the test expression.
+
+        - For Compare nodes, invert the operator directly.
+        - For all other expressions, wrap with a boolean Not.
+        """
+        if isinstance(expr, ast.Compare):
+            op_map = {
+                ast.Lt: ast.GtE(),
+                ast.LtE: ast.Gt(),
+                ast.Gt: ast.LtE(),
+                ast.GtE: ast.Lt(),
+                ast.Eq: ast.NotEq(),
+                ast.NotEq: ast.Eq(),
+                ast.In: ast.NotIn(),
+                ast.NotIn: ast.In(),
+            }
+
+            if type(expr.op) in op_map:
+                expr.op = op_map[type(expr.op)]
+                return expr
+
+        return ast.UnaryOp(op=ast.Not(), operand=expr)
         # Control statement injection
         self.inject_statements_prob = 0.3
         self.max_injection_depth = 4
@@ -391,54 +415,23 @@ class AstMutator(VyperNodeTransformer):
             return node
 
         mutation_type = self.rng.choice(["negate_condition", "swap_branches"])
+        mutated = False
 
         if mutation_type == "negate_condition":
-            # Negate the condition
-            # For a simple comparison, invert the operator
-            if isinstance(node.test, ast.Compare):
-                # Map operators to their negation
-                op_map = {
-                    ast.Lt: ast.GtE(),
-                    ast.LtE: ast.Gt(),
-                    ast.Gt: ast.LtE(),
-                    ast.GtE: ast.Lt(),
-                    ast.Eq: ast.NotEq(),
-                    ast.NotEq: ast.Eq(),
-                    ast.In: ast.NotIn(),
-                    ast.NotIn: ast.In(),
-                }
-
-                if type(node.test.op) in op_map:
-                    node.test.op = op_map[type(node.test.op)]
-            else:
-                # Wrap in a Not operation for other expressions
-                node.test = ast.UnaryOp(op=ast.Not(), operand=node.test)
+            node.test = self._negate_condition(node.test)
+            mutated = True
 
         elif mutation_type == "swap_branches":
             # Swap body and orelse
-            node.body, node.orelse = node.orelse, node.body
+            # Only swap when both branches are non-empty to avoid empty if bodies
+            if node.body and node.orelse:
+                node.body, node.orelse = node.orelse, node.body
+                # If we're swapping branches, also negate the condition
+                node.test = self._negate_condition(node.test)
+                mutated = True
 
-            # If we're swapping branches, also negate the condition
-            if isinstance(node.test, ast.Compare):
-                # Map operators to their negation
-                op_map = {
-                    ast.Lt: ast.GtE(),
-                    ast.LtE: ast.Gt(),
-                    ast.Gt: ast.LtE(),
-                    ast.GtE: ast.Lt(),
-                    ast.Eq: ast.NotEq(),
-                    ast.NotEq: ast.Eq(),
-                    ast.In: ast.NotIn(),
-                    ast.NotIn: ast.In(),
-                }
-
-                if type(node.test.op) in op_map:
-                    node.test.op = op_map[type(node.test.op)]
-            else:
-                # Wrap in a Not operation for other expressions
-                node.test = ast.UnaryOp(op=ast.Not(), operand=node.test)
-
-        self.mutations_done += 1
+        if mutated:
+            self.mutations_done += 1
         return node
 
     def visit_Return(self, node: ast.Return):
