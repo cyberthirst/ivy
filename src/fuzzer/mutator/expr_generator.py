@@ -383,6 +383,11 @@ class ExprGenerator:
         right = self.generate(target_type, context, depth)
 
         node = ast.BinOp(left=left, op=op_class(), right=right)
+
+        if isinstance(node.op, (ast.FloorDiv, ast.Mod, ast.Div)):
+            if isinstance(right, ast.Int) and getattr(right, "value", None) == 0:
+                context.compilation_xfail = True
+
         node._metadata["type"] = target_type
         return node
 
