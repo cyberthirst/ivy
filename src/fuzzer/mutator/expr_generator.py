@@ -650,10 +650,27 @@ class ExprGenerator:
             # The concat return length is sum(parts) which is <= target length by design
             return self._finalize_call(func_node, args, make_typ(sum(parts)))
 
-        # Record the call in the call graph
-        if self.function_registry.current_function:
-            self.function_registry.add_call(
-                self.function_registry.current_function, func_name
-            )
+        if name == "slice":
+            if isinstance(target_type, (BytesT, StringT)):
+                ret_len = target_type.length
+                arg_len = ret_len + self.rng.randint(0, 32)
+                arg_t = (
+                    StringT(arg_len)
+                    if isinstance(target_type, StringT)
+                    else BytesT(arg_len)
+                )
+                arg0 = self.generate(arg_t, context, max(0, depth))
+                # pick literal start/length within bounds for static safety
+                start = self.rng.randint(0, max(0, arg_len - ret_len))
+                length = (
+                    ret_len
+                    if ret_len > 0
+                    else self.rng.randint(1, max(1, arg_len - start))
+                )
+                a1 = self._generate_uint256_literal(start)
+                a2 = self._generate_uint256_literal(length)
+                return self._finalize_call(func_node, [arg0, a1, a2], target_type)
+            return None
 
-        return result_node
+        # Unknown builtin (not yet supported)
+        return None
