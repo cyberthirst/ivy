@@ -1,7 +1,11 @@
 import random
 from typing import Optional
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, BoolT, HashMapT
+from vyper.semantics.types import (
+    VyperType,
+    BoolT,
+    HashMapT,
+)
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability
@@ -377,15 +381,35 @@ class StatementGenerator:
 
         var_name, var_info = self.rng.choice(modifiable_vars)
 
+        # Build base reference (self.x or local)
         if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
-            target = ast.Attribute(value=ast.Name(id="self"), attr=var_name)
+            base = ast.Attribute(value=ast.Name(id="self"), attr=var_name)
         else:
-            target = ast.Name(id=var_name)
+            base = ast.Name(id=var_name)
+        base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
-        target._metadata = {"type": var_info.typ, "varinfo": var_info}
-        value = self.expr_generator.generate(var_info.typ, context, depth=3)
+        # Decide if we target a subscript (for arrays/hashmaps/tuples) and allow nesting
+        target_type = var_info.typ
+        target_node: ast.VyperNode = base
 
-        return ast.Assign(targets=[target], value=value)
+        # bias subscripting over assigning a whole new array
+        if (
+            self.expr_generator.is_subscriptable_type(var_info.typ)
+            and self.rng.random() < 0.7
+        ):
+            cur_node, cur_t = self.expr_generator.build_random_chain(
+                base,
+                var_info.typ,
+                context,
+                depth=2,
+                max_steps=2,
+            )
+            target_node = cur_node
+            target_type = cur_t
+
+        value = self.expr_generator.generate(target_type, context, depth=3)
+
+        return ast.Assign(targets=[target_node], value=value)
 
     def create_vardecl_and_register(
         self, context, parent: Optional[ast.VyperNode]

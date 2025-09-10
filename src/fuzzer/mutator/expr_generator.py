@@ -15,8 +15,10 @@ from vyper.semantics.types import (
     SArrayT,
     DArrayT,
     TupleT,
+    HashMapT,
     DecimalT,
 )
+from vyper.semantics.analysis.base import Modifiability
 
 from .value_mutator import ValueMutator
 from .context import Context, ExprMutability
@@ -93,7 +95,7 @@ class ExprGenerator:
 
         return self._strategy_executor.execute_with_retry(
             strategies,
-            policy="weighted_random",
+            policy="weighted_random",  # TODO nested hash maps
             fallback=_fallback_literal,
             context={
                 "target_type": target_type,
@@ -197,6 +199,17 @@ class ExprGenerator:
             )
         )
 
+        # Subscript expressions (recursive)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.subscript",
+                tags=frozenset({"expr", "recursive"}),
+                is_applicable=self._is_subscript_applicable,
+                weight=self._weight_subscript,
+                run=self._run_subscript,
+            )
+        )
+
     # Applicability/weight helpers
 
     def _is_var_ref_applicable(self, **ctx) -> bool:
@@ -222,6 +235,20 @@ class ExprGenerator:
         if mutability in (ExprMutability.CONST):
             return False
         return not ctx["context"].is_module_scope
+
+    def _is_subscript_applicable(self, **ctx) -> bool:
+        target_type: VyperType = ctx["target_type"]
+        context: Context = ctx["context"]
+        return bool(
+            self._find_nested_subscript_bases(target_type, context, max_steps=3)
+        )
+
+    def _weight_subscript(self, **ctx) -> float:
+        target_type: VyperType = ctx["target_type"]
+        context: Context = ctx["context"]
+        # Slight bias based on number of available bases
+        n = len(self._find_subscript_bases(target_type, context))
+        return 1.0 if n == 0 else min(2.5, 0.5 + 0.2 * n)
 
     # Runner helpers (consume context kwargs)
 
@@ -257,6 +284,11 @@ class ExprGenerator:
 
     def _run_func_call(self, **ctx):
         return self._generate_func_call(
+            ctx["target_type"], ctx["context"], ctx["depth"]
+        )
+
+    def _run_subscript(self, **ctx):
+        return self._generate_subscript(
             ctx["target_type"], ctx["context"], ctx["depth"]
         )
 
@@ -367,8 +399,55 @@ class ExprGenerator:
             if target_type.compare_type(var_info.typ):
                 if const_only and var_info.modifiability != Modifiability.CONSTANT:
                     continue
+            # Directional: can var_type be used where target_type is expected?
+            if target_type.compare_type(var_info.typ):
                 matches.append(name)
         return matches
+
+    def _find_subscript_bases(
+        self, target_type: VyperType, context: Context
+    ) -> list[tuple[str, VyperType]]:
+        """Return list of (var_name, var_type) that can be subscripted to yield target_type.
+
+        Supports HashMapT[key_type, value_type] and sequences (SArrayT, DArrayT, TupleT).
+        For TupleT, any element matching target_type is acceptable.
+        """
+        candidates: list[tuple[str, VyperType]] = []
+        for name, var_info in context.all_vars.items():
+            var_t = var_info.typ
+            # HashMap[key->value]
+            # TODO nested hash maps
+            if isinstance(var_t, HashMapT):
+                if target_type.compare_type(var_t.value_type):
+                    candidates.append((name, var_t))
+                continue
+
+            # Static/Dynamic arrays
+            if isinstance(var_t, (SArrayT, DArrayT)):
+                if target_type.compare_type(var_t.value_type):
+                    candidates.append((name, var_t))
+                continue
+
+            # Tuples: allow if any member matches target_type
+            if isinstance(var_t, TupleT):
+                for mt in getattr(var_t, "member_types", []):
+                    if target_type.compare_type(mt):
+                        candidates.append((name, var_t))
+                        break
+
+        return candidates
+
+    def _find_nested_subscript_bases(
+        self, target_type: VyperType, context: Context, max_steps: int
+    ) -> list[tuple[str, VyperType]]:
+        result: list[tuple[str, VyperType]] = []
+        for name, var_info in context.all_vars.items():
+            t = var_info.typ
+            if not self.is_subscriptable_type(t):
+                continue
+            if self.can_reach_via_subscript(t, target_type, max_steps):
+                result.append((name, t))
+        return result
 
     def _generate_variable_ref(self, name: str, context: Context) -> ast.VyperNode:
         var_info = context.all_vars[name]
@@ -381,6 +460,176 @@ class ExprGenerator:
         node._metadata["type"] = var_info.typ
         node._metadata["varinfo"] = var_info
         return node
+
+    def _generate_subscript(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> Optional[ast.Subscript]:
+        bases = self._find_nested_subscript_bases(target_type, context, max_steps=3)
+        if not bases:
+            return None
+
+        name, base_t = self.rng.choice(bases)
+        base_node: ast.VyperNode = self._generate_variable_ref(name, context)
+        built = self.build_chain_to_target(
+            base_node,
+            base_t,
+            target_type,
+            context,
+            depth,
+            max_steps=3,
+        )
+        if not built:
+            return None
+        node, _ = built
+        node._metadata["type"] = target_type
+        return node
+
+    # ----------------------
+    # Shared subscript utils
+    # ----------------------
+
+    def is_subscriptable_type(self, t: VyperType) -> bool:
+        return isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT))
+
+    def _random_integer_type(self) -> IntegerT:
+        bits = self.rng.choice([8, 16, 32, 64, 128, 256])
+        signed = self.rng.choice([True, False])
+        return IntegerT(signed, bits)
+
+    def _generate_index_for_sequence(
+        self, seq_t: VyperType, context: Context, depth: int
+    ) -> ast.VyperNode:
+        assert isinstance(seq_t, (SArrayT, DArrayT))
+        idx_t = self._random_integer_type()
+
+        capacity = seq_t.length
+        small_window = max(0, min(capacity - 1, 3))
+        p_small = 0.8 if isinstance(seq_t, DArrayT) else 0.6
+
+        if capacity > 0 and small_window >= 0 and self.rng.random() < p_small:
+            val = self.rng.randint(0, small_window)
+            return self._int_to_ast(val, idx_t)
+
+        return self.generate(idx_t, context, max(0, depth))
+
+    def can_reach_via_subscript(
+        self, base_t: VyperType, target_t: VyperType, steps_left: int
+    ) -> bool:
+        if steps_left <= 0:
+            return False
+
+        def child_types(t: VyperType):
+            if isinstance(t, HashMapT):
+                yield t.value_type
+            elif isinstance(t, (SArrayT, DArrayT)):
+                yield t.value_type
+            elif isinstance(t, TupleT):
+                for mt in getattr(t, "member_types", []):
+                    yield mt
+
+        for ct in child_types(base_t):
+            if target_t.compare_type(ct):
+                return True
+            if self.is_subscriptable_type(ct) and self.can_reach_via_subscript(
+                ct, target_t, steps_left - 1
+            ):
+                return True
+        return False
+
+    def build_chain_to_target(
+        self,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        target_type: VyperType,
+        context: Context,
+        depth: int,
+        max_steps: int = 3,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        cur_t = base_type
+        node = base_node
+        steps_remaining = max(1, min(max_steps, depth + 1))
+
+        while steps_remaining > 0 and self.is_subscriptable_type(cur_t):
+            next_options: list[tuple[VyperType, ast.VyperNode]] = []
+
+            if isinstance(cur_t, HashMapT):
+                key_expr = self.generate(cur_t.key_type, context, max(0, depth))
+                next_options.append((cur_t.value_type, key_expr))
+
+            elif isinstance(cur_t, (SArrayT, DArrayT)):
+                idx_expr = self._generate_index_for_sequence(cur_t, context, depth)
+                next_options.append((cur_t.value_type, idx_expr))
+
+            elif isinstance(cur_t, TupleT):
+                mtypes = list(getattr(cur_t, "member_types", []))
+                choices = []
+                for i, mt in enumerate(mtypes):
+                    if target_type.compare_type(mt) or (
+                        self.is_subscriptable_type(mt)
+                        and self.can_reach_via_subscript(
+                            mt, target_type, steps_left=steps_remaining - 1
+                        )
+                    ):
+                        choices.append((i, mt))
+                if not choices:
+                    break
+                idx, child_t = self.rng.choice(choices)
+                idx_expr = self._int_to_ast(idx, IntegerT(False, 256))
+                next_options.append((child_t, idx_expr))
+
+            direct = [
+                (ct, idx) for (ct, idx) in next_options if target_type.compare_type(ct)
+            ]
+            chosen_ct, idx_expr = self.rng.choice(direct or next_options)
+
+            node = ast.Subscript(value=node, slice=idx_expr)
+            node._metadata = {"type": chosen_ct}
+            cur_t = chosen_ct
+            steps_remaining -= 1
+
+            if target_type.compare_type(cur_t):
+                return node, cur_t
+
+        if target_type.compare_type(cur_t):
+            return node, cur_t
+        return None
+
+    def build_random_chain(
+        self,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        context: Context,
+        depth: int,
+        max_steps: int = 2,
+    ) -> tuple[ast.VyperNode, VyperType]:
+        cur_t = base_type
+        node = base_node
+        steps = self.rng.randint(1, max_steps)
+
+        for _ in range(steps):
+            if isinstance(cur_t, HashMapT):
+                idx_expr = self.generate(cur_t.key_type, context, max(0, depth))
+                cur_t = cur_t.value_type
+            elif isinstance(cur_t, (SArrayT, DArrayT)):
+                idx_expr = self._generate_index_for_sequence(cur_t, context, depth)
+                cur_t = cur_t.value_type
+            elif isinstance(cur_t, TupleT):
+                mtypes = list(getattr(cur_t, "member_types", []))
+                if not mtypes:
+                    break
+                idx = self.rng.randrange(len(mtypes))
+                idx_expr = self._int_to_ast(idx, IntegerT(False, 256))
+                cur_t = mtypes[idx]
+            else:
+                break
+
+            node = ast.Subscript(value=node, slice=idx_expr)
+            node._metadata = {"type": cur_t}
+
+            if not self.is_subscriptable_type(cur_t):
+                break
+
+        return node, cur_t
 
     def _generate_arithmetic(
         self, target_type: IntegerT, context: Context, depth: int
