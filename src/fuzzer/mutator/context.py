@@ -14,6 +14,13 @@ class ScopeType(Enum):
     FOR = auto()
 
 
+class ExprMutability(Enum):
+    CONST = auto()  # compile-time constants only (const exprs)
+    PURE = auto()  # no state reads/writes
+    VIEW = auto()  # can read state, cannot write
+    STATEFUL = auto()  # full access
+
+
 @dataclass
 class Scope:
     scope_type: ScopeType
@@ -32,6 +39,7 @@ class Context:
     runtime_xfail: Optional[bool] = (
         None  # True = must fail, None = don't know, False = must not fail (future)
     )
+    current_mutability: ExprMutability = ExprMutability.STATEFUL
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
@@ -76,3 +84,12 @@ class Context:
             yield
         finally:
             self._pop_scope()
+
+    @contextmanager
+    def mutability(self, new_mode: ExprMutability):
+        prev = self.current_mutability
+        self.current_mutability = new_mode
+        try:
+            yield
+        finally:
+            self.current_mutability = prev
