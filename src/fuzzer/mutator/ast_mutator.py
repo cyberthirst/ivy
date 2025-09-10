@@ -662,7 +662,7 @@ class AstMutator(VyperNodeTransformer):
 
     def mutate_source_with_compiler_data(
         self, compiler_data: CompilerData
-    ) -> Optional[str]:
+    ) -> Optional[MutationResult]:
         """Mutate source using annotated AST from CompilerData."""
         try:
             annotated_module = compiler_data.annotated_vyper_module

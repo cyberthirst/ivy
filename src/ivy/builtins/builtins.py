@@ -386,6 +386,13 @@ def builtin_epsilon(typ):
     return VyperDecimal(1, scaled=True)
 
 
+def builtin_abs(x):
+    """Absolute value for integers and decimals."""
+    if isinstance(x, VyperDecimal):
+        return VyperDecimal(abs(x.value), scaled=True)
+    return abs(x)
+
+
 def builtin_sqrt(x: "VyperDecimal") -> "VyperDecimal":
     """
     The underlying value is stored as an integer N = floor(d * 10**10).

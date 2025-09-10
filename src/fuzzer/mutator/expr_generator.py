@@ -113,7 +113,8 @@ class ExprGenerator:
                 name="expr.literal",
                 tags=frozenset({"expr", "terminal"}),
                 is_applicable=lambda **_: True,
-                weight=lambda **_: 1.0,
+                # prefer non-literals; keep as low-weight but reliable fallback
+                weight=lambda **_: 0.15,
                 run=self._run_literal,
             )
         )
@@ -470,33 +471,54 @@ class ExprGenerator:
     def _generate_func_call(
         self, target_type: VyperType, context: Context, depth: int
     ) -> Optional[ast.Call]:
-        """Generate a function call, either to existing or new function."""
+        """Generate a function call, selecting between user functions and builtins."""
         if not self.function_registry:
             return None
 
         current_func = self.function_registry.current_function
         assert current_func is not None
 
+        # Gather candidates
         compatible_func = self.function_registry.get_compatible_function(
             target_type, current_func
         )
+        compatible_builtins = self.function_registry.get_compatible_builtins(
+            target_type
+        )
 
-        # Try to use existing function with 90% probability
-        if compatible_func and self.rng.random() < 0.9:
-            func_t = compatible_func
-            func_name = func_t.name
-        else:
+        # Decide path: prefer user function, but sometimes pick builtin
+        use_builtin = False
+        if compatible_builtins:
+            if not compatible_func:
+                use_builtin = True
+            else:
+                use_builtin = self.rng.random() < 0.4
+
+        if use_builtin:
+            name, builtin = self.rng.choice(compatible_builtins)
+            return self._generate_builtin_call(
+                name, builtin, target_type, context, depth
+            )
+
+        # Fall back to user function (existing or create new)
+        if not compatible_func or self.rng.random() >= 0.9:
             # Create a new function (returns ast.FunctionDef or None)
             func_def = self.function_registry.create_new_function(
                 return_type=target_type, type_generator=self.type_generator, max_args=2
             )
             if func_def is None:
-                # Can't create more functions
+                # Can't create more functions; try builtin if available
+                if compatible_builtins:
+                    name, builtin = self.rng.choice(compatible_builtins)
+                    return self._generate_builtin_call(
+                        name, builtin, target_type, context, depth
+                    )
                 return None
-            # Get the ContractFunctionT from metadata
             func_t = func_def._metadata["func_type"]
-            func_name = func_def.name
+        else:
+            func_t = compatible_func
 
+        func_name = func_t.name
         if func_t.is_external:
             func_node = ast.Name(id=func_name)
         else:
@@ -515,23 +537,118 @@ class ExprGenerator:
                 arg_expr = self.generate(pos_arg.typ, context, max(0, depth))
                 args.append(arg_expr)
 
-        # Create the call node
-        call_node = ast.Call(func=func_node, args=args, keywords=[])
-        call_node._metadata["type"] = func_t.return_type
+        # Build and maybe wrap
+        result_node = self._finalize_call(func_node, args, func_t.return_type, func_t)
 
-        # Wrap external calls using ExtCall/StaticCall
+        # Record the call in the call graph
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function, func_name
+            )
+
+        return result_node
+
+    def _finalize_call(self, func_node, args, return_type, func_t=None):
+        """Create ast.Call and annotate; wrap external calls if func_t provided."""
+        call_node = ast.Call(func=func_node, args=args, keywords=[])
+        call_node._metadata = getattr(call_node, "_metadata", {})
+        call_node._metadata["type"] = return_type
+
+        if func_t is None:
+            return call_node
+
         if func_t.is_external:
-            if not hasattr(func_t, "state_mutability"):
-                pass
             if func_t.mutability in (StateMutability.PURE, StateMutability.VIEW):
                 wrapped = ast.StaticCall(value=call_node)
             else:
                 wrapped = ast.ExtCall(value=call_node)
             wrapped._metadata = getattr(wrapped, "_metadata", {})
-            wrapped._metadata["type"] = func_t.return_type
-            result_node = wrapped
-        else:
-            result_node = call_node
+            wrapped._metadata["type"] = return_type
+            return wrapped
+        return call_node
+
+    def _generate_uint256_literal(self, value: int) -> ast.Int:
+        node = ast.Int(value=value)
+        node._metadata["type"] = IntegerT(False, 256)
+        return node
+
+    def _generate_builtin_call(
+        self,
+        name: str,
+        builtin,
+        target_type: VyperType,
+        context: Context,
+        depth: int,
+    ) -> Optional[ast.Call]:
+        # func node
+        func_node = ast.Name(id=name)
+        func_node._metadata = getattr(func_node, "_metadata", {})
+        func_node._metadata["type"] = builtin
+
+        # Dispatch per builtin for arg synthesis + return typing
+        if name in {"min", "max"}:
+            if not isinstance(target_type, (IntegerT, DecimalT)):
+                return None
+            arg_t = target_type
+            a0 = self.generate(arg_t, context, max(0, depth))
+            a1 = self.generate(arg_t, context, max(0, depth))
+            return self._finalize_call(func_node, [a0, a1], arg_t)
+
+        if name == "abs":
+            if isinstance(target_type, IntegerT) and not target_type.is_signed:
+                return None
+            if not isinstance(target_type, (IntegerT, DecimalT)):
+                return None
+            arg_t = target_type
+            a0 = self.generate(arg_t, context, max(0, depth))
+            return self._finalize_call(func_node, [a0], arg_t)
+
+        if name in {"floor", "ceil"}:
+            # Expect decimal arg, return concrete integer type from builtin
+
+            a0 = self.generate(DecimalT(), context, max(0, depth))
+            ret_t = getattr(builtin, "_return_type", None) or IntegerT(True, 256)
+            return self._finalize_call(func_node, [a0], ret_t)
+
+        if name == "len":
+            # Only support BytesT/StringT to start
+            max_len = self.rng.randint(1, 128)
+
+            arg_t = self.rng.choice([BytesT(max_len), StringT(max_len)])
+            a0 = self.generate(arg_t, context, max(0, depth))
+            ret_t = getattr(builtin, "_return_type", IntegerT(False, 256))
+            return self._finalize_call(func_node, [a0], ret_t)
+
+        if name == "concat":
+            # Choose k in [2,8] and a budget B in [0, target.length].
+            # Partition B into k nonnegative parts and generate that many args.
+            if not isinstance(target_type, (StringT, BytesT)):
+                return None
+
+            tgt_len = target_type.length
+            k = self.rng.randint(2, 8)
+            budget = self.rng.randint(0, tgt_len)
+
+            # composition of `budget` into `k` nonnegative parts
+            parts = []
+            remaining = budget
+            for i in range(k - 1):
+                li = self.rng.randint(0, remaining)
+                parts.append(li)
+                remaining -= li
+            parts.append(remaining)
+
+            # shuffle to avoid monotone order bias
+            self.rng.shuffle(parts)
+
+            def make_typ(n):
+                return StringT(n) if isinstance(target_type, StringT) else BytesT(n)
+
+            arg_types = [make_typ(n) for n in parts]
+            args = [self.generate(t, context, max(0, depth - 1)) for t in arg_types]
+
+            # The concat return length is sum(parts) which is <= target length by design
+            return self._finalize_call(func_node, args, make_typ(sum(parts)))
 
         # Record the call in the call graph
         if self.function_registry.current_function:

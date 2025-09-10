@@ -1,6 +1,14 @@
 import random
-from typing import Optional, Dict, List, Set
-from vyper.semantics.types import VyperType, HashMapT
+from typing import Optional, Dict, List, Set, Tuple, Any
+from vyper.semantics.types import (
+    VyperType,
+    HashMapT,
+    IntegerT,
+    DecimalT,
+    TYPE_T,
+    StringT,
+    BytesT,
+)
 from vyper.semantics.types.function import (
     ContractFunctionT,
     FunctionVisibility,
@@ -28,6 +36,8 @@ class FunctionRegistry:
         self.functions: Dict[str, ContractFunctionT] = {}
         # Map from return type to set of function names
         self.functions_by_return_type: Dict[type, Set[str]] = {}
+        # Keep builtin function objects by name (e.g., "min")
+        self.builtins: Dict[str, Any] = {}
         # Track call graph to prevent cycles
         self.call_graph: Dict[str, Set[str]] = {}  # caller -> callees
         self.current_function: Optional[str] = (
@@ -41,7 +51,17 @@ class FunctionRegistry:
     def _initialize_builtins(self):
         """Add builtin functions from Vyper's DISPATCH_TABLE."""
         # Add selected builtins that are useful for fuzzing
-        useful_builtins = ["min", "max", "len", "empty", "abs", "floor", "ceil"]
+        useful_builtins = [
+            "min",
+            "max",
+            "len",
+            "empty",  # currently skipped by selector (type-literal); kept for future
+            "abs",
+            "floor",
+            "ceil",
+            "concat",
+            "slice",
+        ]
 
         for name, builtin in DISPATCH_TABLE.items():
             if name in useful_builtins:
@@ -53,11 +73,64 @@ class FunctionRegistry:
         # Store in our registry for lookup
         # Note: builtins don't go in functions dict since they're not ContractFunctionT
         # but we track them for return type lookups
+        self.builtins[name] = builtin
         if hasattr(builtin, "_return_type") and builtin._return_type:
             type_key = type(builtin._return_type)
             if type_key not in self.functions_by_return_type:
                 self.functions_by_return_type[type_key] = set()
             self.functions_by_return_type[type_key].add(f"__builtin__{name}")
+
+    def get_compatible_builtins(self, return_type: VyperType) -> List[Tuple[str, Any]]:
+        """Return a list of (name, builtin) where the builtin can produce return_type.
+
+        - If builtin has a concrete _return_type: require compare_type.
+        - For polymorphic returns (e.g., min/max/abs): allow when return_type is numeric.
+        - Skip builtins which require type-literal args (TYPE_T) for now.
+        """
+        compat: List[Tuple[str, Any]] = []
+        for name, b in self.builtins.items():
+            # Skip builtins which require TYPE_T (e.g., empty/convert) for now.
+            try:
+                inputs = getattr(b, "_inputs", []) or []
+                kwargs = getattr(b, "_kwargs", {}) or {}
+            except Exception:
+                inputs = []
+                kwargs = {}
+
+            # If any positional or kwarg expects a TYPE_T (type literal), skip for now
+            def _is_type_literal(expected: VyperType) -> bool:
+                try:
+                    return TYPE_T.any().compare_type(expected)
+                except Exception:
+                    return False
+
+            has_type_literal = any(_is_type_literal(exp) for _, exp in inputs) or any(
+                _is_type_literal(getattr(kw, "typ", None)) for kw in kwargs.values()
+            )
+            if has_type_literal:
+                continue
+
+            ret_t = getattr(b, "_return_type", None)
+            if ret_t is not None:
+                if return_type.compare_type(ret_t):
+                    compat.append((name, b))
+                continue
+
+            # Polymorphic returns: support common numeric-family builtins
+            if name in {"min", "max", "abs"}:
+                if isinstance(return_type, (IntegerT, DecimalT)):
+                    compat.append((name, b))
+                continue
+
+            if name in {"concat", "slice"}:
+                # returns same family as inputs; allow for dynamic bytes/string
+                if isinstance(return_type, (StringT, BytesT)):
+                    compat.append((name, b))
+                continue
+
+            # Otherwise, skip for now (not supported)
+
+        return compat
 
     def register_function(self, func: ContractFunctionT):
         """Register a ContractFunctionT."""
@@ -247,6 +320,7 @@ class FunctionRegistry:
         """Reset the registry state for a new mutation."""
         self.functions.clear()
         self.functions_by_return_type.clear()
+        self.builtins.clear()
         self.call_graph.clear()
         self.current_function = None
         self.name_generator.counter = 0
