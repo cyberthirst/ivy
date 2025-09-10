@@ -284,37 +284,24 @@ class Unparser(VyperNodeVisitorBase):
         return node.id
 
     def visit_Int(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code
         return str(node.value)
 
     def visit_Decimal(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code
         return str(node.value)
 
     def visit_Hex(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code.replace("0X", "0x")
         if isinstance(node.value, str):
             return node.value.replace("0X", "0x")
         return f"0x{node.value:x}"
 
     def visit_HexBytes(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code.replace("0X", "0x")
         return f"0x{node.value.hex()}"
 
     def visit_Bytes(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code
         # Bytes (dynamic) uses b'...' format, not hex
         return repr(node.value)
 
     def visit_Str(self, node):
-        if hasattr(node, "node_source_code") and node.node_source_code:
-            return node.node_source_code
-
         if "\n" in node.value:
             return f'"""{node.value}"""'
         escaped = (
