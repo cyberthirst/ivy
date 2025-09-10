@@ -19,7 +19,7 @@ from vyper.semantics.types import (
 )
 
 from .value_mutator import ValueMutator
-from .context import Context
+from .context import Context, ExprMutability
 from .function_registry import FunctionRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
 from vyper.semantics.analysis.base import DataLocation
@@ -81,6 +81,7 @@ class ExprGenerator:
                 "rng": self.rng,
                 "gen": self,
                 "function_registry": self.function_registry,
+                "mutability": context.current_mutability,
             },
         )
 
@@ -101,6 +102,7 @@ class ExprGenerator:
                 "rng": self.rng,
                 "gen": self,
                 "function_registry": self.function_registry,
+                "mutability": context.current_mutability,
             },
         )
 
@@ -215,6 +217,9 @@ class ExprGenerator:
     def _is_func_call_applicable(self, **ctx) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
+        mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
+        if mutability in (ExprMutability.CONST):
+            return False
         return not ctx["context"].is_module_scope
 
     # Runner helpers (consume context kwargs)
@@ -354,10 +359,13 @@ class ExprGenerator:
         self, target_type: VyperType, context: Context
     ) -> list[str]:
         matches = []
+        const_only = context.current_mutability == ExprMutability.CONST
         for name, var_info in context.all_vars.items():
             # Directional assignability: a value of var_info.typ must be assignable
             # to a expr of target_type
             if target_type.compare_type(var_info.typ):
+                if const_only and var_info.modifiability != Modifiability.CONSTANT:
+                    continue
                 matches.append(name)
         return matches
 

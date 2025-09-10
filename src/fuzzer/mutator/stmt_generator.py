@@ -4,7 +4,7 @@ from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, BoolT, HashMapT
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from src.fuzzer.mutator.context import Context, ScopeType
+from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability
 from src.fuzzer.mutator.strategy import (
     Strategy,
     StrategyRegistry,
@@ -423,11 +423,19 @@ class StatementGenerator:
             var_info.modifiability == Modifiability.CONSTANT
             or not context.is_module_scope  # inside a function / block
         )
-        init_val = (
-            self.expr_generator.generate(var_info.typ, context, depth=3)
-            if needs_init
-            else None
-        )
+        if needs_init:
+            if (
+                context.is_module_scope
+                and var_info.modifiability == Modifiability.CONSTANT
+            ):
+                with context.mutability(ExprMutability.CONST):
+                    init_val = self.expr_generator.generate(
+                        var_info.typ, context, depth=3
+                    )
+            else:
+                init_val = self.expr_generator.generate(var_info.typ, context, depth=3)
+        else:
+            init_val = None
 
         var_decl = ast.VariableDecl(
             parent=parent,
