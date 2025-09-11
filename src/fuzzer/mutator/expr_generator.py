@@ -188,6 +188,17 @@ class ExprGenerator:
             )
         )
 
+        # If-expression (ternary) supporting any target type (recursive)
+        self._strategy_registry.register(
+            Strategy(
+                name="expr.ifexp",
+                tags=frozenset({"expr", "recursive"}),
+                is_applicable=lambda **_: True,
+                weight=lambda **_: 0.3,
+                run=self._run_ifexp,
+            )
+        )
+
         # Function calls (recursive)
         self._strategy_registry.register(
             Strategy(
@@ -281,6 +292,9 @@ class ExprGenerator:
 
     def _run_not(self, **ctx):
         return self._generate_not(ctx["context"], ctx["depth"])
+
+    def _run_ifexp(self, **ctx):
+        return self._generate_ifexp(ctx["target_type"], ctx["context"], ctx["depth"])
 
     def _run_func_call(self, **ctx):
         return self._generate_func_call(
@@ -481,6 +495,18 @@ class ExprGenerator:
         if not built:
             return None
         node, _ = built
+        node._metadata["type"] = target_type
+        return node
+
+    def _generate_ifexp(
+        self, target_type: VyperType, context: Context, depth: int
+    ) -> ast.IfExp:
+        # Condition must be bool; branches must yield the same type
+        test = self.generate(BoolT(), context, depth)
+        body = self.generate(target_type, context, depth)
+        orelse = self.generate(target_type, context, depth)
+
+        node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = target_type
         return node
 

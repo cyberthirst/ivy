@@ -351,7 +351,7 @@ class Unparser(VyperNodeVisitorBase):
         body = self._expr(node.body)
         test = self._expr(node.test)
         orelse = self._expr(node.orelse)
-        return f"{body} if {test} else {orelse}"
+        return f"{body} if ({test}) else {orelse}"
 
     def visit_Call(self, node):
         func = self._expr(node.func)
