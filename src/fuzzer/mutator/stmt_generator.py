@@ -149,7 +149,11 @@ class StatementGenerator:
         context.add_local(name, typ)
 
     def generate_type(
-        self, context, nesting: int = 3, skip: Optional[set] = None
+        self,
+        context,
+        nesting: int = 3,
+        skip: Optional[set] = None,
+        size_budget: Optional[int] = None,
     ) -> VyperType:
         """Generate a type, biasing towards existing types in context."""
         skip = skip or set()
@@ -165,7 +169,9 @@ class StatementGenerator:
                 var_info = self.rng.choice(valid_vars)
                 return var_info.typ
 
-        typ, fragments = self.type_generator.generate_type(nesting=nesting, skip=skip)
+        typ, fragments = self.type_generator.generate_type(
+            nesting=nesting, skip=skip, size_budget=size_budget
+        )
 
         if fragments:
             for fragment in fragments:
@@ -223,7 +229,17 @@ class StatementGenerator:
             # HashMapT can't be in memory
             skip_types = {HashMapT}
 
-        var_type = self.generate_type(context, nesting=2, skip=skip_types)
+        # Apply a size budget for immutables, constants, and memory variables
+        budget = None
+        if selected_location == DataLocation.MEMORY or selected_modifiability in (
+            Modifiability.CONSTANT,
+            Modifiability.RUNTIME_CONSTANT,
+        ):
+            budget = 10000
+
+        var_type = self.generate_type(
+            context, nesting=2, skip=skip_types, size_budget=budget
+        )
 
         # Create VarInfo
         var_info = self._create_var_info(
