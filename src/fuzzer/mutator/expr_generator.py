@@ -523,20 +523,107 @@ class ExprGenerator:
         return IntegerT(signed, bits)
 
     def _generate_index_for_sequence(
-        self, seq_t: VyperType, context: Context, depth: int
+        self,
+        base_node: ast.VyperNode,
+        seq_t: VyperType,
+        context: Context,
+        depth: int,
     ) -> ast.VyperNode:
+        """Generate an index expression for arrays with three modes:
+        - Guarded by len(base) (preferred)
+        - Random expression (unconstrained)
+        - OOB literal that forces compilation xfail (rare)
+
+        Notes:
+        - Use uint256-only indices (no signedness for now).
+        - Bias DynArray towards small literals because runtime len tends to be small.
+        - For SArray, guarding is still fine and semantically interesting.
+        """
         assert isinstance(seq_t, (SArrayT, DArrayT))
-        idx_t = self._random_integer_type()
 
-        capacity = seq_t.length
-        small_window = max(0, min(capacity - 1, 3))
-        p_small = 0.8 if isinstance(seq_t, DArrayT) else 0.6
+        # Fixed unsigned 256-bit type for indices
+        idx_t = IntegerT(False, 256)
 
-        if capacity > 0 and small_window >= 0 and self.rng.random() < p_small:
-            val = self.rng.randint(0, small_window)
+        # Strategy weights
+        p_guard = 0.60
+        p_rand = 0.35
+        # remaining 0.05 -> OOB literal
+
+        roll = self.rng.random()
+
+        # Helper: literal small index for DArray bias
+        def _small_literal_for_dynarray():
+            # very small indices [0..2]
+            val = self.rng.randint(0, 2)
             return self._int_to_ast(val, idx_t)
 
-        return self.generate(idx_t, context, max(0, depth))
+        # Helper: generate random uint256 index expression
+        def _random_uint_index():
+            return self.generate(idx_t, context, max(0, depth))
+
+        # Helper: guarded index using len(base)
+        def _guarded_index():
+            # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
+            i_expr = (
+                _small_literal_for_dynarray()
+                if isinstance(seq_t, DArrayT) and self.rng.random() < 0.75
+                else _random_uint_index()
+            )
+
+            len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
+            len_call._metadata = getattr(len_call, "_metadata", {})
+            len_call._metadata["type"] = IntegerT(False, 256)
+
+            zero = self._generate_uint256_literal(0)
+            one = self._generate_uint256_literal(1)
+
+            len_gt_zero = ast.Compare(
+                left=len_call,
+                ops=[ast.Gt()],
+                comparators=[zero],
+            )
+            len_gt_zero._metadata = {"type": BoolT()}
+
+            len_minus_one = ast.BinOp(left=len_call, op=ast.Sub(), right=one)
+            len_minus_one._metadata = {"type": idx_t}
+
+            safe_fallback = ast.IfExp(
+                test=len_gt_zero,
+                body=len_minus_one,
+                orelse=zero,
+            )
+            safe_fallback._metadata = {"type": idx_t}
+
+            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_call])
+            cond._metadata = {"type": BoolT()}
+
+            guarded = ast.IfExp(test=cond, body=i_expr, orelse=safe_fallback)
+            guarded._metadata = {"type": idx_t}
+            return guarded
+
+        # Helper: OOB literal that should fail compilation for SArray only (tuple handled elsewhere)
+        def _oob_literal():
+            cap = seq_t.length
+            # choose either -1 (invalid) or cap (== length) as out-of-bounds
+            if self.rng.random() < 0.5:
+                # -1 would be negative; keep uint domain by using cap then rely on compiler
+                val = cap if cap > 0 else 1
+            else:
+                val = cap + 1 if cap > 0 else 1
+            # mark xfail at the context level
+            context.compilation_xfail = True
+            return self._int_to_ast(val, idx_t)
+
+        if roll < p_guard:
+            return _guarded_index()
+        elif roll < p_guard + p_rand:
+            # Bias for DynArray to small literal sometimes
+            if isinstance(seq_t, DArrayT) and self.rng.random() < 0.6:
+                return _small_literal_for_dynarray()
+            return _random_uint_index()
+        else:
+            # Only makes sense for SArray where cap is static; still set xfail
+            return _oob_literal()
 
     def can_reach_via_subscript(
         self, base_t: VyperType, target_t: VyperType, steps_left: int
@@ -583,7 +670,7 @@ class ExprGenerator:
                 next_options.append((cur_t.value_type, key_expr))
 
             elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(cur_t, context, depth)
+                idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
                 next_options.append((cur_t.value_type, idx_expr))
 
             elif isinstance(cur_t, TupleT):
@@ -637,7 +724,7 @@ class ExprGenerator:
                 idx_expr = self.generate(cur_t.key_type, context, max(0, depth))
                 cur_t = cur_t.value_type
             elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(cur_t, context, depth)
+                idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
                 cur_t = cur_t.value_type
             elif isinstance(cur_t, TupleT):
                 mtypes = list(getattr(cur_t, "member_types", []))
