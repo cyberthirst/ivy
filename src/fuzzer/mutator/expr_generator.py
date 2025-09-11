@@ -847,6 +847,40 @@ class ExprGenerator:
         node._metadata["type"] = IntegerT(False, 256)
         return node
 
+    # ---------
+    # AST utils
+    # ---------
+    def _builtin_call_expr(self, name: str, args: list, ret_t: VyperType) -> ast.Call:
+        b = None
+        if self.function_registry and name in self.function_registry.builtins:
+            b = self.function_registry.builtins[name]
+        fn = ast.Name(id=name)
+        fn._metadata = getattr(fn, "_metadata", {})
+        if b is not None:
+            fn._metadata["type"] = b
+        call = ast.Call(func=fn, args=args, keywords=[])
+        call._metadata = getattr(call, "_metadata", {})
+        call._metadata["type"] = ret_t
+        return call
+
+    def _uint_binop_expr(self, left: ast.VyperNode, op, right: ast.VyperNode) -> ast.BinOp:
+        node = ast.BinOp(left=left, op=op, right=right)
+        node._metadata = getattr(node, "_metadata", {})
+        node._metadata["type"] = IntegerT(False, 256)
+        return node
+
+    def _uint_cmp_expr(self, left: ast.VyperNode, op, right: ast.VyperNode) -> ast.Compare:
+        node = ast.Compare(left=left, ops=[op], comparators=[right])
+        node._metadata = getattr(node, "_metadata", {})
+        node._metadata["type"] = BoolT()
+        return node
+
+    def _ifexp_typed(self, test: ast.VyperNode, body: ast.VyperNode, orelse: ast.VyperNode, ret_t: VyperType) -> ast.IfExp:
+        node = ast.IfExp(test=test, body=body, orelse=orelse)
+        node._metadata = getattr(node, "_metadata", {})
+        node._metadata["type"] = ret_t
+        return node
+
     def _generate_builtin_call(
         self,
         name: str,
@@ -926,26 +960,125 @@ class ExprGenerator:
             return self._finalize_call(func_node, args, make_typ(sum(parts)))
 
         if name == "slice":
-            if isinstance(target_type, (BytesT, StringT)):
-                ret_len = target_type.length
-                arg_len = ret_len + self.rng.randint(0, 32)
-                arg_t = (
-                    StringT(arg_len)
-                    if isinstance(target_type, StringT)
-                    else BytesT(arg_len)
-                )
-                arg0 = self.generate(arg_t, context, max(0, depth))
-                # pick literal start/length within bounds for static safety
-                start = self.rng.randint(0, max(0, arg_len - ret_len))
-                length = (
-                    ret_len
-                    if ret_len > 0
-                    else self.rng.randint(1, max(1, arg_len - start))
-                )
-                a1 = self._generate_uint256_literal(start)
-                a2 = self._generate_uint256_literal(length)
-                return self._finalize_call(func_node, [arg0, a1, a2], target_type)
-            return None
+            # Generate slice with dynamic expressions for start/length.
+            # Bias towards valid slices (~70%), but still produce some invalid
+            # ones to ensure compiler/runtime checks are exercised.
+            if not isinstance(target_type, (BytesT, StringT)):
+                return None
 
+            # Helper to build builtin calls directly (min/max/len)
+            def _builtin_call(bname: str, args, ret_t):
+                b = None
+                if self.function_registry and bname in self.function_registry.builtins:
+                    b = self.function_registry.builtins[bname]
+                fn = ast.Name(id=bname)
+                fn._metadata = getattr(fn, "_metadata", {})
+                if b is not None:
+                    fn._metadata["type"] = b
+                call = ast.Call(func=fn, args=args, keywords=[])
+                call._metadata = getattr(call, "_metadata", {})
+                call._metadata["type"] = ret_t
+                return call
+
+            def _uint_binop(a, op, b):
+                node = ast.BinOp(left=a, op=op, right=b)
+                node._metadata = getattr(node, "_metadata", {})
+                node._metadata["type"] = IntegerT(False, 256)
+                return node
+
+            def _uint_cmp(a, op, b):
+                node = ast.Compare(left=a, ops=[op], comparators=[b])
+                node._metadata = getattr(node, "_metadata", {})
+                node._metadata["type"] = BoolT()
+                return node
+
+            def _ifexp(test, body, orelse, ret_t):
+                node = ast.IfExp(test=test, body=body, orelse=orelse)
+                node._metadata = getattr(node, "_metadata", {})
+                node._metadata["type"] = ret_t
+                return node
+
+            ret_len = target_type.length
+
+            # Choose source type:
+            # - For String target, must slice a String
+            # - For Bytes target, pick Bytes[..] or sometimes bytes32
+            if isinstance(target_type, StringT):
+                arg_len = ret_len + self.rng.randint(0, 32)
+                src_t = StringT(arg_len)
+            else:
+                # 25% chance to slice bytes32
+                if self.rng.random() < 0.25:
+                    src_t = BytesM_T(32)
+                    arg_len = 32
+                else:
+                    arg_len = ret_len + self.rng.randint(0, 32)
+                    src_t = BytesT(arg_len)
+
+            # Generate the source expression
+            arg0 = self.generate(src_t, context, max(0, depth))
+
+            # Build len(arg0) where applicable (Bytes/String only)
+            len_ret_t = IntegerT(False, 256)
+            if isinstance(src_t, (BytesT, StringT)):
+                len_arg = arg0
+                len_call = _builtin_call("len", [len_arg], len_ret_t)
+            else:
+                # bytes32 has fixed length 32
+                len_call = self._generate_uint256_literal(32)
+
+            # Random uint expressions to feed into min/max
+            rand_u = self.generate(IntegerT(False, 256), context, max(0, depth))
+            rand_v = self.generate(IntegerT(False, 256), context, max(0, depth))
+
+            # Valid vs invalid selection
+            make_valid = self.rng.random() < 0.7
+
+            if make_valid:
+                # Start: if len == 0 -> 0 else rand % len
+                one = self._generate_uint256_literal(1)
+                zero = self._generate_uint256_literal(0)
+
+                len_is_zero = _uint_cmp(len_call, ast.Eq(), zero)
+                start_else = _uint_binop(rand_u, ast.Mod(), len_call)
+                a1 = _ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+
+                # remaining = len - start
+                remaining = _uint_binop(len_call, ast.Sub(), a1)
+
+                # length: if remaining == 0 -> 1 (will be invalid but rare)
+                # else min((rand_v % bound)+1, remaining) where bound = ret_len (if >0) else remaining
+                rem_is_zero = _uint_cmp(remaining, ast.Eq(), zero)
+                if ret_len > 0:
+                    bound = self._generate_uint256_literal(ret_len)
+                else:
+                    bound = remaining
+                # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
+                rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
+                plus_one = _uint_binop(rand_mod, ast.Add(), one)
+                len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)
+                a2 = _ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
+            else:
+                # Intentionally produce out-of-bounds in a dynamic way
+                one = self._generate_uint256_literal(1)
+                two = self._generate_uint256_literal(2)
+                ten = self._generate_uint256_literal(10)
+
+                choice = self.rng.random()
+                if choice < 0.34:
+                    # start = len(arg0) (or more); length = 1
+                    a1 = len_call
+                    a2 = one
+                elif choice < 0.67:
+                    # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
+                    a1 = _uint_binop(len_call, ast.Add(), _uint_binop(rand_u, ast.Mod(), ten))
+                    a2 = _uint_binop(_uint_binop(rand_v, ast.Mod(), self._generate_uint256_literal(max(1, ret_len + 1))), ast.Add(), one)
+                else:
+                    # start = (len(arg0) * 2); length = 1
+                    a1 = _uint_binop(len_call, ast.Mult(), two)
+                    a2 = one
+
+            return self._finalize_call(func_node, [arg0, a1, a2], target_type)
+            
         # Unknown builtin (not yet supported)
         return None
