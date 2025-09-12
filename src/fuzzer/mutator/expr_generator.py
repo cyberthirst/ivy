@@ -193,7 +193,7 @@ class ExprGenerator:
             Strategy(
                 name="expr.ifexp",
                 tags=frozenset({"expr", "recursive"}),
-                is_applicable=lambda **_: True,
+                is_applicable=self._is_ifexp_applicable,
                 weight=lambda **_: 0.3,
                 run=self._run_ifexp,
             )
@@ -253,6 +253,11 @@ class ExprGenerator:
         return bool(
             self._find_nested_subscript_bases(target_type, context, max_steps=3)
         )
+
+    def _is_ifexp_applicable(self, **ctx) -> bool:
+        # Disallow if-expressions in constant contexts due to compiler limitation
+        mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
+        return mutability != ExprMutability.CONST
 
     def _weight_subscript(self, **ctx) -> float:
         target_type: VyperType = ctx["target_type"]
@@ -670,7 +675,9 @@ class ExprGenerator:
                 next_options.append((cur_t.value_type, key_expr))
 
             elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
+                idx_expr = self._generate_index_for_sequence(
+                    node, cur_t, context, depth
+                )
                 next_options.append((cur_t.value_type, idx_expr))
 
             elif isinstance(cur_t, TupleT):
@@ -724,7 +731,9 @@ class ExprGenerator:
                 idx_expr = self.generate(cur_t.key_type, context, max(0, depth))
                 cur_t = cur_t.value_type
             elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
+                idx_expr = self._generate_index_for_sequence(
+                    node, cur_t, context, depth
+                )
                 cur_t = cur_t.value_type
             elif isinstance(cur_t, TupleT):
                 mtypes = list(getattr(cur_t, "member_types", []))
@@ -950,19 +959,29 @@ class ExprGenerator:
         call._metadata["type"] = ret_t
         return call
 
-    def _uint_binop_expr(self, left: ast.VyperNode, op, right: ast.VyperNode) -> ast.BinOp:
+    def _uint_binop_expr(
+        self, left: ast.VyperNode, op, right: ast.VyperNode
+    ) -> ast.BinOp:
         node = ast.BinOp(left=left, op=op, right=right)
         node._metadata = getattr(node, "_metadata", {})
         node._metadata["type"] = IntegerT(False, 256)
         return node
 
-    def _uint_cmp_expr(self, left: ast.VyperNode, op, right: ast.VyperNode) -> ast.Compare:
+    def _uint_cmp_expr(
+        self, left: ast.VyperNode, op, right: ast.VyperNode
+    ) -> ast.Compare:
         node = ast.Compare(left=left, ops=[op], comparators=[right])
         node._metadata = getattr(node, "_metadata", {})
         node._metadata["type"] = BoolT()
         return node
 
-    def _ifexp_typed(self, test: ast.VyperNode, body: ast.VyperNode, orelse: ast.VyperNode, ret_t: VyperType) -> ast.IfExp:
+    def _ifexp_typed(
+        self,
+        test: ast.VyperNode,
+        body: ast.VyperNode,
+        orelse: ast.VyperNode,
+        ret_t: VyperType,
+    ) -> ast.IfExp:
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata = getattr(node, "_metadata", {})
         node._metadata["type"] = ret_t
@@ -1158,14 +1177,24 @@ class ExprGenerator:
                     a2 = one
                 elif choice < 0.67:
                     # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
-                    a1 = _uint_binop(len_call, ast.Add(), _uint_binop(rand_u, ast.Mod(), ten))
-                    a2 = _uint_binop(_uint_binop(rand_v, ast.Mod(), self._generate_uint256_literal(max(1, ret_len + 1))), ast.Add(), one)
+                    a1 = _uint_binop(
+                        len_call, ast.Add(), _uint_binop(rand_u, ast.Mod(), ten)
+                    )
+                    a2 = _uint_binop(
+                        _uint_binop(
+                            rand_v,
+                            ast.Mod(),
+                            self._generate_uint256_literal(max(1, ret_len + 1)),
+                        ),
+                        ast.Add(),
+                        one,
+                    )
                 else:
                     # start = (len(arg0) * 2); length = 1
                     a1 = _uint_binop(len_call, ast.Mult(), two)
                     a2 = one
 
             return self._finalize_call(func_node, [arg0, a1, a2], target_type)
-            
+
         # Unknown builtin (not yet supported)
         return None
