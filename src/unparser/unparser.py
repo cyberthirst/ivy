@@ -39,6 +39,7 @@ class Unparser(VyperNodeVisitorBase):
             self.indent -= 1
 
     PRECEDENCE = {
+        ast.IfExp: -1,
         ast.Or: 0,
         ast.And: 1,
         ast.Compare: 2,
