@@ -39,7 +39,7 @@ from ivy.exceptions import (
     FunctionNotFound,
     PayabilityViolation,
 )
-from ivy.types import Address, Struct, StaticArray, DynamicArray, Map
+from ivy.types import Address, Struct, StaticArray, DynamicArray, Map, Tuple as IvyTuple
 from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
@@ -246,7 +246,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         typ = calculate_type_for_external_return(typ)
         # from https://github.com/vyperlang/vyper/blob/a1af967e675b72051cf236f75e1104378fd83030/vyper/codegen/core.py#L694
-        output = (ret,) if (not isinstance(ret, tuple) or len(ret) <= 1) else ret
+        is_tuple_like = isinstance(ret, (tuple, IvyTuple))
+        output = (ret,) if (not is_tuple_like or len(ret) <= 1) else ret
         self.current_context.execution_output.output = abi_encode(typ, output)
 
     def _execute_function(self, func_t, args):
@@ -321,11 +322,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         if isinstance(target, ast.Name):
             self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Tuple):
-            if not isinstance(value, tuple):
+            if not isinstance(value, (tuple, IvyTuple)):
                 raise TypeError("Cannot unpack non-iterable to tuple")
-            if len(target.elements) != len(value):
+            # Normalize IvyTuple to a sequence of values
+            seq = tuple(value) if isinstance(value, IvyTuple) else value
+            if len(target.elements) != len(seq):
                 raise ValueError("Mismatch in number of items to unpack")
-            for t, v in zip(target.elements, value):
+            for t, v in zip(target.elements, seq):
                 self._assign_target(t, v)
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
@@ -334,10 +337,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             if isinstance(container, (Map, StaticArray, DynamicArray)):
                 container.__setitem__(index, value, loc)
             else:
-                # TODO should we create a custom tuple too?
-                # it's not necessary for journaling though
-                assert isinstance(container, tuple)
-                container[index] = value
+                assert isinstance(container, IvyTuple)
+                container.__setitem__(index, value, loc)
         elif isinstance(target, ast.Attribute):
             typ = target.value._metadata["type"]
             if isinstance(typ, (SelfT, ModuleT)):

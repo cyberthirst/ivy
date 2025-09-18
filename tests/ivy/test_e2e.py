@@ -2964,3 +2964,71 @@ def get_struct() -> MyStruct:
     assert isinstance(dump["my_struct"], dict)
     assert dump["my_struct"]["member1"] == 42
     assert dump["my_struct"]["member2"] == ["hello", "world", "test"]
+
+
+def test_tuple_indexing(get_contract):
+    src = """
+t: (uint256, uint256)
+
+def bar() -> (uint256, uint256):
+    return 1, 1
+
+@external
+def foo() -> uint256:
+    self.t = self.bar()
+    self.t[0] = 2
+    return self.t[0]
+    """
+    c = get_contract(src)
+    assert c.foo() == 2
+
+
+def test_tuple_storage_copy_on_assign(get_contract):
+    src = """
+t: (uint256, uint256)
+t2: (uint256, uint256)
+
+@external
+def foo() -> (uint256, uint256):
+    self.t[0] = 10
+    self.t[1] = 1
+    self.t2 = self.t
+    self.t[0] = 42
+    return self.t2
+    """
+    c = get_contract(src)
+    assert c.foo() == (10, 1)
+
+
+def test_tuple_destructuring_from_storage(get_contract):
+    src = """
+t: (uint256, uint256)
+
+@external
+def foo() -> uint256:
+    self.t[0] = 1
+    self.t[1] = 2
+    a: uint256 = 0
+    b: uint256 = 0
+    a, b = self.t
+    return a + b
+    """
+    c = get_contract(src)
+    assert c.foo() == 3
+
+
+def test_tuple_destructuring_from_internal_return(get_contract):
+    src = """
+@internal
+def bar() -> (uint256, uint256):
+    return 5, 7
+
+@external
+def foo() -> uint256:
+    a: uint256 = 0
+    b: uint256 = 0
+    a, b = self.bar()
+    return a * b
+    """
+    c = get_contract(src)
+    assert c.foo() == 35

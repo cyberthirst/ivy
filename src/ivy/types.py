@@ -12,6 +12,7 @@ from vyper.semantics.types import (
     FlagT,
     SArrayT,
     DArrayT,
+    TupleT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
@@ -422,4 +423,60 @@ class Struct(_Container):
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
         result.typ = self._typ
+        return result
+
+
+class Tuple(_Container):
+    def __init__(self, typ: TupleT):
+        super().__init__(typ)
+        assert isinstance(typ, TupleT)
+        # Eagerly initialize all members with their default values
+        from ivy.expr.default_values import get_default_value
+
+        self.length = len(typ.member_types)
+        self._values = {
+            i: get_default_value(member_typ)
+            for i, member_typ in enumerate(typ.member_types)
+        }
+
+    def __len__(self) -> int:
+        return self.length
+
+    def _validate_index(self, idx: int) -> None:
+        if idx < 0 or idx >= self.length:
+            raise IndexError(
+                f"Tuple index out of range: {idx} not in [0, {self.length})"
+            )
+
+    def __getitem__(self, idx: int):
+        self._validate_index(idx)
+        return self._values[idx]
+
+    def __setitem__(self, idx: int, value: Any, loc: Optional[DataLocation] = None):
+        self._validate_index(idx)
+        self._journal(idx, loc)
+        self._values[idx] = value
+
+    def __iter__(self):
+        for i in range(self.length):
+            yield self._values[i]
+
+    def __str__(self):
+        values = [str(self._values[i]) for i in range(self.length)]
+        return f"({', '.join(values)})"
+
+    def __eq__(self, other: Any) -> bool:
+        if isinstance(other, Tuple):
+            if len(self) != len(other):
+                return False
+            return all(self[i] == other[i] for i in range(self.length))
+        if isinstance(other, tuple):
+            if len(self) != len(other):
+                return False
+            return all(self[i] == other[i] for i in range(self.length))
+        return NotImplemented
+
+    def __deepcopy__(self, _):
+        result = super().__deepcopy__(_)
+        result.length = self.length
         return result

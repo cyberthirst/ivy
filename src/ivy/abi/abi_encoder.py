@@ -16,7 +16,14 @@ from vyper.abi_types import (
 from vyper.utils import int_bounds
 from vyper.semantics.types import VyperType
 
-from ivy.types import Struct, Flag, DynamicArray, StaticArray, VyperDecimal
+from ivy.types import (
+    Struct,
+    Flag,
+    DynamicArray,
+    StaticArray,
+    VyperDecimal,
+    Tuple as IvyTuple,
+)
 
 
 class EncodeError(Exception):
@@ -29,10 +36,14 @@ def abi_encode(typ: VyperType, value: Any) -> bytes:
     return _encode_r(abi_t, value)
 
 
-def _encode_tuple(abi_t: ABI_Tuple, value: Union[tuple, list, Struct]) -> bytes:
+def _encode_tuple(
+    abi_t: ABI_Tuple, value: Union[tuple, list, Struct, IvyTuple]
+) -> bytes:
     # TODO rethink whether not to represent structs as tuples
     if isinstance(value, Struct):
         value = tuple(value.values())
+    elif isinstance(value, IvyTuple):
+        value = tuple(value)
     elif isinstance(value, list):
         # Convert list to tuple for struct types
         value = tuple(value)
