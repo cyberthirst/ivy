@@ -18,7 +18,14 @@ from vyper.semantics.namespace import Namespace
 from vyper.semantics.types.utils import type_from_annotation
 
 from ivy.visitor import BaseVisitor
-from ivy.types import Address, Flag, StaticArray, DynamicArray, VyperDecimal
+from ivy.types import (
+    Address,
+    Flag,
+    StaticArray,
+    DynamicArray,
+    VyperDecimal,
+    Tuple as IvyTuple,
+)
 from ivy.expr.operators import get_operator_handler
 from ivy.expr.clamper import validate_value
 
@@ -249,7 +256,11 @@ class ExprVisitor(BaseVisitor):
         return DynamicArray(typ, values)
 
     def visit_Tuple(self, node: ast.Tuple):
-        return tuple(self.deep_copy_visit(elem) for elem in node.elements)
+        typ = node._metadata["type"]
+        t = IvyTuple(typ)
+        for i, elem in enumerate(node.elements):
+            t[i] = self.deep_copy_visit(elem)
+        return t
 
     def visit_IfExp(self, node: ast.IfExp):
         test = self.visit(node.test)

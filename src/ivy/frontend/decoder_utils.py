@@ -1,6 +1,6 @@
 from vyper.semantics.types.primitives import _PrimT
 
-from ivy.types import StaticArray, DynamicArray, Map, Address, Struct
+from ivy.types import StaticArray, DynamicArray, Map, Address, Struct, Tuple as IvyTuple
 
 
 def decode_ivy_object(v, typ):
@@ -25,7 +25,7 @@ def decode_ivy_object(v, typ):
                 value = decode_ivy_object(value, member_typ)
             result[key] = value
         v = result
-    elif isinstance(v, tuple):
+    elif isinstance(v, (tuple, IvyTuple)):
         v = list(v)
         for i, member_typ in enumerate(typ.member_types):
             if typ_needs_decode(member_typ):

@@ -24,6 +24,7 @@ from ivy.types import (
     DynamicArray,
     Map,
     VyperDecimal,
+    Tuple as IvyTuple,
 )
 
 DEFAULT_FACTORY_REGISTRY: dict[Type[Any], Callable[[Any], Any]] = {}
@@ -123,5 +124,5 @@ def default_map(typ: HashMapT) -> Map:
 
 
 @register_default(TupleT)
-def default_tuple(typ: TupleT) -> tuple:
-    return tuple(get_default_value(member_typ) for member_typ in typ.member_types)
+def default_tuple(typ: TupleT) -> IvyTuple:
+    return IvyTuple(typ)

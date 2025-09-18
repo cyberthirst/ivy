@@ -31,7 +31,14 @@ from vyper.semantics.types import (
     DecimalT,
 )
 
-from ivy.types import Flag, Struct, StaticArray, DynamicArray, VyperDecimal
+from ivy.types import (
+    Flag,
+    Struct,
+    StaticArray,
+    DynamicArray,
+    VyperDecimal,
+    Tuple as IvyTuple,
+)
 
 if TYPE_CHECKING:
     from vyper.semantics.types import VyperType
@@ -121,6 +128,11 @@ def _decode_r(
         if isinstance(typ, StructT):
             kws = dict(zip(typ.tuple_keys(), res))
             return Struct(typ, kws)
+        if isinstance(typ, TupleT):
+            t = IvyTuple(typ)
+            for i, v in enumerate(res):
+                t[i] = v
+            return t
         return res
 
     if isinstance(abi_t, ABI_StaticArray):
