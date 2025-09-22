@@ -3032,3 +3032,14 @@ def foo() -> uint256:
     """
     c = get_contract(src)
     assert c.foo() == 35
+
+
+@pytest.mark.xfail(reason="bad resolution order, we might need topsort")
+def test_assigning_constants_to_each_other(get_contract):
+    src = """
+gen_var2: public(constant(address)) = gen_var1
+gen_var1: constant(address) = 0x0000000000000000000000000000000000000003
+    """
+    c = get_contract(src)
+
+    assert c.gen_var2() == "0x0000000000000000000000000000000000000003"
