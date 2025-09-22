@@ -7,11 +7,13 @@ execution between Ivy and the Vyper compiler (via Boa).
 
 import logging
 import random
+import hashlib
+import secrets
 from pathlib import Path
 from typing import Dict, Optional
 from copy import deepcopy
 
-from .mutator.ast_mutator import AstMutator, MutationResult
+from .mutator.ast_mutator import AstMutator
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
@@ -55,16 +57,10 @@ class DifferentialFuzzer:
         seed: Optional[int] = None,
     ):
         self.exports_dir = exports_dir
-        self.seed = seed
-        self.rng = random.Random(seed)
-        self.ast_mutator = AstMutator(
-            self.rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
-        )
-        self.value_mutator = ValueMutator(self.rng)
-        self.argument_mutator = ArgumentMutator(self.rng, self.value_mutator)
-        self.trace_mutator = TraceMutator(
-            self.rng, self.value_mutator, self.argument_mutator, self.ast_mutator
-        )
+        # global campaign seed for total reproducibility
+        self.seed = seed if seed is not None else secrets.randbits(64)
+        self.reporter = FuzzerReporter(seed=self.seed)
+
         # Cache for CompilerData objects, keyed by id of solc_json
         self._compiler_data_cache: Dict[int, CompilerData] = {}
 
@@ -72,7 +68,6 @@ class DifferentialFuzzer:
         self.call_drop_prob = 0.1
         self.call_mutate_args_prob = 0.3
         self.call_duplicate_prob = 0.1
-        self.reporter = FuzzerReporter(seed=seed)
 
     def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
         """Load and filter test exports."""
@@ -117,11 +112,24 @@ class DifferentialFuzzer:
     def create_mutated_scenario(
         self,
         item: TestItem,
+        *,
+        scenario_seed: Optional[int] = None,
     ) -> Scenario:
         """Create a scenario from a test item with optional mutations."""
         # Create base scenario using shared utility
         # TODO use_python_args should probably set on per-trace basis
         scenario = create_scenario_from_item(item, use_python_args=True)
+
+        # per-scenario RNG for easy reproducibility
+        rng = random.Random(
+            scenario_seed
+            if scenario_seed is not None
+            else self._derive_scenario_seed(item.name, 0)
+        )
+        ast_mutator = AstMutator(rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS)
+        value_mutator = ValueMutator(rng)
+        argument_mutator = ArgumentMutator(rng, value_mutator)
+        trace_mutator = TraceMutator(rng, value_mutator, argument_mutator, ast_mutator)
 
         mutated_traces = []
 
@@ -132,7 +140,7 @@ class DifferentialFuzzer:
                 compiler_data = self.get_compiler_data(trace)
 
                 # Mutate the deployment trace, xfail flags are set on the trace
-                mutated_trace = self.trace_mutator.mutate_deployment_trace(
+                mutated_trace = trace_mutator.mutate_deployment_trace(
                     trace, compiler_data
                 )
                 mutated_traces.append(mutated_trace)
@@ -144,21 +152,21 @@ class DifferentialFuzzer:
                     )
 
             elif isinstance(trace, CallTrace):
-                if self.rng.random() < self.call_drop_prob:
+                if rng.random() < self.call_drop_prob:
                     continue  # Drop this trace
 
                 mutate_args = False
-                if self.rng.random() < self.call_mutate_args_prob:
+                if rng.random() < self.call_mutate_args_prob:
                     mutate_args = True
 
-                mutated_trace = self.trace_mutator.mutate_and_normalize_call_args(
+                mutated_trace = trace_mutator.mutate_and_normalize_call_args(
                     trace, mutate_args, deployment_compiler_data
                 )
 
                 mutated_traces.append(mutated_trace)
 
                 # Check if we should duplicate
-                if self.rng.random() < self.call_duplicate_prob:
+                if rng.random() < self.call_duplicate_prob:
                     # Append duplicate as-is (no further mutations)
                     mutated_traces.append(deepcopy(mutated_trace))
 
@@ -169,6 +177,13 @@ class DifferentialFuzzer:
         scenario.mutated_traces = mutated_traces
 
         return scenario
+
+    def _derive_scenario_seed(self, item_name: str, scenario_num: int) -> int:
+        """Derive a deterministic per-scenario seed"""
+        h = hashlib.blake2b(
+            f"{self.seed}|{item_name}|{scenario_num}".encode("utf-8"), digest_size=16
+        ).digest()
+        return int.from_bytes(h, byteorder="big", signed=False)
 
     def fuzz_exports(
         self,
@@ -204,14 +219,19 @@ class DifferentialFuzzer:
                 logging.info(f"Testing {item_name} ({items_processed})")
 
                 # Set context for reporting
-                self.reporter.set_context(item_name, 0, self.seed)
+                self.reporter.set_context(item_name, 0, self.seed, scenario_seed=None)
 
                 # Run mutation scenarios
                 for scenario_num in range(max_scenarios):
                     # Update context for this scenario
-                    self.reporter.set_context(item_name, scenario_num, self.seed)
-                    # Create scenario with mutations
-                    scenario = self.create_mutated_scenario(item)
+                    scenario_seed = self._derive_scenario_seed(item_name, scenario_num)
+                    self.reporter.set_context(
+                        item_name, scenario_num, self.seed, scenario_seed
+                    )
+                    # Create scenario with mutations using the per-scenario seed
+                    scenario = self.create_mutated_scenario(
+                        item, scenario_seed=scenario_seed
+                    )
 
                     # Run in both environments
                     ivy_result = ivy_runner.run(scenario)
