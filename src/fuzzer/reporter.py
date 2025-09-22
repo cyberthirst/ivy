@@ -9,6 +9,42 @@ from datetime import datetime
 from vyper.exceptions import VyperException, VyperInternalException
 
 
+def _make_json_serializable(obj):
+    """Convert nested structures into JSON-serializable equivalents."""
+    if isinstance(obj, dict):
+        result = {}
+        for k, v in obj.items():
+            if isinstance(k, bytes):
+                k = "0x" + k.hex()
+            elif not isinstance(k, (str, int, float, bool, type(None))):
+                k = str(k)
+            result[k] = _make_json_serializable(v)
+        return result
+    if isinstance(obj, list):
+        return [_make_json_serializable(item) for item in obj]
+    if isinstance(obj, bytes):
+        return "0x" + obj.hex()
+    return obj
+
+
+def build_divergence_record(
+    divergence: Any,
+    *,
+    item_name: str,
+    scenario_num: int,
+    seed: Optional[int],
+    scenario_seed: Optional[int],
+) -> Dict[str, Any]:
+    """Create a JSON-serializable divergence payload for saving or printing."""
+    divergence_data = divergence.to_dict()
+    divergence_data["timestamp"] = datetime.now().isoformat()
+    divergence_data["item_name"] = item_name
+    divergence_data["scenario_num"] = scenario_num
+    divergence_data["seed"] = seed
+    divergence_data["scenario_seed"] = scenario_seed
+    return _make_json_serializable(divergence_data)
+
+
 @dataclass
 class FuzzerReporter:
     # Deployment statistics
@@ -67,13 +103,19 @@ class FuzzerReporter:
         self.divergences += 1
 
     def set_context(
-        self, item_name: str, scenario_num: int, seed: Optional[int] = None
+        self,
+        item_name: str,
+        scenario_num: int,
+        seed: Optional[int] = None,
+        scenario_seed: Optional[int] = None,
     ):
         """Set the current test context for reporting."""
         self.current_item_name = item_name
         self.current_scenario_num = scenario_num
         if seed is not None:
             self.seed = seed
+        # Attach scenario seed to the instance for saving alongside reports
+        self._current_scenario_seed = scenario_seed
 
     def update_from_scenario_result(self, result: Any):
         for trace_idx, deployment_result in result.get_deployment_results():
@@ -245,32 +287,13 @@ class FuzzerReporter:
         filename = f"divergence_{self._file_counter}.json"
         filepath = reports_dir / filename
 
-        divergence_data = divergence.to_dict()
-        divergence_data["timestamp"] = datetime.now().isoformat()
-        divergence_data["item_name"] = item_name
-        divergence_data["scenario_num"] = scenario_num
-        divergence_data["seed"] = self.seed
-
-        # Convert any non-JSON-serializable keys/values for JSON serialization
-        # Slow, but divergences are rare
-        def make_json_serializable(obj):
-            if isinstance(obj, dict):
-                result = {}
-                for k, v in obj.items():
-                    if isinstance(k, bytes):
-                        k = "0x" + k.hex()
-                    elif not isinstance(k, (str, int, float, bool, type(None))):
-                        k = str(k)
-                    result[k] = make_json_serializable(v)
-                return result
-            elif isinstance(obj, list):
-                return [make_json_serializable(item) for item in obj]
-            elif isinstance(obj, bytes):
-                return "0x" + obj.hex()
-            else:
-                return obj
-
-        divergence_data = make_json_serializable(divergence_data)
+        divergence_data = build_divergence_record(
+            divergence,
+            item_name=item_name,
+            scenario_num=scenario_num,
+            seed=self.seed,
+            scenario_seed=getattr(self, "_current_scenario_seed", None),
+        )
 
         with open(filepath, "w") as f:
             json.dump(divergence_data, f, indent=2, default=str)
@@ -301,6 +324,7 @@ class FuzzerReporter:
                 "seed": self.seed,
                 "item_name": self.current_item_name or "unknown",
                 "scenario_num": self.current_scenario_num or -1,
+                "scenario_seed": getattr(self, "_current_scenario_seed", None),
             },
         }
 
@@ -335,6 +359,7 @@ class FuzzerReporter:
                 "seed": self.seed,
                 "item_name": self.current_item_name or "unknown",
                 "scenario_num": self.current_scenario_num or -1,
+                "scenario_seed": getattr(self, "_current_scenario_seed", None),
             },
         }
 

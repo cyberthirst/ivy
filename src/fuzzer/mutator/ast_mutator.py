@@ -167,18 +167,7 @@ class AstMutator(VyperNodeTransformer):
         self.max_injection_depth = 4
 
     def mutate(self, root: ast.Module) -> ast.Module:
-        self.mutations_done = 0
-        # Reset context
-        self.context = Context()
-        # Initialize with module-level scope
-        self.context.scope_stack.append(
-            self.context.current_scope
-        )  # Module scope stays on stack
-        self.name_generator.counter = 0
-        self.type_generator.struct_counter = 0
-        self.stmt_generator.source_fragments = []
-        self.stmt_generator.name_generator.counter = 0
-        self.function_registry.reset()
+        self.reset_state()
 
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
@@ -190,6 +179,17 @@ class AstMutator(VyperNodeTransformer):
         self._ensure_init_with_immutables(new_root)
 
         return new_root
+
+    def reset_state(self) -> None:
+        """Reset all per-mutation internal state to a clean baseline."""
+        self.mutations_done = 0
+        self.context = Context()
+        self.context.scope_stack.append(self.context.current_scope)  # keep module scope
+        self.name_generator.counter = 0
+        self.type_generator.struct_counter = 0
+        self.stmt_generator.source_fragments = []
+        self.stmt_generator.name_generator.counter = 0
+        self.function_registry.reset()
 
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
