@@ -1,5 +1,5 @@
 import random
-from typing import Optional, Dict, List, Set, Tuple, Any
+from typing import Optional, Dict, List, Set, Tuple
 from vyper.semantics.types import (
     VyperType,
     HashMapT,
@@ -16,6 +16,7 @@ from vyper.semantics.types.function import (
     PositionalArg,
 )
 from vyper.builtins.functions import DISPATCH_TABLE
+from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.ast import nodes as ast
 
 
@@ -37,7 +38,7 @@ class FunctionRegistry:
         # Map from return type to set of function names
         self.functions_by_return_type: Dict[type, Set[str]] = {}
         # Keep builtin function objects by name (e.g., "min")
-        self.builtins: Dict[str, Any] = {}
+        self.builtins: Dict[str, BuiltinFunctionT] = {}
         # Track call graph to prevent cycles
         self.call_graph: Dict[str, Set[str]] = {}  # caller -> callees
         self.current_function: Optional[str] = (
@@ -47,6 +48,18 @@ class FunctionRegistry:
         self.max_generated_functions = max_generated_functions
         self.generated_count = 0
         self._initialize_builtins()
+
+    @staticmethod
+    def _is_mutability_compatible(
+        caller_mutability: Optional[StateMutability],
+        callee_mutability: Optional[StateMutability],
+    ) -> bool:
+        if caller_mutability is None or callee_mutability is None:
+            return True
+        return (
+            callee_mutability <= caller_mutability
+            or caller_mutability >= StateMutability.NONPAYABLE
+        )
 
     def _initialize_builtins(self):
         """Add builtin functions from Vyper's DISPATCH_TABLE."""
@@ -68,7 +81,7 @@ class FunctionRegistry:
                 # Builtins are already properly typed, just register them
                 self.register_builtin(name, builtin)
 
-    def register_builtin(self, name: str, builtin):
+    def register_builtin(self, name: str, builtin: BuiltinFunctionT):
         """Register a builtin function type."""
         # Store in our registry for lookup
         # Note: builtins don't go in functions dict since they're not ContractFunctionT
@@ -80,14 +93,18 @@ class FunctionRegistry:
                 self.functions_by_return_type[type_key] = set()
             self.functions_by_return_type[type_key].add(f"__builtin__{name}")
 
-    def get_compatible_builtins(self, return_type: VyperType) -> List[Tuple[str, Any]]:
+    def get_compatible_builtins(
+        self,
+        return_type: VyperType,
+        caller_mutability: Optional[StateMutability] = None,
+    ) -> List[Tuple[str, BuiltinFunctionT]]:
         """Return a list of (name, builtin) where the builtin can produce return_type.
 
         - If builtin has a concrete _return_type: require compare_type.
         - For polymorphic returns (e.g., min/max/abs): allow when return_type is numeric.
         - Skip builtins which require type-literal args (TYPE_T) for now.
         """
-        compat: List[Tuple[str, Any]] = []
+        compat: List[Tuple[str, BuiltinFunctionT]] = []
         for name, b in self.builtins.items():
             # Skip builtins which require TYPE_T (e.g., empty/convert) for now.
             try:
@@ -108,6 +125,9 @@ class FunctionRegistry:
                 _is_type_literal(getattr(kw, "typ", None)) for kw in kwargs.values()
             )
             if has_type_literal:
+                continue
+
+            if not self._is_mutability_compatible(caller_mutability, b.mutability):
                 continue
 
             ret_t = getattr(b, "_return_type", None)
@@ -175,7 +195,10 @@ class FunctionRegistry:
         return False
 
     def get_callable_functions(
-        self, return_type: VyperType, from_function: Optional[str] = None
+        self,
+        return_type: VyperType,
+        from_function: Optional[str] = None,
+        caller_mutability: Optional[StateMutability] = None,
     ) -> List[ContractFunctionT]:
         """Get functions that can be called without creating cycles."""
         type_key = type(return_type)
@@ -202,21 +225,33 @@ class FunctionRegistry:
             if from_function and self.would_create_cycle(from_function, name):
                 continue
 
+            if not self._is_mutability_compatible(caller_mutability, func.mutability):
+                continue
+
             callable_funcs.append(func)
 
         return callable_funcs
 
     def get_compatible_function(
-        self, return_type: VyperType, from_function: Optional[str] = None
+        self,
+        return_type: VyperType,
+        from_function: Optional[str] = None,
+        caller_mutability: Optional[StateMutability] = None,
     ) -> Optional[ContractFunctionT]:
         """Get a random compatible function that won't create a cycle."""
-        compatible = self.get_callable_functions(return_type, from_function)
+        compatible = self.get_callable_functions(
+            return_type, from_function, caller_mutability
+        )
         if compatible:
             return self.rng.choice(compatible)
         return None
 
     def create_new_function(
-        self, return_type: VyperType, type_generator, max_args: int = 3
+        self,
+        return_type: VyperType,
+        type_generator,
+        max_args: int = 3,
+        caller_mutability: Optional[StateMutability] = None,
     ) -> Optional[ast.FunctionDef]:
         """Create a new function with empty body and ContractFunctionT in metadata.
         The body is created later, once we have more information. That allows
@@ -246,14 +281,18 @@ class FunctionRegistry:
         )
 
         # Choose state mutability
-        state_mutability = self.rng.choice(
-            [
+        mutability_options = [
+            m
+            for m in (
                 StateMutability.PURE,
                 StateMutability.VIEW,
                 StateMutability.NONPAYABLE,
                 StateMutability.PAYABLE,
-            ]
-        )
+            )
+            if self._is_mutability_compatible(caller_mutability, m)
+        ]
+        assert mutability_options
+        state_mutability = self.rng.choice(mutability_options)
 
         # Create decorators
         decorator_list = []

@@ -849,12 +849,17 @@ class ExprGenerator:
         current_func = self.function_registry.current_function
         assert current_func is not None
 
+        caller_mutability = context.current_function_mutability
+
         # Gather candidates
         compatible_func = self.function_registry.get_compatible_function(
-            target_type, current_func
+            target_type,
+            current_func,
+            caller_mutability=caller_mutability,
         )
         compatible_builtins = self.function_registry.get_compatible_builtins(
-            target_type
+            target_type,
+            caller_mutability=caller_mutability,
         )
 
         # Decide path: prefer user function, but sometimes pick builtin
@@ -875,7 +880,10 @@ class ExprGenerator:
         if not compatible_func or self.rng.random() >= 0.9:
             # Create a new function (returns ast.FunctionDef or None)
             func_def = self.function_registry.create_new_function(
-                return_type=target_type, type_generator=self.type_generator, max_args=2
+                return_type=target_type,
+                type_generator=self.type_generator,
+                max_args=2,
+                caller_mutability=caller_mutability,
             )
             if func_def is None:
                 # Can't create more functions; try builtin if available

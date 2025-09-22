@@ -5,6 +5,7 @@ from enum import Enum, auto
 
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.semantics.types import VyperType
+from vyper.semantics.types.function import StateMutability
 
 
 class ScopeType(Enum):
@@ -19,6 +20,14 @@ class ExprMutability(Enum):
     PURE = auto()  # no state reads/writes
     VIEW = auto()  # can read state, cannot write
     STATEFUL = auto()  # full access
+
+
+def state_to_expr_mutability(state_mutability: StateMutability) -> ExprMutability:
+    if state_mutability == StateMutability.PURE:
+        return ExprMutability.PURE
+    if state_mutability == StateMutability.VIEW:
+        return ExprMutability.VIEW
+    return ExprMutability.STATEFUL
 
 
 @dataclass
@@ -40,6 +49,7 @@ class Context:
         None  # True = must fail, None = don't know, False = must not fail (future)
     )
     current_mutability: ExprMutability = ExprMutability.STATEFUL
+    current_function_mutability: StateMutability = StateMutability.NONPAYABLE
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
@@ -93,3 +103,12 @@ class Context:
             yield
         finally:
             self.current_mutability = prev
+
+    @contextmanager
+    def function_mutability(self, new_mode: StateMutability):
+        prev = self.current_function_mutability
+        self.current_function_mutability = new_mode
+        try:
+            yield
+        finally:
+            self.current_function_mutability = prev

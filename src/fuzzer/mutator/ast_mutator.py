@@ -11,7 +11,7 @@ from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
 from src.fuzzer.mutator.function_registry import FunctionRegistry
-from .context import Context, ScopeType
+from .context import Context, ScopeType, ExprMutability, state_to_expr_mutability
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
 from src.unparser.unparser import unparse
@@ -289,38 +289,46 @@ class AstMutator(VyperNodeTransformer):
         with self.context.new_scope(ScopeType.FUNCTION):
             # Get function arguments from the function type
             func_type = node._metadata["func_type"]
+            func_state_mut = func_type.mutability
+            expr_mut = state_to_expr_mutability(func_state_mut)
 
-            for arg in func_type.arguments:
-                if func_type.is_external:
-                    location = DataLocation.CALLDATA
-                    modifiability = Modifiability.RUNTIME_CONSTANT
-                else:
-                    assert func_type.is_internal, (
-                        f"Expected internal function, got {func_type}"
+            with (
+                self.context.mutability(expr_mut),
+                self.context.function_mutability(func_state_mut),
+            ):
+                for arg in func_type.arguments:
+                    if func_type.is_external:
+                        location = DataLocation.CALLDATA
+                        modifiability = Modifiability.RUNTIME_CONSTANT
+                    else:
+                        assert func_type.is_internal, (
+                            f"Expected internal function, got {func_type}"
+                        )
+                        location = DataLocation.MEMORY
+                        modifiability = Modifiability.MODIFIABLE
+
+                    var_info = VarInfo(
+                        typ=arg.typ,
+                        location=location,
+                        modifiability=modifiability,
+                        decl_node=arg.ast_source
+                        if hasattr(arg, "ast_source")
+                        else None,
                     )
-                    location = DataLocation.MEMORY
-                    modifiability = Modifiability.MODIFIABLE
+                    self.add_variable(arg.name, var_info)
 
-                var_info = VarInfo(
-                    typ=arg.typ,
-                    location=location,
-                    modifiability=modifiability,
-                    decl_node=arg.ast_source if hasattr(arg, "ast_source") else None,
-                )
-                self.add_variable(arg.name, var_info)
-
-            # Use statement generator to inject statements
-            # For generated functions with empty bodies, ensure they get statements
-            if not node.body:
-                n_stmts = self.rng.randint(1, 5)
-                self.stmt_generator.inject_statements(
-                    node.body, self.context, node, depth=0, n_stmts=n_stmts
-                )
-            else:
-                # For existing functions, use normal probability-based injection
-                self.stmt_generator.inject_statements(
-                    node.body, self.context, node, depth=0
-                )
+                # Use statement generator to inject statements
+                # For generated functions with empty bodies, ensure they get statements
+                if not node.body:
+                    n_stmts = self.rng.randint(1, 5)
+                    self.stmt_generator.inject_statements(
+                        node.body, self.context, node, depth=0, n_stmts=n_stmts
+                    )
+                else:
+                    # For existing functions, use normal probability-based injection
+                    self.stmt_generator.inject_statements(
+                        node.body, self.context, node, depth=0
+                    )
 
             # Let the base class handle visiting children
             node = super().generic_visit(node)
