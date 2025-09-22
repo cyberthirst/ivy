@@ -7,6 +7,7 @@ from typing import Any, Dict, Optional, Union
 
 from .runner.scenario import Scenario
 from .runner.base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
+from .storage_normalizer import normalize_storage_dump
 
 
 @dataclass
@@ -216,7 +217,8 @@ class DivergenceDetector:
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
             if ivy_res.storage_dump != boa_res.storage_dump:
-                return False
+                if not self._normalized_dumps_match(ivy_res, boa_res):
+                    return False
 
         return True
 
@@ -237,6 +239,20 @@ class DivergenceDetector:
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
             if ivy_res.storage_dump != boa_res.storage_dump:
-                return False
+                if not self._normalized_dumps_match(ivy_res, boa_res):
+                    return False
 
         return True
+
+    @staticmethod
+    def _normalized_dumps_match(
+        ivy_res: Union[DeploymentResult, CallResult],
+        boa_res: Union[DeploymentResult, CallResult],
+    ) -> bool:
+        """Logically equivalent storage can be produced by the runners but the dumps can differ.
+        That happens e.g. when one materializes default values and the other does not. We compare
+        normalized dumps lazily to avoid performance penalty only when the original doesn't compare equal.
+        """
+        normalized_ivy = normalize_storage_dump(ivy_res.storage_dump, ivy_res.contract)
+        normalized_boa = normalize_storage_dump(boa_res.storage_dump, boa_res.contract)
+        return normalized_ivy == normalized_boa
