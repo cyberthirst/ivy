@@ -90,6 +90,7 @@ class CallResult(BaseResult):
     """Result of a single function call."""
 
     output: Any = None
+    contract: Optional[Any] = None
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
@@ -428,6 +429,7 @@ class BaseScenarioRunner(ABC):
                 success=True,
                 output=output,
                 storage_dump=storage_dump,
+                contract=contract,
             )
 
         except Exception as e:
