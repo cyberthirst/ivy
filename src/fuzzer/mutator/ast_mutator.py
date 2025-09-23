@@ -285,7 +285,7 @@ class AstMutator(VyperNodeTransformer):
 
         with self.context.new_scope(ScopeType.FUNCTION):
             # Get function arguments from the function type
-            func_type = node._metadata["func_type"]
+            func_type: ContractFunctionT = node._metadata["func_type"]
             func_state_mut = func_type.mutability
             expr_mut = state_to_expr_mutability(func_state_mut)
 
@@ -294,7 +294,8 @@ class AstMutator(VyperNodeTransformer):
                 self.context.function_mutability(func_state_mut),
             ):
                 for arg in func_type.arguments:
-                    if func_type.is_external:
+                    if func_type.is_external or func_type.is_deploy:
+                        # TODO setting CALLDATA for deploy funcs arg might not be precise, see https://github.com/vyperlang/vyper/issues/4755
                         location = DataLocation.CALLDATA
                         modifiability = Modifiability.RUNTIME_CONSTANT
                     else:
