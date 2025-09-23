@@ -19,6 +19,7 @@ from ..export_utils import (
     load_export,
 )
 from vyper.exceptions import VyperException, VyperInternalException
+from ..xfail import XFailExpectation
 
 
 @dataclass
@@ -106,8 +107,8 @@ class TraceResult:
     result: Optional[Union[DeploymentResult, CallResult]] = (
         None  # None for set_balance/clear_transient
     )
-    compilation_xfail: Optional[bool] = None  # For deployment traces
-    runtime_xfail: Optional[bool] = None  # For both deployment and call traces
+    compilation_xfails: List[XFailExpectation] = field(default_factory=list)
+    runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
 
 @dataclass
@@ -229,8 +230,8 @@ class BaseScenarioRunner(ABC):
                         trace_type="deployment",
                         trace_index=trace_index,
                         result=deployment_result,
-                        compilation_xfail=trace.compilation_xfail,
-                        runtime_xfail=trace.runtime_xfail,
+                        compilation_xfails=list(trace.compilation_xfails),
+                        runtime_xfails=list(trace.runtime_xfails),
                     )
                 )
 
@@ -247,7 +248,7 @@ class BaseScenarioRunner(ABC):
                         trace_type="call",
                         trace_index=trace_index,
                         result=call_result,
-                        runtime_xfail=trace.runtime_xfail,
+                        runtime_xfails=list(trace.runtime_xfails),
                     )
                 )
 

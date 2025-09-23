@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -6,6 +6,8 @@ from enum import Enum, auto
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import StateMutability
+
+from ..xfail import XFailExpectation
 
 
 class ScopeType(Enum):
@@ -42,12 +44,8 @@ class Context:
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
     immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
-    compilation_xfail: Optional[bool] = (
-        None  # True = must fail, None = don't check, False = must not fail
-    )
-    runtime_xfail: Optional[bool] = (
-        None  # True = must fail, None = don't know, False = must not fail (future)
-    )
+    compilation_xfails: List[XFailExpectation] = field(default_factory=list)
+    runtime_xfails: List[XFailExpectation] = field(default_factory=list)
     current_mutability: ExprMutability = ExprMutability.STATEFUL
     current_function_mutability: StateMutability = StateMutability.NONPAYABLE
 
