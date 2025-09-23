@@ -27,6 +27,8 @@ from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExec
 from vyper.semantics.analysis.base import DataLocation
 from vyper.semantics.types.function import StateMutability
 
+from src.fuzzer.xfail import XFailExpectation
+
 
 class ExprGenerator:
     def __init__(
@@ -616,7 +618,12 @@ class ExprGenerator:
             else:
                 val = cap + 1 if cap > 0 else 1
             # mark xfail at the context level
-            context.compilation_xfail = True
+            context.compilation_xfails.append(
+                XFailExpectation(
+                    kind="compilation",
+                    reason="generated out-of-bounds static array index",
+                )
+            )
             return self._int_to_ast(val, idx_t)
 
         if roll < p_guard:
@@ -766,7 +773,12 @@ class ExprGenerator:
 
         if isinstance(node.op, (ast.FloorDiv, ast.Mod, ast.Div)):
             if isinstance(right, ast.Int) and getattr(right, "value", None) == 0:
-                context.compilation_xfail = True
+                context.compilation_xfails.append(
+                    XFailExpectation(
+                        kind="compilation",
+                        reason="division or modulo by zero should fail compilation",
+                    )
+                )
 
         node._metadata["type"] = target_type
         return node

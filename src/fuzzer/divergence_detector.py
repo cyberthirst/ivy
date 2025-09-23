@@ -2,12 +2,13 @@
 Divergence detection for differential fuzzing.
 """
 
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Union
 
 from .runner.scenario import Scenario
 from .runner.base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
 from .storage_normalizer import normalize_storage_dump
+from .xfail import XFailExpectation
 
 
 @dataclass
@@ -20,9 +21,9 @@ class Divergence:
     ivy_result: Optional[Union[DeploymentResult, CallResult]] = None
     boa_result: Optional[Union[DeploymentResult, CallResult]] = None
     function: Optional[str] = None  # For execution divergences
-    xfail_type: Optional[str] = None  # "compilation_xfail" or "runtime_xfail"
-    xfail_expected: Optional[Union[bool, None]] = None  # What we expected
+    xfail_expected: Optional[str] = None
     xfail_actual: Optional[str] = None  # What actually happened
+    xfail_reasons: list[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -45,9 +46,9 @@ class Divergence:
                 result["has_mutations"] = True
 
         if self.type == "xfail":
-            result["xfail_type"] = self.xfail_type
             result["xfail_expected"] = self.xfail_expected
             result["xfail_actual"] = self.xfail_actual
+            result["xfail_reasons"] = self.xfail_reasons
         elif self.type == "deployment":
             if self.ivy_result:
                 result["ivy_deployment"] = self.ivy_result.to_dict()
@@ -83,6 +84,10 @@ class Divergence:
                 result["traces"].append(trace_info)
 
         return result
+
+
+def _get_xfail_reasons(l: list[XFailExpectation]) -> list[str]:
+    return [xf.reason or "(unspecified)" for xf in l]
 
 
 class DivergenceDetector:
@@ -123,38 +128,35 @@ class DivergenceDetector:
                 (ivy_trace_result, "ivy"),
                 (boa_trace_result, "boa"),
             ]:
-                # Check compilation_xfail for deployment traces
+                # Check compilation expectations for deployment traces
                 deployment_result = trace_result.result
-                if (
-                    isinstance(deployment_result, DeploymentResult)
-                    and trace_result.compilation_xfail is not None
-                ):
-                    if (
-                        trace_result.compilation_xfail
-                        != deployment_result.is_compilation_failure
-                    ):
+                if isinstance(deployment_result, DeploymentResult):
+                    reasons = _get_xfail_reasons(trace_result.compilation_xfails)
+                    if reasons and not deployment_result.is_compilation_failure:
                         return Divergence(
                             type="xfail",
                             step=trace_result.trace_index,
                             scenario=scenario,
-                            xfail_type="compilation_xfail",
-                            xfail_expected=trace_result.compilation_xfail,
+                            xfail_expected="compilation",
                             xfail_actual=f"{runner_name}: {'compilation_failure' if deployment_result.is_compilation_failure else ('success' if deployment_result.success else 'runtime_failure')}",
+                            xfail_reasons=reasons,
                         )
 
-                # Check runtime_xfail for both deployment and call traces
-                if trace_result.runtime_xfail is not None:
+                runtime_reasons = _get_xfail_reasons(trace_result.runtime_xfails)
+
+                if runtime_reasons:
                     exec_result = trace_result.result
-                    if exec_result and (
-                        trace_result.runtime_xfail != exec_result.is_runtime_failure
-                    ):
+                    actual_runtime_fail = (
+                        exec_result.is_runtime_failure if exec_result else False
+                    )
+                    if not actual_runtime_fail:
                         return Divergence(
                             type="xfail",
                             step=trace_result.trace_index,
                             scenario=scenario,
-                            xfail_type="runtime_xfail",
-                            xfail_expected=trace_result.runtime_xfail,
+                            xfail_expected="runtime",
                             xfail_actual=f"{runner_name}: {'runtime_failure' if exec_result.is_runtime_failure else ('success' if exec_result.success else 'compilation_failure')}",
+                            xfail_reasons=runtime_reasons,
                         )
 
             # Compare deployment results
