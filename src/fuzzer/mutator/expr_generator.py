@@ -19,6 +19,7 @@ from vyper.semantics.types import (
     DecimalT,
 )
 from vyper.semantics.analysis.base import Modifiability
+from vyper.semantics.types.subscriptable import _SequenceT
 
 from .value_mutator import ValueMutator
 from .context import Context, ExprMutability
@@ -532,7 +533,7 @@ class ExprGenerator:
     def _generate_index_for_sequence(
         self,
         base_node: ast.VyperNode,
-        seq_t: VyperType,
+        seq_t: _SequenceT,
         context: Context,
         depth: int,
     ) -> ast.VyperNode:
@@ -608,20 +609,19 @@ class ExprGenerator:
             guarded._metadata = {"type": idx_t}
             return guarded
 
-        # Helper: OOB literal that should fail compilation for SArray only (tuple handled elsewhere)
         def _oob_literal():
-            cap = seq_t.length
-            # choose either -1 (invalid) or cap (== length) as out-of-bounds
+            cap = seq_t.length  # SArray: fixed size, DArray: max capacity
+            # choose either cap (== length/capacity) or cap+1 as out-of-bounds
             if self.rng.random() < 0.5:
-                # -1 would be negative; keep uint domain by using cap then rely on compiler
                 val = cap if cap > 0 else 1
             else:
                 val = cap + 1 if cap > 0 else 1
-            # mark xfail at the context level
+            # For both SArray and DArray, literal index >= declared length/capacity
+            # is detectable at compile time by Vyper
             context.compilation_xfails.append(
                 XFailExpectation(
                     kind="compilation",
-                    reason="generated out-of-bounds static array index",
+                    reason="generated out-of-bounds array index",
                 )
             )
             return self._int_to_ast(val, idx_t)

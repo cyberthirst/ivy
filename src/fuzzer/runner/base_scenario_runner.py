@@ -18,7 +18,7 @@ from ..export_utils import (
     ClearTransientStorageTrace,
     load_export,
 )
-from vyper.exceptions import VyperException, VyperInternalException
+from vyper.exceptions import VyperException, VyperInternalException, ParserException
 from ..xfail import XFailExpectation
 
 
@@ -36,7 +36,10 @@ class BaseResult:
         if self.success:
             return False
         # Runtime failure if error exists and is NOT a Vyper compilation error
-        return self.error is not None and not isinstance(self.error, VyperException)
+        # Note: ParserException doesn't inherit from VyperException but is a compilation error
+        return self.error is not None and not isinstance(
+            self.error, (VyperException, ParserException)
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -61,6 +64,10 @@ class DeploymentResult(BaseResult):
         """Check if this is a compilation failure (not runtime)."""
         if self.success:
             return False
+
+        # ParserException doesn't inherit from VyperException but is a compilation error
+        if self.error is not None and isinstance(self.error, ParserException):
+            return True
 
         return (
             self.error is not None

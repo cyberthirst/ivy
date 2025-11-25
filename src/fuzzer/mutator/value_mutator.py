@@ -158,7 +158,8 @@ class ValueMutator:
                 "",
                 "a",
                 "A" * min(100, vyper_type.length),
-                "\x00",
+                # vyper (python) parser rejects null bytes, we'd need to propagete compilation xfail from here
+                # "\x00",
                 "test",
                 "0x1234",
             ]
