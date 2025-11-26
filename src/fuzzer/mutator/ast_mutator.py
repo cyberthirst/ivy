@@ -223,6 +223,10 @@ class AstMutator(VyperNodeTransformer):
             and self.rng.random() < self.mutate_prob * node_prob
         )
 
+    def _type_of(self, node: ast.VyperNode):
+        """Safely extract the inferred type from AST metadata."""
+        return getattr(node, "_metadata", {}).get("type")
+
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(target_type, self.context, depth=4)
 
@@ -340,7 +344,7 @@ class AstMutator(VyperNodeTransformer):
             return node
 
         # Get the type if available
-        node_type = getattr(node, "_metadata", {}).get("type")
+        node_type = self._type_of(node)
 
         if node_type and isinstance(node_type, IntegerT):
             # Use the value mutator with proper type
@@ -367,8 +371,8 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(ast.BinOp):
             return node
 
-        left_type = getattr(node.left, "_metadata", {}).get("type")
-        right_type = getattr(node.right, "_metadata", {}).get("type")
+        left_type = self._type_of(node.left)
+        right_type = self._type_of(node.right)
 
         if left_type is not None and right_type is not None and left_type != right_type:
             return node
@@ -467,7 +471,7 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(ast.Assign):
             return node
 
-        rhs_type = getattr(node.value, "_metadata", {}).get("type")
+        rhs_type = self._type_of(node.value)
 
         mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
 
@@ -518,7 +522,7 @@ class AstMutator(VyperNodeTransformer):
         # Check if all operands are boolean typed
         all_bool = True
         for value in node.values:
-            value_type = getattr(value, "_metadata", {}).get("type")
+            value_type = self._type_of(value)
             if value_type is not None and "bool" not in str(value_type):
                 all_bool = False
                 break
@@ -555,11 +559,13 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(ast.Subscript):
             return node
 
-        # Could mutate the index
+        # Mutate the index; skip tuples entirely to avoid changing element types.
+        base_type = self._type_of(node.value)
         if isinstance(node.slice, ast.Int):
-            node.slice.value = self.rng.choice(
-                [0, 1, node.slice.value + 1, node.slice.value - 1]
-            )
+            if not isinstance(base_type, TupleT):
+                node.slice.value = self.rng.choice(
+                    [0, 1, node.slice.value + 1, node.slice.value - 1]
+                )
 
         self.mutations_done += 1
         return node
@@ -593,8 +599,7 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(ast.Compare):
             return node
 
-        typ = node._metadata.get("type", None)
-        typ = typ if typ else node.left._metadata.get("type", None)
+        typ = self._type_of(node) or self._type_of(node.left)
 
         if typ and isinstance(typ, NumericT):
             # For numeric types, any comparison operator is valid
