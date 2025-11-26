@@ -3043,3 +3043,62 @@ gen_var1: constant(address) = 0x0000000000000000000000000000000000000003
     c = get_contract(src)
 
     assert c.gen_var2() == "0x0000000000000000000000000000000000000003"
+
+
+def test_convert_bytes_array_to_bytesm(get_contract):
+    src = """
+@external
+def foo() -> bytes32:
+    b: Bytes[32] = b''
+    return convert(b, bytes32)
+
+@external
+def bar() -> bytes32:
+    b: Bytes[32] = b'hello'
+    return convert(b, bytes32)
+
+@external
+def baz() -> bytes4:
+    b: Bytes[4] = b'ab'
+    return convert(b, bytes4)
+
+@external
+def empty_bytes4() -> bytes4:
+    b: Bytes[4] = b''
+    return convert(b, bytes4)
+
+@external
+def empty_bytes8() -> bytes8:
+    b: Bytes[8] = b''
+    return convert(b, bytes8)
+
+@external
+def bytes8_partial() -> bytes8:
+    b: Bytes[8] = b'abc'
+    return convert(b, bytes8)
+
+@external
+def bytes16_full() -> bytes16:
+    b: Bytes[16] = b'0123456789abcdef'
+    return convert(b, bytes16)
+
+@external
+def bytes1_test() -> bytes1:
+    b: Bytes[1] = b'x'
+    return convert(b, bytes1)
+
+@external
+def bytes1_empty() -> bytes1:
+    b: Bytes[1] = b''
+    return convert(b, bytes1)
+"""
+    c = get_contract(src)
+    assert c.foo() == b"\x00" * 32
+    assert c.bar() == b"hello" + b"\x00" * 27
+    assert c.baz() == b"ab\x00\x00"
+    assert c.empty_bytes4() == b"\x00" * 4
+    assert c.empty_bytes8() == b"\x00" * 8
+    assert c.bytes8_partial() == b"abc" + b"\x00" * 5
+    assert c.bytes16_full() == b"0123456789abcdef"
+    assert c.bytes1_test() == b"x"
+    assert c.bytes1_empty() == b"\x00"

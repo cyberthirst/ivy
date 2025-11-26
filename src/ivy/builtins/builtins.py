@@ -245,6 +245,9 @@ def builtin_convert(typs: tuple[VyperType], *values: tuple[Any, VyperType]):
         o_typ, (BytesT, StringT)
     ):
         val_bits = val_bits[32:]
+        # For BytesT/StringT to BytesM_T conversion, right-pad to 32 bytes
+        if isinstance(o_typ, BytesM_T):
+            val_bits = val_bits.ljust(32, b"\x00")
 
     if convert_utils._padding_direction(i_typ) != convert_utils._padding_direction(
         o_typ
