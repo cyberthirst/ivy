@@ -30,8 +30,7 @@ from .export_utils import (
 from src.ivy.frontend.loader import loads_from_solc_json
 
 from .runner.scenario import Scenario, create_scenario_from_item
-from .runner.ivy_scenario_runner import IvyScenarioRunner
-from .runner.boa_scenario_runner import BoaScenarioRunner
+from .runner.multi_runner import MultiRunner
 from .divergence_detector import DivergenceDetector
 from .reporter import FuzzerReporter
 
@@ -202,10 +201,12 @@ class DifferentialFuzzer:
         divergence_count = 0
         items_processed = 0
 
-        # Create runners and detector (with storage dumps enabled for comparison)
+        # Create multi-runner and detector (with storage dumps enabled for comparison)
         # Use no_solc_json=True for Ivy to compile mutated source code
-        ivy_runner = IvyScenarioRunner(collect_storage_dumps=True, no_solc_json=True)
-        boa_runner = BoaScenarioRunner(collect_storage_dumps=True)
+        multi_runner = MultiRunner(
+            collect_storage_dumps=True,
+            no_solc_json=True,
+        )
         detector = DivergenceDetector()
 
         # Process each export file
@@ -233,39 +234,40 @@ class DifferentialFuzzer:
                         item, scenario_seed=scenario_seed
                     )
 
-                    # Run in both environments
-                    ivy_result = ivy_runner.run(scenario)
-                    boa_result = boa_runner.run(scenario)
+                    # Run in all environments
+                    results = multi_runner.run(scenario)
 
                     self.reporter.record_scenario()
                     self.reporter.record_item_stats(item_name, "scenario")
-                    self.reporter.update_from_scenario_result(ivy_result)
-                    self.reporter.update_from_scenario_result(boa_result)
+                    self.reporter.update_from_scenario_result(results.ivy_result)
+                    for _, (_, boa_result) in results.boa_results.items():
+                        self.reporter.update_from_scenario_result(boa_result)
 
                     # Compare results
-                    divergence = detector.compare_results(
-                        ivy_result, boa_result, scenario
+                    divergences = detector.compare_all_results(
+                        results.ivy_result, results.boa_results, scenario
                     )
 
-                    if not divergence:
+                    if not divergences:
                         logging.info(f"ok  | item {item_name} | mut#{scenario_num}")
                         continue
 
-                    divergence_count += 1
-                    self.reporter.record_divergence()
-                    self.reporter.record_item_stats(item_name, "divergence")
-                    logging.error(
-                        f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step}"
-                    )
-                    if divergence.type == "deployment":
-                        logging.error("  Deployment divergence")
-                    else:
+                    for divergence in divergences:
+                        divergence_count += 1
+                        self.reporter.record_divergence()
+                        self.reporter.record_item_stats(item_name, "divergence")
                         logging.error(
-                            f"  Execution divergence at function {divergence.function}"
+                            f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner}"
                         )
+                        if divergence.type == "deployment":
+                            logging.error("  Deployment divergence")
+                        else:
+                            logging.error(
+                                f"  Execution divergence at function {divergence.function}"
+                            )
 
-                    # Save divergence using reporter
-                    self.reporter.save_divergence(divergence)
+                        # Save divergence using reporter
+                        self.reporter.save_divergence(divergence)
 
         self.reporter.stop_timer()
         self.reporter.print_summary()
