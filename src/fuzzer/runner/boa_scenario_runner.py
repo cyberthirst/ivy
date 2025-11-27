@@ -13,8 +13,13 @@ from .scenario import Scenario
 class BoaScenarioRunner(BaseScenarioRunner):
     """Runner for executing scenarios in Boa."""
 
-    def __init__(self, collect_storage_dumps: bool = False):
+    def __init__(
+        self,
+        compiler_args: Optional[Dict[str, Any]] = None,
+        collect_storage_dumps: bool = False,
+    ):
         super().__init__(boa.env, collect_storage_dumps)
+        self.compiler_args = compiler_args or {}
 
     def _deploy_from_source(
         self,
@@ -30,7 +35,9 @@ class BoaScenarioRunner(BaseScenarioRunner):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
-            contract = boa.loads(source, *args, **kwargs)
+            contract = boa.loads(
+                source, *args, compiler_args=self.compiler_args, **kwargs
+            )
             return contract
 
     def _call_method(

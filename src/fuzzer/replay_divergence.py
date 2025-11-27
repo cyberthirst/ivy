@@ -11,8 +11,7 @@ from pathlib import Path
 
 from .differential_fuzzer import DifferentialFuzzer
 from .export_utils import TestFilter
-from .runner.ivy_scenario_runner import IvyScenarioRunner
-from .runner.boa_scenario_runner import BoaScenarioRunner
+from .runner.multi_runner import MultiRunner
 from .divergence_detector import DivergenceDetector
 
 
@@ -53,18 +52,15 @@ def replay_divergence(divergence_path: Path) -> bool:
     item = _find_item(fuzzer, item_name)
     scenario = fuzzer.create_mutated_scenario(item, scenario_seed=scenario_seed)
 
-    ivy_runner = IvyScenarioRunner(collect_storage_dumps=True, no_solc_json=True)
-    boa_runner = BoaScenarioRunner(collect_storage_dumps=True)
+    multi_runner = MultiRunner(collect_storage_dumps=True, no_solc_json=True)
     detector = DivergenceDetector()
 
-    ivy_result = ivy_runner.run(scenario)
-    boa_result = boa_runner.run(scenario)
+    results = multi_runner.run(scenario)
 
-    divergence = detector.compare_results(ivy_result, boa_result, scenario)
-    if divergence is None:
-        return False
-
-    return True
+    divergences = detector.compare_all_results(
+        results.ivy_result, results.boa_results, scenario
+    )
+    return len(divergences) > 0
 
 
 def main(argv: list[str]) -> None:
