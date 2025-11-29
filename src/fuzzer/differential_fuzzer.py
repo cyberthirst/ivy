@@ -10,6 +10,7 @@ import random
 import hashlib
 import secrets
 from pathlib import Path
+import typing
 from typing import Dict, Optional
 from copy import deepcopy
 
@@ -95,10 +96,10 @@ class DifferentialFuzzer:
             return self._compiler_data_cache[cache_key]
 
         try:
-            compiler_data = loads_from_solc_json(
-                trace.solc_json, get_compiler_data=True
+            compiler_data = typing.cast(
+                CompilerData,
+                loads_from_solc_json(trace.solc_json, get_compiler_data=True),
             )
-
             self._compiler_data_cache[cache_key] = compiler_data
 
             return compiler_data

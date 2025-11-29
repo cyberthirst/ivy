@@ -4,14 +4,14 @@ from typing import List, Optional, Type
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT, ContractFunctionT
+from vyper.semantics.types import VyperType, IntegerT, ContractFunctionT, TupleT
 from vyper.semantics.types.primitives import NumericT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
 from .value_mutator import ValueMutator
 from src.fuzzer.mutator.function_registry import FunctionRegistry
-from .context import Context, ScopeType, ExprMutability, state_to_expr_mutability
+from .context import Context, ScopeType, state_to_expr_mutability
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
 from src.unparser.unparser import unparse
@@ -171,6 +171,7 @@ class AstMutator(VyperNodeTransformer):
 
         # Visit and get the potentially transformed root
         new_root = self.visit(new_root)
+        assert isinstance(new_root, ast.Module)
 
         # Handle immutables initialization after mutation
         self._ensure_init_with_immutables(new_root)
@@ -247,6 +248,7 @@ class AstMutator(VyperNodeTransformer):
 
             for func in pending_funcs:
                 if func.ast_def:
+                    assert isinstance(func.ast_def, ast.FunctionDef)
                     # Visit the function to fill its body
                     self.visit_FunctionDef(func.ast_def)
                     assert func.ast_def.body
@@ -364,8 +366,11 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_BinOp(self, node: ast.BinOp):
-        node.left = self.visit(node.left)
-        node.right = self.visit(node.right)
+        left = self.visit(node.left)
+        right = self.visit(node.right)
+        assert isinstance(left, ast.ExprNode) and isinstance(right, ast.ExprNode)
+        node.left = left
+        node.right = right
 
         if not self.should_mutate(ast.BinOp):
             return node

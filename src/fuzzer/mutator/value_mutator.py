@@ -7,7 +7,7 @@ for both AST mutations and ABI fuzzing.
 
 import random
 from typing import Any, List, Optional
-from eth_utils import to_checksum_address
+from eth_utils.address import to_checksum_address
 from vyper.semantics.types import (
     AddressT,
     BoolT,

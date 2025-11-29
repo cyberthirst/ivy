@@ -4,7 +4,7 @@
 #   - structs get decoded as tuples, ivy returns them as struct objects
 #   - boolean get decoded as ints, ivy returns them as bools
 
-from typing import TYPE_CHECKING, Iterable
+from typing import Iterable
 
 from eth_utils import to_checksum_address
 
@@ -39,9 +39,6 @@ from ivy.types import (
     VyperDecimal,
     Tuple as IvyTuple,
 )
-
-if TYPE_CHECKING:
-    from vyper.semantics.types import VyperType
 
 
 class DecodeError(Exception):

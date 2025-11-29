@@ -1,6 +1,6 @@
 import random
 
-from typing import Optional
+from typing import Optional, Union
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -36,7 +36,7 @@ class ExprGenerator:
         self,
         value_mutator: ValueMutator,
         rng: random.Random,
-        function_registry: FunctionRegistry = None,
+        function_registry: Optional[FunctionRegistry] = None,
         type_generator=None,
     ):
         self.value_mutator = value_mutator
@@ -246,7 +246,7 @@ class ExprGenerator:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
         mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
-        if mutability in (ExprMutability.CONST):
+        if mutability == ExprMutability.CONST:
             return False
         return not ctx["context"].is_module_scope
 
@@ -503,6 +503,7 @@ class ExprGenerator:
         if not built:
             return None
         node, _ = built
+        assert isinstance(node, ast.Subscript)
         node._metadata["type"] = target_type
         return node
 
@@ -853,7 +854,7 @@ class ExprGenerator:
 
     def _generate_func_call(
         self, target_type: VyperType, context: Context, depth: int
-    ) -> Optional[ast.Call]:
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         """Generate a function call, selecting between user functions and builtins."""
         if not self.function_registry:
             return None
@@ -939,7 +940,9 @@ class ExprGenerator:
 
         return result_node
 
-    def _finalize_call(self, func_node, args, return_type, func_t=None):
+    def _finalize_call(
+        self, func_node, args, return_type, func_t=None
+    ) -> Union[ast.Call, ast.StaticCall, ast.ExtCall]:
         """Create ast.Call and annotate; wrap external calls if func_t provided."""
         call_node = ast.Call(func=func_node, args=args, keywords=[])
         call_node._metadata = getattr(call_node, "_metadata", {})
@@ -1014,7 +1017,7 @@ class ExprGenerator:
         target_type: VyperType,
         context: Context,
         depth: int,
-    ) -> Optional[ast.Call]:
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         # func node
         func_node = ast.Name(id=name)
         func_node._metadata = getattr(func_node, "_metadata", {})

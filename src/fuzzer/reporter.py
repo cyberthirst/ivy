@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import time
 import json
 import logging
 from pathlib import Path
 from datetime import datetime
 
-from vyper.exceptions import VyperException, VyperInternalException
 from src.fuzzer.runner.base_scenario_runner import ScenarioResult
 
 if TYPE_CHECKING:
@@ -202,7 +201,9 @@ class FuzzerReporter:
             error_type = type(error).__name__
 
             status = "new" if decision.keep else "dup"
-            logging.error(f"crash| {status} | {item_name} | mut#{scenario_num} | {error_type}")
+            logging.error(
+                f"crash| {status} | {item_name} | mut#{scenario_num} | {error_type}"
+            )
 
             if decision.keep:
                 self.save_compiler_crash(
@@ -221,7 +222,9 @@ class FuzzerReporter:
             error_type = type(error).__name__
 
             if decision.keep:
-                logging.debug(f"compile_fail| new | {item_name} | mut#{scenario_num} | {error_type}")
+                logging.debug(
+                    f"compile_fail| new | {item_name} | mut#{scenario_num} | {error_type}"
+                )
                 self.save_compilation_failure(
                     source_code, error, error_type, subfolder="filtered"
                 )
@@ -237,9 +240,13 @@ class FuzzerReporter:
 
             status = "new" if decision.keep else "dup"
             if divergence.type == DivergenceType.DEPLOYMENT:
-                logging.error(f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | deployment")
+                logging.error(
+                    f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | deployment"
+                )
             else:
-                logging.error(f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | {divergence.function}")
+                logging.error(
+                    f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | {divergence.function}"
+                )
 
             if decision.keep:
                 self.save_divergence(divergence, subfolder="filtered")

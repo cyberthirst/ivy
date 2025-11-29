@@ -1,6 +1,6 @@
 import textwrap
 from pathlib import Path
-from typing import TYPE_CHECKING, Union, Dict, Any
+from typing import Union, Dict, Any
 
 import vyper
 from vyper.cli.vyper_compile import get_search_paths
@@ -20,10 +20,6 @@ from vyper.compiler.settings import Settings
 from ivy.frontend.vyper_contract import VyperDeployer, VyperContract
 from ivy.frontend.env import Env
 from ivy.utils import _detect_version
-
-
-if TYPE_CHECKING:
-    pass
 
 _Contract = Union[VyperContract]
 

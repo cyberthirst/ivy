@@ -2,6 +2,8 @@
 Divergence detection for differential fuzzing.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
@@ -30,7 +32,7 @@ class Divergence:
     scenario: Scenario
     # Runner identification
     divergent_runner: str = "boa"  # e.g. "boa:default", "boa:venom"
-    divergent_config: Optional["CompilerConfig"] = None
+    divergent_config: Optional[CompilerConfig] = None
     # Results
     ivy_result: Optional[Union[DeploymentResult, CallResult]] = None
     boa_result: Optional[Union[DeploymentResult, CallResult]] = None
@@ -52,18 +54,9 @@ class Divergence:
                 "compiler_args": self.divergent_config.compiler_args,
             }
 
-        # Add trace information for the divergence step
-        traces = self.scenario.get_traces_to_execute()
-        if self.step < len(traces):
-            trace = traces[self.step]
-
-            # If it's a deployment trace, add source information
-            if hasattr(trace, "source_code"):
-                result["source_code"] = trace.source_code
-
-            # Add mutation information if traces were mutated
-            if self.scenario.mutated_traces:
-                result["has_mutations"] = True
+        # Add mutation information if traces were mutated
+        if self.scenario.mutated_traces:
+            result["has_mutations"] = True
 
         if self.type == DivergenceType.XFAIL:
             result["xfail_expected"] = self.xfail_expected
@@ -83,31 +76,18 @@ class Divergence:
 
         # Add relevant traces up to the divergence point
         if self.scenario.get_traces_to_execute():
-            result["traces"] = []
-            for i, trace in enumerate(
-                self.scenario.get_traces_to_execute()[: self.step + 1]
-            ):
-                trace_info = {
-                    "type": trace.__class__.__name__,
-                    "index": i,
-                }
-                if hasattr(trace, "function_name"):
-                    trace_info["function"] = trace.function_name
-                elif (
-                    hasattr(trace, "python_args")
-                    and trace.python_args
-                    and "method" in trace.python_args
-                ):
-                    trace_info["function"] = trace.python_args["method"]
-                if hasattr(trace, "python_args"):
-                    trace_info["args"] = trace.python_args
-                result["traces"].append(trace_info)
+            result["traces"] = [
+                trace.to_trace_info(i)
+                for i, trace in enumerate(
+                    self.scenario.get_traces_to_execute()[: self.step + 1]
+                )
+            ]
 
         return result
 
 
-def _get_xfail_reasons(l: list[XFailExpectation]) -> list[str]:
-    return [xf.reason or "(unspecified)" for xf in l]
+def _get_xfail_reasons(expectations: list[XFailExpectation]) -> list[str]:
+    return [xf.reason or "(unspecified)" for xf in expectations]
 
 
 class DivergenceDetector:
@@ -116,12 +96,10 @@ class DivergenceDetector:
     def compare_all_results(
         self,
         ivy_result: ScenarioResult,
-        boa_results: Dict[str, tuple["CompilerConfig", ScenarioResult]],
+        boa_results: Dict[str, tuple[CompilerConfig, ScenarioResult]],
         scenario: Scenario,
     ) -> List[Divergence]:
         """Compare Ivy results against all Boa runner results."""
-        from .runner.multi_runner import CompilerConfig
-
         divergences = []
         for runner_name, (config, boa_result) in boa_results.items():
             divergence = self.compare_results(
@@ -137,7 +115,7 @@ class DivergenceDetector:
         boa_result: ScenarioResult,
         scenario: Scenario,
         runner_name: str = "boa",
-        config: Optional["CompilerConfig"] = None,
+        config: Optional[CompilerConfig] = None,
     ) -> Optional[Divergence]:
         """Compare results from two runners and identify divergences."""
         divergent_runner = f"boa:{runner_name}" if runner_name != "boa" else "boa"
@@ -213,9 +191,10 @@ class DivergenceDetector:
 
             # Compare deployment results
             if ivy_trace_result.trace_type == "deployment":
-                if not self._compare_deployment_results(
-                    ivy_trace_result.result, boa_trace_result.result
-                ):
+                ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
+                assert isinstance(ivy_res, DeploymentResult)
+                assert isinstance(boa_res, DeploymentResult)
+                if not self._compare_deployment_results(ivy_res, boa_res):
                     return Divergence(
                         type=DivergenceType.DEPLOYMENT,
                         step=ivy_trace_result.trace_index,
@@ -228,17 +207,16 @@ class DivergenceDetector:
 
             # Compare call results
             elif ivy_trace_result.trace_type == "call":
-                if not self._compare_call_results(
-                    ivy_trace_result.result, boa_trace_result.result
-                ):
+                ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
+                assert isinstance(ivy_res, CallResult)
+                assert isinstance(boa_res, CallResult)
+                if not self._compare_call_results(ivy_res, boa_res):
                     # Find the function name from the scenario
                     function_name = None
                     traces = scenario.get_traces_to_execute()
                     trace = traces[ivy_trace_result.trace_index]
-                    if hasattr(trace, "function_name"):
-                        function_name = trace.function_name
-                    elif hasattr(trace, "python_args") and trace.python_args:
-                        function_name = trace.python_args.get("method")
+                    trace_info = trace.to_trace_info(ivy_trace_result.trace_index)
+                    function_name = trace_info.get("function")
 
                     return Divergence(
                         type=DivergenceType.EXECUTION,
@@ -311,6 +289,7 @@ class DivergenceDetector:
         That happens e.g. when one materializes default values and the other does not. We compare
         normalized dumps lazily to avoid performance penalty only when the original doesn't compare equal.
         """
+        assert ivy_res.storage_dump is not None and boa_res.storage_dump is not None
         normalized_ivy = normalize_storage_dump(ivy_res.storage_dump, ivy_res.contract)
         normalized_boa = normalize_storage_dump(boa_res.storage_dump, boa_res.contract)
         return normalized_ivy == normalized_boa

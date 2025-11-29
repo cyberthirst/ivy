@@ -60,6 +60,14 @@ class DeploymentTrace:
     compilation_xfails: List[XFailExpectation] = field(default_factory=list)
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
+    def to_trace_info(self, index: int) -> Dict[str, Any]:
+        info: Dict[str, Any] = {"type": self.__class__.__name__, "index": index}
+        if self.source_code:
+            info["source_code"] = self.source_code
+        if self.python_args:
+            info["args"] = self.python_args
+        return info
+
 
 @dataclass
 class CallTrace:
@@ -73,6 +81,16 @@ class CallTrace:
     function_name: Optional[str] = None
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
+    def to_trace_info(self, index: int) -> Dict[str, Any]:
+        info: Dict[str, Any] = {"type": self.__class__.__name__, "index": index}
+        if self.function_name:
+            info["function"] = self.function_name
+        elif self.python_args and "method" in self.python_args:
+            info["function"] = self.python_args["method"]
+        if self.python_args:
+            info["args"] = self.python_args
+        return info
+
 
 @dataclass
 class SetBalanceTrace:
@@ -81,12 +99,18 @@ class SetBalanceTrace:
     address: str
     value: int
 
+    def to_trace_info(self, index: int) -> Dict[str, Any]:
+        return {"type": self.__class__.__name__, "index": index}
+
 
 @dataclass
 class ClearTransientStorageTrace:
     """Represents a clear_transient_storage trace."""
 
     # No fields needed for this trace type
+
+    def to_trace_info(self, index: int) -> Dict[str, Any]:
+        return {"type": self.__class__.__name__, "index": index}
 
 
 @dataclass
@@ -113,50 +137,50 @@ class TestFilter:
     """Filters for selecting which tests to use."""
 
     def __init__(self, exclude_multi_module: bool = False):
-        self.path_includes: List[Union[str, re.Pattern]] = []
-        self.path_excludes: List[Union[str, re.Pattern]] = []
-        self.source_excludes: List[Union[str, re.Pattern]] = []
-        self.source_includes: List[Union[str, re.Pattern]] = []
-        self.name_includes: List[Union[str, re.Pattern]] = []
-        self.name_excludes: List[Union[str, re.Pattern]] = []
+        self.path_includes: List[re.Pattern[str]] = []
+        self.path_excludes: List[re.Pattern[str]] = []
+        self.source_excludes: List[re.Pattern[str]] = []
+        self.source_includes: List[re.Pattern[str]] = []
+        self.name_includes: List[re.Pattern[str]] = []
+        self.name_excludes: List[re.Pattern[str]] = []
         self.exclude_multi_module = exclude_multi_module
 
-    def include_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def include_path(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Only include tests from paths matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.path_includes.append(pattern)
         return self
 
-    def exclude_path(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def exclude_path(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Exclude tests from paths matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.path_excludes.append(pattern)
         return self
 
-    def exclude_source(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def exclude_source(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Exclude tests with source code matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.source_excludes.append(pattern)
         return self
 
-    def include_source(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def include_source(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Only include tests with source code matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.source_includes.append(pattern)
         return self
 
-    def include_name(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def include_name(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Only include tests with names matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.name_includes.append(pattern)
         return self
 
-    def exclude_name(self, pattern: Union[str, re.Pattern]) -> "TestFilter":
+    def exclude_name(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
         """Exclude tests with names matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)

@@ -126,8 +126,12 @@ class Deduper:
             )
         elif divergence.type in (DivergenceType.DEPLOYMENT, DivergenceType.EXECUTION):
             # Check if one succeeded and one failed
-            ivy_success = divergence.ivy_result.success if divergence.ivy_result else None
-            boa_success = divergence.boa_result.success if divergence.boa_result else None
+            ivy_success = (
+                divergence.ivy_result.success if divergence.ivy_result else None
+            )
+            boa_success = (
+                divergence.boa_result.success if divergence.boa_result else None
+            )
 
             if ivy_success == boa_success:
                 # Both succeeded with different results - don't dedup
@@ -147,7 +151,7 @@ class Deduper:
 
             error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
             sig = (
-                divergence.type.value,
+                str(divergence.type),
                 failing_runner,
                 error_fp,
             )
@@ -160,7 +164,7 @@ class Deduper:
         if fingerprint in self._seen_divergences:
             return DedupDecision(
                 keep=False,
-                reason=f"duplicate_divergence",
+                reason="duplicate_divergence",
                 fingerprint=fingerprint,
             )
 
