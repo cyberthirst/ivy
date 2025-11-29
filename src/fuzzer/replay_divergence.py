@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-from .differential_fuzzer import DifferentialFuzzer
+from .differential_fuzzer import TestFuzzer
 from .export_utils import TestFilter
 from .runner.multi_runner import MultiRunner
 from .divergence_detector import DivergenceDetector
@@ -20,7 +20,7 @@ def _load_divergence(path: Path) -> dict:
         return json.load(f)
 
 
-def _find_item(fuzzer: DifferentialFuzzer, item_name: str):
+def _find_item(fuzzer: TestFuzzer, item_name: str):
     exports = fuzzer.load_filtered_exports(TestFilter(exclude_multi_module=True))
     for export in exports.values():
         if item_name in export.items:
@@ -46,7 +46,7 @@ def replay_divergence(divergence_path: Path) -> bool:
         raise ValueError("Divergence file missing 'scenario_seed'")
 
     # Initialize fuzzer with base seed (used for consistency when loading)
-    fuzzer = DifferentialFuzzer(seed=base_seed)
+    fuzzer = TestFuzzer(seed=base_seed)
 
     # Locate the item and reconstruct the mutated scenario
     item = _find_item(fuzzer, item_name)
