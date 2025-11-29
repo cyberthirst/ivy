@@ -7,6 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 from vyper.exceptions import VyperException, VyperInternalException
+from src.fuzzer.runner.base_scenario_runner import ScenarioResult
 
 
 def _make_json_serializable(obj):
@@ -117,7 +118,7 @@ class FuzzerReporter:
         # Attach scenario seed to the instance for saving alongside reports
         self._current_scenario_seed = scenario_seed
 
-    def update_from_scenario_result(self, result: Any):
+    def update_from_scenario_result(self, result: ScenarioResult):
         for trace_idx, deployment_result in result.get_deployment_results():
             if deployment_result.is_compiler_crash:
                 # Compiler crash (CompilerPanic, CodegenPanic, etc.)

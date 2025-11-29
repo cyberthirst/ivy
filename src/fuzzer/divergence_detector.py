@@ -3,6 +3,7 @@ Divergence detection for differential fuzzing.
 """
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
 from .runner.scenario import Scenario
@@ -14,11 +15,17 @@ if TYPE_CHECKING:
     from .runner.multi_runner import CompilerConfig
 
 
+class DivergenceType(StrEnum):
+    DEPLOYMENT = "deployment"
+    EXECUTION = "execution"
+    XFAIL = "xfail"
+
+
 @dataclass
 class Divergence:
     """Represents a divergence between Ivy and a specific Boa runner."""
 
-    type: str  # "deployment", "execution", or "xfail"
+    type: DivergenceType
     step: int  # 0 for deployment, 1+ for calls
     scenario: Scenario
     # Runner identification
@@ -58,11 +65,11 @@ class Divergence:
             if self.scenario.mutated_traces:
                 result["has_mutations"] = True
 
-        if self.type == "xfail":
+        if self.type == DivergenceType.XFAIL:
             result["xfail_expected"] = self.xfail_expected
             result["xfail_actual"] = self.xfail_actual
             result["xfail_reasons"] = self.xfail_reasons
-        elif self.type == "deployment":
+        elif self.type == DivergenceType.DEPLOYMENT:
             if self.ivy_result:
                 result["ivy_deployment"] = self.ivy_result.to_dict()
             if self.boa_result:
@@ -138,7 +145,7 @@ class DivergenceDetector:
         # If result counts differ, report it as a divergence
         if len(ivy_result.results) != len(boa_result.results):
             return Divergence(
-                type="execution",
+                type=DivergenceType.EXECUTION,
                 step=0,
                 scenario=scenario,
                 divergent_runner=divergent_runner,
@@ -175,7 +182,7 @@ class DivergenceDetector:
                     reasons = _get_xfail_reasons(trace_result.compilation_xfails)
                     if reasons and not deployment_result.is_compilation_failure:
                         return Divergence(
-                            type="xfail",
+                            type=DivergenceType.XFAIL,
                             step=trace_result.trace_index,
                             scenario=scenario,
                             divergent_runner=xfail_runner_name,
@@ -194,7 +201,7 @@ class DivergenceDetector:
                     )
                     if not actual_runtime_fail:
                         return Divergence(
-                            type="xfail",
+                            type=DivergenceType.XFAIL,
                             step=trace_result.trace_index,
                             scenario=scenario,
                             divergent_runner=xfail_runner_name,
@@ -210,7 +217,7 @@ class DivergenceDetector:
                     ivy_trace_result.result, boa_trace_result.result
                 ):
                     return Divergence(
-                        type="deployment",
+                        type=DivergenceType.DEPLOYMENT,
                         step=ivy_trace_result.trace_index,
                         scenario=scenario,
                         divergent_runner=divergent_runner,
@@ -234,7 +241,7 @@ class DivergenceDetector:
                         function_name = trace.python_args.get("method")
 
                     return Divergence(
-                        type="execution",
+                        type=DivergenceType.EXECUTION,
                         step=ivy_trace_result.trace_index,
                         scenario=scenario,
                         divergent_runner=divergent_runner,

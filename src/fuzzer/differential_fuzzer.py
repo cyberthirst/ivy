@@ -31,7 +31,7 @@ from src.ivy.frontend.loader import loads_from_solc_json
 
 from .runner.scenario import Scenario, create_scenario_from_item
 from .runner.multi_runner import MultiRunner
-from .divergence_detector import DivergenceDetector
+from .divergence_detector import DivergenceDetector, DivergenceType
 from .reporter import FuzzerReporter
 
 from vyper.compiler.phases import CompilerData
@@ -259,7 +259,7 @@ class DifferentialFuzzer:
                         logging.error(
                             f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner}"
                         )
-                        if divergence.type == "deployment":
+                        if divergence.type == DivergenceType.DEPLOYMENT:
                             logging.error("  Deployment divergence")
                         else:
                             logging.error(
