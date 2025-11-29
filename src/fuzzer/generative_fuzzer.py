@@ -1,0 +1,152 @@
+"""
+Generative fuzzer for Vyper using corpus evolution.
+
+Starts with test exports as seeds, then continuously mutates
+and evolves the corpus based on successful compilations.
+"""
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from .base_fuzzer import BaseFuzzer
+from .corpus import FuzzCorpus
+from .export_utils import TestFilter
+from .runner.scenario import create_scenario_from_item
+
+
+class GenerativeFuzzer(BaseFuzzer):
+    """
+    Queue-based fuzzer with corpus evolution.
+
+    Seeds: original test exports (never removed)
+    Evolved: successfully mutated scenarios (bounded, O(1) replacement)
+    """
+
+    def __init__(
+        self,
+        exports_dir: Path = Path("tests/vyper-exports"),
+        seed: Optional[int] = None,
+        debug_mode: bool = True,
+        max_evolved: int = 10_000,
+        seed_selection_prob: float = 0.3,
+    ):
+        super().__init__(exports_dir=exports_dir, seed=seed, debug_mode=debug_mode)
+
+        self.corpus: FuzzCorpus = FuzzCorpus(
+            rng=self.rng,
+            max_evolved=max_evolved,
+            seed_selection_prob=seed_selection_prob,
+        )
+
+        self._iteration = 0
+
+    def load_seeds(self, test_filter: Optional[TestFilter] = None) -> int:
+        """Load test exports as seed corpus. Returns number of seeds loaded."""
+        exports = self.load_filtered_exports(test_filter)
+
+        count = 0
+        for export in exports.values():
+            for item in export.items.values():
+                if item.item_type == "fixture":
+                    continue
+
+                scenario = create_scenario_from_item(item, use_python_args=True)
+                self.corpus.add_seed(scenario)
+                count += 1
+
+        logging.info(f"Loaded {count} seed scenarios into corpus")
+        return count
+
+    def fuzz_loop(
+        self,
+        test_filter: Optional[TestFilter] = None,
+        max_iterations: Optional[int] = None,
+        log_interval: int = 100,
+    ):
+        """
+        Main fuzzing loop.
+
+        Infinite loop (or until max_iterations) that:
+        1. Picks a scenario from corpus
+        2. Mutates it
+        3. Runs differential comparison
+        4. Adds successful mutations back to corpus
+        """
+        # Bootstrap: load seeds
+        seed_count = self.load_seeds(test_filter)
+        if seed_count == 0:
+            logging.error("No seeds loaded, cannot fuzz")
+            return
+
+        self.reporter.start_timer()
+
+        try:
+            while max_iterations is None or self._iteration < max_iterations:
+                self._iteration += 1
+
+                base_scenario = self.corpus.pick()
+                if base_scenario is None:
+                    logging.error("Corpus empty, stopping")
+                    break
+
+                scenario_seed = self.derive_scenario_seed("gen", self._iteration)
+
+                mutated_scenario = self.mutate_scenario(
+                    base_scenario, scenario_seed=scenario_seed
+                )
+
+                self.reporter.set_context(
+                    f"gen_{self._iteration}",
+                    self._iteration,
+                    self.seed,
+                    scenario_seed,
+                )
+
+                analysis = self.run_scenario(mutated_scenario)
+
+                self.reporter.report(analysis, debug_mode=self.debug_mode)
+
+                # Add to evolved corpus if no compilation failures
+                # (divergences are fine - we want to keep exploring that space)
+                if not analysis.compile_failures:
+                    self.corpus.add_evolved(mutated_scenario)
+
+                if self._iteration % log_interval == 0:
+                    self._log_progress()
+
+        except KeyboardInterrupt:
+            logging.info("Interrupted by user")
+
+        self.finalize()
+
+    def _log_progress(self):
+        """Log fuzzing progress."""
+        elapsed = self.reporter.get_elapsed_time()
+        rate = self._iteration / elapsed if elapsed > 0 else 0
+
+        logging.info(
+            f"iter={self._iteration} | "
+            f"seeds={self.corpus.seed_count} | "
+            f"evolved={self.corpus.evolved_count} | "
+            f"divergences={self.reporter.divergences} | "
+            f"rate={rate:.1f}/s"
+        )
+
+
+def main():
+    """Run generative fuzzing."""
+    test_filter = TestFilter(exclude_multi_module=True)
+    test_filter.include_path("functional/builtins/codegen/test_slice")
+    test_filter.exclude_source(r"\.code")
+    test_filter.exclude_name("zero_length_side_effects")
+
+    fuzzer = GenerativeFuzzer(
+        max_evolved=10_000,
+        seed_selection_prob=0.3,
+    )
+    fuzzer.fuzz_loop(test_filter=test_filter, max_iterations=None)
+
+
+if __name__ == "__main__":
+    main()
