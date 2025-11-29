@@ -216,7 +216,7 @@ class DifferentialFuzzer:
         )
 
         # Process each export file
-        for export_path, export in exports.items():
+        for export in exports.values():
             for item_name, item in export.items.items():
                 # Skip fixtures - they'll be executed as dependencies
                 if item.item_type == "fixture":
@@ -251,6 +251,10 @@ class DifferentialFuzzer:
                     # Report (handles stats, logging, file saving)
                     self.reporter.report(analysis, debug_mode=self.debug_mode)
 
+        self._finalize()
+
+    def _finalize(self):
+        """Stop timer and output final reports."""
         self.reporter.stop_timer()
         self.reporter.print_summary()
         self.reporter.save_statistics()
