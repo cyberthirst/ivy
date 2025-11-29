@@ -31,7 +31,8 @@ from src.ivy.frontend.loader import loads_from_solc_json
 
 from .runner.scenario import Scenario, create_scenario_from_item
 from .runner.multi_runner import MultiRunner
-from .divergence_detector import DivergenceDetector, DivergenceType
+from .deduper import Deduper
+from .result_analyzer import ResultAnalyzer
 from .reporter import FuzzerReporter
 
 from vyper.compiler.phases import CompilerData
@@ -54,11 +55,17 @@ class DifferentialFuzzer:
         self,
         exports_dir: Path = Path("tests/vyper-exports"),
         seed: Optional[int] = None,
+        debug_mode: bool = True,
     ):
         self.exports_dir = exports_dir
         # global campaign seed for total reproducibility
         self.seed = seed if seed is not None else secrets.randbits(64)
+        self.debug_mode = debug_mode
+
+        # Core components
+        self.deduper = Deduper()
         self.reporter = FuzzerReporter(seed=self.seed)
+        self.result_analyzer = ResultAnalyzer(self.deduper)
 
         # Cache for CompilerData objects, keyed by id of solc_json
         self._compiler_data_cache: Dict[int, CompilerData] = {}
@@ -198,16 +205,14 @@ class DifferentialFuzzer:
 
         self.reporter.start_timer()
 
-        divergence_count = 0
         items_processed = 0
 
-        # Create multi-runner and detector (with storage dumps enabled for comparison)
+        # Create multi-runner (with storage dumps enabled for comparison)
         # Use no_solc_json=True for Ivy to compile mutated source code
         multi_runner = MultiRunner(
             collect_storage_dumps=True,
             no_solc_json=True,
         )
-        detector = DivergenceDetector()
 
         # Process each export file
         for export_path, export in exports.items():
@@ -237,37 +242,13 @@ class DifferentialFuzzer:
                     # Run in all environments
                     results = multi_runner.run(scenario)
 
-                    self.reporter.record_scenario()
-                    self.reporter.record_item_stats(item_name, "scenario")
-                    self.reporter.update_from_scenario_result(results.ivy_result)
-                    for _, (_, boa_result) in results.boa_results.items():
-                        self.reporter.update_from_scenario_result(boa_result)
-
-                    # Compare results
-                    divergences = detector.compare_all_results(
-                        results.ivy_result, results.boa_results, scenario
+                    # Analyze results (detects crashes, failures, divergences + dedup)
+                    analysis = self.result_analyzer.analyze_run(
+                        scenario, results.ivy_result, results.boa_results
                     )
 
-                    if not divergences:
-                        logging.info(f"ok  | item {item_name} | mut#{scenario_num}")
-                        continue
-
-                    for divergence in divergences:
-                        divergence_count += 1
-                        self.reporter.record_divergence()
-                        self.reporter.record_item_stats(item_name, "divergence")
-                        logging.error(
-                            f"diff| item {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner}"
-                        )
-                        if divergence.type == DivergenceType.DEPLOYMENT:
-                            logging.error("  Deployment divergence")
-                        else:
-                            logging.error(
-                                f"  Execution divergence at function {divergence.function}"
-                            )
-
-                        # Save divergence using reporter
-                        self.reporter.save_divergence(divergence)
+                    # Report (handles stats, logging, file saving)
+                    self.reporter.report(analysis, debug_mode=self.debug_mode)
 
         self.reporter.stop_timer()
         self.reporter.print_summary()
