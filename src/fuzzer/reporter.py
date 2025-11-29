@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, TYPE_CHECKING
 import time
 import json
 import logging
@@ -8,6 +10,9 @@ from datetime import datetime
 
 from vyper.exceptions import VyperException, VyperInternalException
 from src.fuzzer.runner.base_scenario_runner import ScenarioResult
+
+if TYPE_CHECKING:
+    from .result_analyzer import AnalysisResult
 
 
 def _make_json_serializable(obj):
@@ -167,6 +172,84 @@ class FuzzerReporter:
         elif stat_type == "failure":
             self.item_stats[item_name]["failures"] += 1
 
+    def report(self, analysis: AnalysisResult, debug_mode: bool = False):
+        """
+        Report results from an AnalysisResult.
+
+        Handles all reporting: stats, item stats, file saving, and logging.
+        Saves unique items to filtered/, all items to unfiltered/ if debug_mode.
+        """
+        from .divergence_detector import DivergenceType
+
+        item_name = self.current_item_name or "unknown"
+        scenario_num = self.current_scenario_num or 0
+
+        # Update scenario stats
+        self.total_scenarios += 1
+        self.record_item_stats(item_name, "scenario")
+
+        # Update stats from analysis
+        self.successful_deployments += analysis.successful_deployments
+        self.deployment_failures += analysis.failed_deployments
+        self.successful_calls += analysis.successful_calls
+        self.call_failures += analysis.failed_calls
+
+        # Report crashes
+        for deployment_result, decision in analysis.crashes:
+            self.compiler_crashes += 1
+            source_code = deployment_result.source_code
+            error = deployment_result.error
+            error_type = type(error).__name__
+
+            status = "new" if decision.keep else "dup"
+            logging.error(f"crash| {status} | {item_name} | mut#{scenario_num} | {error_type}")
+
+            if decision.keep:
+                self.save_compiler_crash(
+                    source_code, error, error_type, subfolder="filtered"
+                )
+            if debug_mode:
+                self.save_compiler_crash(
+                    source_code, error, error_type, subfolder="unfiltered"
+                )
+
+        # Report compilation failures
+        for deployment_result, decision in analysis.compile_failures:
+            self.compilation_failures += 1
+            source_code = deployment_result.source_code
+            error = deployment_result.error
+            error_type = type(error).__name__
+
+            if decision.keep:
+                logging.debug(f"compile_fail| new | {item_name} | mut#{scenario_num} | {error_type}")
+                self.save_compilation_failure(
+                    source_code, error, error_type, subfolder="filtered"
+                )
+            if debug_mode:
+                self.save_compilation_failure(
+                    source_code, error, error_type, subfolder="unfiltered"
+                )
+
+        # Report divergences
+        for divergence, decision in analysis.divergences:
+            self.divergences += 1
+            self.record_item_stats(item_name, "divergence")
+
+            status = "new" if decision.keep else "dup"
+            if divergence.type == DivergenceType.DEPLOYMENT:
+                logging.error(f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | deployment")
+            else:
+                logging.error(f"diff| {status} | {item_name} | mut#{scenario_num} | step {divergence.step} | {divergence.divergent_runner} | {divergence.function}")
+
+            if decision.keep:
+                self.save_divergence(divergence, subfolder="filtered")
+            if debug_mode:
+                self.save_divergence(divergence, subfolder="unfiltered")
+
+        # Log success if no divergences
+        if not analysis.divergences:
+            logging.info(f"ok  | {item_name} | mut#{scenario_num}")
+
     def get_deployment_success_rate(self) -> float:
         total = self.successful_deployments + self.deployment_failures
         if total == 0:
@@ -276,9 +359,11 @@ class FuzzerReporter:
             "scenarios_per_second": self.get_scenarios_per_second(),
         }
 
-    def save_divergence(self, divergence: Any):
+    def save_divergence(self, divergence: Any, subfolder: Optional[str] = None):
         """Save a divergence between Ivy and Boa execution."""
         reports_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        if subfolder:
+            reports_dir = reports_dir / subfolder
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         item_name = self.current_item_name or "unknown"
@@ -302,14 +387,19 @@ class FuzzerReporter:
         logging.error(f"Divergence saved to {filepath}")
 
     def save_compiler_crash(
-        self, source_code: str, error: Exception, error_type: Optional[str] = None
+        self,
+        source_code: str,
+        error: Exception,
+        error_type: Optional[str] = None,
+        subfolder: Optional[str] = None,
     ):
         """Save a compiler crash with the source code that caused it."""
         error_type = error_type or type(error).__name__
 
-        crash_dir = (
-            self.reports_dir / datetime.now().strftime("%Y-%m-%d") / "compiler_crashes"
-        )
+        crash_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        if subfolder:
+            crash_dir = crash_dir / subfolder
+        crash_dir = crash_dir / "compiler_crashes"
         crash_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
@@ -335,16 +425,19 @@ class FuzzerReporter:
         logging.error(f"Compiler crash saved to {filepath}")
 
     def save_compilation_failure(
-        self, source_code: str, error: Exception, error_type: Optional[str] = None
+        self,
+        source_code: str,
+        error: Exception,
+        error_type: Optional[str] = None,
+        subfolder: Optional[str] = None,
     ):
         """Save a compilation failure with the source code that caused it."""
         error_type = error_type or type(error).__name__
 
-        failure_dir = (
-            self.reports_dir
-            / datetime.now().strftime("%Y-%m-%d")
-            / "compilation_failures"
-        )
+        failure_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        if subfolder:
+            failure_dir = failure_dir / subfolder
+        failure_dir = failure_dir / "compilation_failures"
         failure_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
