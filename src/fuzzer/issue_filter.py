@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Callable, Optional
 
+from .reporter import _make_json_serializable
+
 
 class IssueType(StrEnum):
     DIVERGENCE = "divergence"
@@ -99,7 +101,8 @@ class IssueFilter:
 
     def should_filter(self, issue_dict: dict, issue_type: IssueType) -> Optional[str]:
         """Check if issue should be filtered. Returns rule name if filtered, None otherwise."""
-        json_str = json.dumps(issue_dict, default=str)
+        serializable_dict = _make_json_serializable(issue_dict)
+        json_str = json.dumps(serializable_dict, default=str)
         for rule in self.rules:
             if rule.matches(issue_type, json_str, issue_dict):
                 return rule.name
@@ -128,6 +131,7 @@ def default_issue_filter() -> IssueFilter:
     f.add_rule(
         name="eip3860_code_size_limit",
         contains="Contract code size exceeds EIP-3860 limit",
+        issue_types={IssueType.COMPILE_FAILURE}
     )
 
     # Boa feature not implemented
@@ -140,6 +144,7 @@ def default_issue_filter() -> IssueFilter:
     f.add_rule(
         name="static_assertion_failure",
         contains="assertion found to fail at compile time",
+        issue_types={IssueType.COMPILE_FAILURE}
     )
 
     # Known compiler bugs
@@ -156,8 +161,9 @@ def default_issue_filter() -> IssueFilter:
     )
 
     f.add_rule(
-        name="zero_array_indexing",
+        name="known_bug_zero_array_indexing",
         contains="indexing into zero array not allowed",
+        issue_types={IssueType.CRASH},
     )
 
     return f
