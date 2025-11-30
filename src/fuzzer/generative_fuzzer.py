@@ -12,6 +12,7 @@ from typing import Optional
 from .base_fuzzer import BaseFuzzer
 from .corpus import FuzzCorpus
 from .export_utils import TestFilter
+from .issue_filter import IssueFilter, default_issue_filter
 from .runner.scenario import create_scenario_from_item
 
 
@@ -30,8 +31,14 @@ class GenerativeFuzzer(BaseFuzzer):
         debug_mode: bool = True,
         max_evolved: int = 10_000,
         seed_selection_prob: float = 0.3,
+        issue_filter: Optional[IssueFilter] = None,
     ):
-        super().__init__(exports_dir=exports_dir, seed=seed, debug_mode=debug_mode)
+        super().__init__(
+            exports_dir=exports_dir,
+            seed=seed,
+            debug_mode=debug_mode,
+            issue_filter=issue_filter,
+        )
 
         self.corpus: FuzzCorpus = FuzzCorpus(
             rng=self.rng,
@@ -141,9 +148,12 @@ def main():
     test_filter.exclude_source(r"\.code")
     test_filter.exclude_name("zero_length_side_effects")
 
+    issue_filter = default_issue_filter()
+
     fuzzer = GenerativeFuzzer(
-        max_evolved=10_000,
+        max_evolved=20_000,
         seed_selection_prob=0.3,
+        issue_filter=issue_filter,
     )
     fuzzer.fuzz_loop(test_filter=test_filter, max_iterations=None)
 

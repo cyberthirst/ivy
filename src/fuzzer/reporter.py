@@ -41,12 +41,14 @@ def build_divergence_record(
     scenario_seed: Optional[int],
 ) -> Dict[str, Any]:
     """Create a JSON-serializable divergence payload for saving or printing."""
-    divergence_data = divergence.to_dict()
-    divergence_data["timestamp"] = datetime.now().isoformat()
-    divergence_data["item_name"] = item_name
-    divergence_data["scenario_num"] = scenario_num
-    divergence_data["seed"] = seed
-    divergence_data["scenario_seed"] = scenario_seed
+    divergence_data = {
+        **divergence.as_dict,
+        "timestamp": datetime.now().isoformat(),
+        "item_name": item_name,
+        "scenario_num": scenario_num,
+        "seed": seed,
+        "scenario_seed": scenario_seed,
+    }
     return _make_json_serializable(divergence_data)
 
 

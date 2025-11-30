@@ -341,6 +341,7 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Int(self, node: ast.Int):
+        return node
         if not self.should_mutate(ast.Int):
             return node
 

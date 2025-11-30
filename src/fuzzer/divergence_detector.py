@@ -5,6 +5,7 @@ Divergence detection for differential fuzzing.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from functools import cached_property
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
@@ -41,8 +42,9 @@ class Divergence:
     xfail_actual: Optional[str] = None  # What actually happened
     xfail_reasons: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
+    @cached_property
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization. Result is cached."""
         result = {
             "type": self.type,
             "step": self.step,

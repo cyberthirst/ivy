@@ -79,7 +79,7 @@ def fingerprint_error(
 
 
 @dataclass
-class DedupDecision:
+class KeepDecision:
     """Result of deduplication check."""
 
     keep: bool
@@ -110,7 +110,7 @@ class Deduper:
         h = hashlib.blake2b(repr(sig).encode("utf-8"), digest_size=16)
         return h.hexdigest()
 
-    def check_divergence(self, divergence: Divergence) -> DedupDecision:
+    def check_divergence(self, divergence: Divergence) -> KeepDecision:
         """
         Check if a divergence should be kept or dropped.
 
@@ -135,7 +135,7 @@ class Deduper:
 
             if ivy_success == boa_success:
                 # Both succeeded with different results - don't dedup
-                return DedupDecision(
+                return KeepDecision(
                     keep=True,
                     reason="both_succeeded_different_results",
                     fingerprint="",
@@ -157,25 +157,25 @@ class Deduper:
             )
         else:
             # Unknown type - don't dedup
-            return DedupDecision(keep=True, reason="unknown_type", fingerprint="")
+            return KeepDecision(keep=True, reason="unknown_type", fingerprint="")
 
         fingerprint = self._compute_fingerprint(sig)
 
         if fingerprint in self._seen_divergences:
-            return DedupDecision(
+            return KeepDecision(
                 keep=False,
                 reason="duplicate_divergence",
                 fingerprint=fingerprint,
             )
 
         self._seen_divergences.add(fingerprint)
-        return DedupDecision(
+        return KeepDecision(
             keep=True,
             reason="new_divergence",
             fingerprint=fingerprint,
         )
 
-    def check_compiler_crash(self, error: Exception) -> DedupDecision:
+    def check_compiler_crash(self, error: Exception) -> KeepDecision:
         """
         Check if a compiler crash should be kept or dropped.
         """
@@ -184,20 +184,20 @@ class Deduper:
         fingerprint = self._compute_fingerprint(sig)
 
         if fingerprint in self._seen_crashes:
-            return DedupDecision(
+            return KeepDecision(
                 keep=False,
                 reason="duplicate_crash",
                 fingerprint=fingerprint,
             )
 
         self._seen_crashes.add(fingerprint)
-        return DedupDecision(
+        return KeepDecision(
             keep=True,
             reason="new_crash",
             fingerprint=fingerprint,
         )
 
-    def check_compilation_failure(self, error: Exception) -> DedupDecision:
+    def check_compilation_failure(self, error: Exception) -> KeepDecision:
         """
         Check if a compilation failure should be kept or dropped.
         """
@@ -206,14 +206,14 @@ class Deduper:
         fingerprint = self._compute_fingerprint(sig)
 
         if fingerprint in self._seen_compile_failures:
-            return DedupDecision(
+            return KeepDecision(
                 keep=False,
                 reason="duplicate_compile_failure",
                 fingerprint=fingerprint,
             )
 
         self._seen_compile_failures.add(fingerprint)
-        return DedupDecision(
+        return KeepDecision(
             keep=True,
             reason="new_compile_failure",
             fingerprint=fingerprint,

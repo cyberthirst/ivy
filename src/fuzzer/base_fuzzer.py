@@ -31,6 +31,7 @@ from .runner.multi_runner import MultiRunner
 from .deduper import Deduper
 from .result_analyzer import ResultAnalyzer
 from .reporter import FuzzerReporter
+from .issue_filter import IssueFilter
 
 from vyper.compiler.phases import CompilerData
 from vyper.exceptions import CompilerPanic, VyperException
@@ -49,6 +50,7 @@ class BaseFuzzer:
         exports_dir: Path = Path("tests/vyper-exports"),
         seed: Optional[int] = None,
         debug_mode: bool = True,
+        issue_filter: Optional[IssueFilter] = None,
     ):
         self.exports_dir = exports_dir
         self.seed = seed if seed is not None else secrets.randbits(64)
@@ -58,7 +60,8 @@ class BaseFuzzer:
         # Core components
         self.deduper = Deduper()
         self.reporter = FuzzerReporter(seed=self.seed)
-        self.result_analyzer = ResultAnalyzer(self.deduper)
+        self.issue_filter = issue_filter
+        self.result_analyzer = ResultAnalyzer(self.deduper, issue_filter)
 
         # Cache for CompilerData objects
         self._compiler_data_cache: Dict[int, CompilerData] = {}

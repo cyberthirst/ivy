@@ -8,12 +8,13 @@ applies deduplication, and returns structured results for the fuzzer.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, TYPE_CHECKING
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from .runner.scenario import Scenario
 from .runner.base_scenario_runner import ScenarioResult, DeploymentResult
 from .divergence_detector import DivergenceDetector, Divergence
-from .deduper import Deduper, DedupDecision
+from .deduper import Deduper, KeepDecision
+from .issue_filter import IssueFilter, IssueType as IT
 
 if TYPE_CHECKING:
     from .runner.multi_runner import CompilerConfig
@@ -24,11 +25,11 @@ class AnalysisResult:
     """Result of analyzing a scenario run."""
 
     # Detected issues with dedup decisions
-    crashes: List[Tuple[DeploymentResult, DedupDecision]] = field(default_factory=list)
-    compile_failures: List[Tuple[DeploymentResult, DedupDecision]] = field(
+    crashes: List[Tuple[DeploymentResult, KeepDecision]] = field(default_factory=list)
+    compile_failures: List[Tuple[DeploymentResult, KeepDecision]] = field(
         default_factory=list
     )
-    divergences: List[Tuple[Divergence, DedupDecision]] = field(default_factory=list)
+    divergences: List[Tuple[Divergence, KeepDecision]] = field(default_factory=list)
 
     # Stats for reporter
     successful_deployments: int = 0
@@ -56,16 +57,31 @@ class AnalysisResult:
 
 class ResultAnalyzer:
     """
-    Analyzes scenario results and applies deduplication.
+    Analyzes scenario results and applies deduplication and filtering.
 
     Detects compiler crashes, compilation failures, and divergences.
-    Uses Deduper to filter duplicates. Returns AnalysisResult for
-    the fuzzer to use for corpus management and reporting.
+    Uses IssueFilter to filter known issues, then Deduper to filter
+    duplicates. Returns AnalysisResult for the fuzzer to use for
+    corpus management and reporting.
     """
 
-    def __init__(self, deduper: Deduper):
+    def __init__(self, deduper: Deduper, issue_filter: Optional[IssueFilter] = None):
         self.deduper = deduper
+        self.issue_filter = issue_filter
         self.divergence_detector = DivergenceDetector()
+
+    def _check_filter(
+        self, issue_dict: dict, issue_type: IT
+    ) -> Optional[KeepDecision]:
+        """Check if issue should be filtered. Returns DedupDecision if filtered, None otherwise."""
+        if not self.issue_filter:
+            return None
+        filter_reason = self.issue_filter.should_filter(issue_dict, issue_type)
+        if filter_reason:
+            return KeepDecision(
+                keep=False, reason=f"filtered:{filter_reason}", fingerprint=""
+            )
+        return None
 
     def analyze_run(
         self,
@@ -93,9 +109,11 @@ class ResultAnalyzer:
             ivy_result, boa_results, scenario
         )
 
-        # Apply dedup to divergences
+        # Apply filter and dedup to divergences
         for divergence in divergences:
-            decision = self.deduper.check_divergence(divergence)
+            decision = self._check_filter(divergence.as_dict, IT.DIVERGENCE)
+            if decision is None:
+                decision = self.deduper.check_divergence(divergence)
             result.divergences.append((divergence, decision))
 
         return result
@@ -106,12 +124,20 @@ class ResultAnalyzer:
         """Process a single scenario result (Ivy or Boa)."""
         for _, deployment_result in scenario_result.get_deployment_results():
             if deployment_result.is_compiler_crash:
-                decision = self.deduper.check_compiler_crash(deployment_result.error)
+                decision = self._check_filter(deployment_result.to_dict(), IT.CRASH)
+                if decision is None:
+                    decision = self.deduper.check_compiler_crash(
+                        deployment_result.error
+                    )
                 result.crashes.append((deployment_result, decision))
             elif deployment_result.is_compilation_failure:
-                decision = self.deduper.check_compilation_failure(
-                    deployment_result.error
+                decision = self._check_filter(
+                    deployment_result.to_dict(), IT.COMPILE_FAILURE
                 )
+                if decision is None:
+                    decision = self.deduper.check_compilation_failure(
+                        deployment_result.error
+                    )
                 result.compile_failures.append((deployment_result, decision))
             elif deployment_result.is_runtime_failure:
                 result.failed_deployments += 1
