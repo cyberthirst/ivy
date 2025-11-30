@@ -314,5 +314,9 @@ class ExprVisitor(BaseVisitor):
                 # and evaluate if the len(returndata) == 0
                 kws[kw.arg] = kw.value
                 continue
-            kws[kw.arg] = self.deep_copy_visit(kw.value)
+            kw_typ = kw.value._metadata["type"]
+            if isinstance(kw_typ, TYPE_T):
+                kws[kw.arg] = kw_typ.typedef
+            else:
+                kws[kw.arg] = self.deep_copy_visit(kw.value)
         return self.generic_call_handler(node, args, kws, typs, target, is_static)

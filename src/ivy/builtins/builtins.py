@@ -160,8 +160,8 @@ def builtin_uint2str(x: int) -> str:
     return str(x)
 
 
-# TODO handle typ
-def builtin_method_id(method: str, output_type: VyperType = None):
+def builtin_method_id(method: str, output_type: Optional[VyperType] = None):
+    # output_type (bytes4 vs Bytes[4]) only affects ABI encoding, not the value
     return method_id(method)
 
 
