@@ -27,6 +27,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
         sender = self._get_sender(sender)
 
@@ -37,7 +38,9 @@ class IvyScenarioRunner(BaseScenarioRunner):
                 self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
             )
             if self.no_solc_json and source:
-                contract = loads(source, *args, **kwargs)
+                contract = loads(
+                    source, *args, compiler_args=compiler_settings, **kwargs
+                )
             else:
                 contract = loads_from_solc_json(solc_json, *args, **kwargs)
 

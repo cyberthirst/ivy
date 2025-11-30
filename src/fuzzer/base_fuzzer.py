@@ -154,6 +154,16 @@ class BaseFuzzer:
                 mutated_trace = trace_mutator.mutate_deployment_trace(
                     trace, compiler_data
                 )
+
+                # Capture compiler settings for runners to use.
+                # TODO: This unconditionally enables decimals because the mutator
+                # might generate decimal-using code. Ideally, we'd track whether
+                # decimals were actually used and only enable if needed.
+                if compiler_data and hasattr(compiler_data, "settings"):
+                    settings = compiler_data.settings.as_dict()
+                    settings["enable_decimals"] = True
+                    mutated_trace.compiler_settings = settings
+
                 mutated_traces.append(mutated_trace)
 
                 if compiler_data:

@@ -159,6 +159,7 @@ class BaseScenarioRunner(ABC):
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Deploy a contract from source. Must be implemented by subclasses."""
         pass
@@ -333,6 +334,7 @@ class BaseScenarioRunner(ABC):
                 args=args,
                 kwargs=kwargs,
                 sender=trace.env.tx.origin if hasattr(trace, "env") else None,
+                compiler_settings=trace.compiler_settings,
             )
 
             # Store the deployed contract by its address

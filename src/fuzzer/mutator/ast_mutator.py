@@ -659,23 +659,6 @@ class AstMutator(VyperNodeTransformer):
 
         assert init_func.body
 
-    def generate_pragma_lines(self, settings) -> list[str]:
-        pragma_lines = []
-
-        if settings.compiler_version:
-            pragma_lines.append(f"# pragma version {settings.compiler_version}")
-
-        if settings.evm_version:
-            pragma_lines.append(f"# pragma evm-version {settings.evm_version}")
-
-        if settings.experimental_codegen:
-            pragma_lines.append("# pragma experimental-codegen")
-
-        # TODO we should probably dump settings in traces (maybe just read from solc_json)
-        pragma_lines.append("# pragma enable-decimals")
-
-        return pragma_lines
-
     def mutate_source_with_compiler_data(
         self, compiler_data: CompilerData
     ) -> Optional[MutationResult]:
@@ -687,12 +670,10 @@ class AstMutator(VyperNodeTransformer):
 
             result = unparse(mutated_ast)
 
-            pragma_lines = self.generate_pragma_lines(compiler_data.settings)
-
-            # Build final source with pragmas, type declarations, and code
+            # Build final source with type declarations and code.
+            # Note: Pragmas are no longer embedded in source - compiler settings
+            # are passed directly to loaders via DeploymentTrace.compiler_settings.
             parts = []
-            if pragma_lines:
-                parts.append("\n".join(pragma_lines))
 
             # Add all source fragments (struct declarations, etc.)
             if self.stmt_generator.source_fragments:

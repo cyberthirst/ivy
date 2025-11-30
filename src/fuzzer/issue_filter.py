@@ -155,4 +155,9 @@ def default_issue_filter() -> IssueFilter:
         issue_types={IssueType.CRASH},
     )
 
+    f.add_rule(
+        name="zero_array_indexing",
+        contains="indexing into zero array not allowed",
+    )
+
     return f

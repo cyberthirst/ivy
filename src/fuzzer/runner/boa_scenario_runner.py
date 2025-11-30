@@ -28,15 +28,21 @@ class BoaScenarioRunner(BaseScenarioRunner):
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Deploy a contract from source in Boa."""
         sender = self._get_sender(sender)
+
+        # Merge trace compiler_settings with runner's compiler_args.
+        # Runner args (e.g. experimental_codegen) take precedence.
+        merged_args = {**(compiler_settings or {}), **self.compiler_args}
+
         with self.env.prank(sender):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
             contract = boa.loads(
-                source, *args, compiler_args=self.compiler_args, **kwargs
+                source, *args, compiler_args=merged_args, **kwargs
             )
             return contract
 

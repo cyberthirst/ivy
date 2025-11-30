@@ -57,6 +57,7 @@ class DeploymentTrace:
     deployment_succeeded: bool
     env: Env
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}
+    compiler_settings: Optional[Dict[str, Any]] = None
     compilation_xfails: List[XFailExpectation] = field(default_factory=list)
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
