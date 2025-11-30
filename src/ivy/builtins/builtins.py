@@ -70,10 +70,14 @@ _WEI_DENOMS = {
 }
 
 
-def builtin_as_wei_value(value: int, denom: str):
+def builtin_as_wei_value(value: Union[int, VyperDecimal], denom: str):
     if denom not in _WEI_DENOMS:
         raise ValueError(f"Unknown wei denomination: {denom}")
-    return value * _WEI_DENOMS[denom]
+    multiplier = _WEI_DENOMS[denom]
+    if isinstance(value, VyperDecimal):
+        # For decimals: (scaled_value * multiplier) // SCALING_FACTOR
+        return (value.value * multiplier) // VyperDecimal.SCALING_FACTOR
+    return value * multiplier
 
 
 def builtin_len(x):
