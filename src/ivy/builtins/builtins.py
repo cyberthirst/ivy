@@ -49,14 +49,31 @@ def builtin_range(*args, bound=None):
     return range(start, stop)
 
 
+_WEI_DENOMS = {
+    "wei": 1,
+    "femtoether": 10**3,
+    "kwei": 10**3,
+    "babbage": 10**3,
+    "picoether": 10**6,
+    "mwei": 10**6,
+    "lovelace": 10**6,
+    "nanoether": 10**9,
+    "gwei": 10**9,
+    "shannon": 10**9,
+    "microether": 10**12,
+    "szabo": 10**12,
+    "milliether": 10**15,
+    "finney": 10**15,
+    "ether": 10**18,
+    "kether": 10**21,
+    "grand": 10**21,
+}
+
+
 def builtin_as_wei_value(value: int, denom: str):
-    if denom == "ether":
-        return value * 10**18
-    if denom == "wei":
-        return value
-    if denom == "gwei":
-        return value * 10**9
-    raise UnimplementedException()
+    if denom not in _WEI_DENOMS:
+        raise ValueError(f"Unknown wei denomination: {denom}")
+    return value * _WEI_DENOMS[denom]
 
 
 def builtin_len(x):
