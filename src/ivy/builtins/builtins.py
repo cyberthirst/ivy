@@ -14,7 +14,7 @@ from vyper.semantics.types import (
     BytesM_T,
     StringT,
 )
-from vyper.semantics.types.shortcuts import UINT256_T
+from vyper.semantics.types.shortcuts import UINT256_T, BYTES32_T
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.utils import method_id
 
@@ -457,3 +457,46 @@ def builtin_keccak256(value: Union[str, bytes]) -> bytes:
         raise TypeError(f"keccak256 expects bytes or string, got {type(value)}")
 
     return keccak(value)
+
+
+def builtin_extract32(
+    b: bytes, start: int, output_type: Optional[VyperType] = None
+) -> Any:
+    if output_type is None:
+        output_type = BYTES32_T
+    assert isinstance(b, bytes)
+    assert start >= 0
+
+    # Revert if we can't extract 32 bytes from position start
+    if start + 32 > len(b):
+        raise Revert(data=b"")
+
+    # Extract 32 bytes
+    extracted = b[start : start + 32]
+
+    # Convert based on output_type
+    if isinstance(output_type, BytesM_T):
+        # For bytesN, the first N bytes are the value, remaining bytes must be zero
+        n = output_type.length
+        if n < 32 and extracted[n:] != b"\x00" * (32 - n):
+            raise Revert(data=b"")
+        return extracted[:n]
+    elif isinstance(output_type, AddressT):
+        # Address: first 12 bytes must be zero (right-aligned in 32-byte word)
+        if extracted[:12] != b"\x00" * 12:
+            raise Revert(data=b"")
+        addr_int = int.from_bytes(extracted[-20:], "big")
+        return Address(addr_int)
+    elif isinstance(output_type, IntegerT):
+        # Integer: interpret as big-endian
+        # For signed output types, interpret as signed 256-bit first
+        value = int.from_bytes(extracted, "big", signed=False)
+        if output_type.is_signed and value >= 2**255:
+            value -= 2**256
+        # Check bounds for target type
+        low, high = output_type.int_bounds
+        if not (low <= value <= high):
+            raise Revert(data=b"")
+        return value
+    else:
+        raise TypeError(f"extract32: unsupported output_type {output_type}")

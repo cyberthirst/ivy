@@ -3102,3 +3102,53 @@ def bytes1_empty() -> bytes1:
     assert c.bytes16_full() == b"0123456789abcdef"
     assert c.bytes1_test() == b"x"
     assert c.bytes1_empty() == b"\x00"
+
+
+def test_extract32_bytes4_valid(get_contract):
+    src = """
+@external
+def foo(inp: Bytes[32]) -> bytes4:
+    return extract32(inp, 0, output_type=bytes4)
+"""
+    c = get_contract(src)
+    # Valid: 4 bytes of data + 28 zero bytes
+    inp = b"\xde\xad\xbe\xef" + b"\x00" * 28
+    assert c.foo(inp) == b"\xde\xad\xbe\xef"
+
+
+def test_extract32_bytes16_valid(get_contract):
+    src = """
+@external
+def foo(inp: Bytes[32]) -> bytes16:
+    return extract32(inp, 0, output_type=bytes16)
+"""
+    c = get_contract(src)
+    # Valid: 16 bytes of data + 16 zero bytes
+    inp = b"0123456789abcdef" + b"\x00" * 16
+    assert c.foo(inp) == b"0123456789abcdef"
+
+
+def test_extract32_bytes4_invalid(get_contract):
+    src = """
+@external
+def foo(inp: Bytes[32]) -> bytes4:
+    return extract32(inp, 0, output_type=bytes4)
+"""
+    c = get_contract(src)
+    # Invalid: 4 bytes of data + non-zero byte in tail
+    inp = b"\xde\xad\xbe\xef" + b"\x01" + b"\x00" * 27
+    with pytest.raises(Revert):
+        c.foo(inp)
+
+
+def test_extract32_bytes16_invalid(get_contract):
+    src = """
+@external
+def foo(inp: Bytes[32]) -> bytes16:
+    return extract32(inp, 0, output_type=bytes16)
+"""
+    c = get_contract(src)
+    # Invalid: 16 bytes of data + non-zero bytes in tail
+    inp = b"0123456789abcdef" + b"\xff" * 16
+    with pytest.raises(Revert):
+        c.foo(inp)

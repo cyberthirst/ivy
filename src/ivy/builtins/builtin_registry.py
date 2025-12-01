@@ -26,11 +26,13 @@ from ivy.builtins.builtins import (
     builtin_unsafe_mul,
     builtin_unsafe_div,
     builtin_floor,
+    builtin_ceil,
     builtin_epsilon,
     builtin_abs,
     builtin_sqrt,
     builtin_isqrt,
     builtin_keccak256,
+    builtin_extract32,
 )
 
 
@@ -98,11 +100,13 @@ class BuiltinRegistry:
             "unsafe_mul": BuiltinWrapper(builtin_unsafe_mul, needs_types=True),
             "unsafe_div": BuiltinWrapper(builtin_unsafe_div, needs_types=True),
             "floor": BuiltinWrapper(builtin_floor),
+            "ceil": BuiltinWrapper(builtin_ceil),
             "epsilon": BuiltinWrapper(builtin_epsilon),
             "abs": BuiltinWrapper(builtin_abs),
             "sqrt": BuiltinWrapper(builtin_sqrt),
             "isqrt": BuiltinWrapper(builtin_isqrt),
             "keccak256": BuiltinWrapper(builtin_keccak256),
+            "extract32": BuiltinWrapper(builtin_extract32),
         }
 
     def get(self, name):
