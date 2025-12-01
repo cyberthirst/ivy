@@ -181,7 +181,7 @@ def builtin_raw_call(
     to: Address,
     data: bytes,
     max_outsize: int = 0,
-    gas: int = None,
+    gas: Optional[int] = None,
     value: int = 0,
     is_delegate_call: bool = False,
     is_static_call: bool = False,
@@ -246,15 +246,16 @@ def builtin_concat(*args):
 
 # all the convert functionality is adapted from vyper's test suite
 # - https://github.com/vyperlang/vyper/blob/c32b9b4c6f0d8b8cdb103d3017ff540faf56a305/tests/functional/builtins/codegen/test_convert.py#L301
-def builtin_convert(typs: tuple[VyperType], *values: tuple[Any, VyperType]):
-    assert len(typs) == 2
-    i_typ = typs[0]
-    val, o_typ = values
-
+def builtin_convert(typs: tuple[VyperType, VyperType], *values: Any):
     """
     Perform conversion on the Python representation of a Vyper value.
     Returns None if the conversion is invalid (i.e., would revert in Vyper)
     """
+
+    assert len(typs) == 2
+    i_typ = typs[0]
+    val, o_typ = values
+
     if isinstance(i_typ, IntegerT) and isinstance(o_typ, IntegerT):
         return convert_utils._convert_int_to_int(val, o_typ)
 
