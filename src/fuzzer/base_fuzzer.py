@@ -7,6 +7,7 @@ import random
 import hashlib
 import secrets
 import typing
+from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, Optional
 from copy import deepcopy
@@ -160,7 +161,13 @@ class BaseFuzzer:
                 # might generate decimal-using code. Ideally, we'd track whether
                 # decimals were actually used and only enable if needed.
                 if compiler_data and hasattr(compiler_data, "settings"):
-                    settings = compiler_data.settings.as_dict()
+                    # Use dataclasses.asdict to preserve enum types (Settings.as_dict
+                    # converts enums to strings, which Settings() doesn't accept)
+                    settings = {
+                        k: v
+                        for k, v in asdict(compiler_data.settings).items()
+                        if v is not None
+                    }
                     settings["enable_decimals"] = True
                     mutated_trace.compiler_settings = settings
 

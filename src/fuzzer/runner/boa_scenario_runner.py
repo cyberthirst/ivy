@@ -41,9 +41,7 @@ class BoaScenarioRunner(BaseScenarioRunner):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
-            contract = boa.loads(
-                source, *args, compiler_args=merged_args, **kwargs
-            )
+            contract = boa.loads(source, *args, compiler_args=merged_args, **kwargs)
             return contract
 
     def _call_method(

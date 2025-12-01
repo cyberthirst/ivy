@@ -49,7 +49,7 @@ def compiler_data(
     search_paths = get_search_paths(_search_path)
     bundle = input_bundle or FilesystemInputBundle(search_paths)
 
-    settings = Settings.from_dict(kwargs)
+    settings = Settings(**kwargs)
     return CompilerData(file_input, bundle, settings)
 
 
