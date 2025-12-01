@@ -175,6 +175,9 @@ class VyperDecimal:
         rem = self.value - _trunc_div(self.value, other.value) * other.value
         return VyperDecimal(rem, scaled=True)
 
+    def __neg__(self) -> VyperDecimal:
+        return VyperDecimal(-self.value, scaled=True)
+
     def __lt__(self, other: VyperDecimal) -> bool:
         return self.value < other.value
 
