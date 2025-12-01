@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Union, Dict, Any, Optional, TypeVar, Generic
 import copy
 from decimal import Decimal
@@ -107,13 +109,13 @@ class VyperDecimal:
     MIN_VALUE = -(2**167)
 
     @classmethod
-    def max(cls) -> "VyperDecimal":
+    def max(cls) -> VyperDecimal:
         result = cls(0)
         result.value = cls.MAX_VALUE
         return result
 
     @classmethod
-    def min(cls) -> "VyperDecimal":
+    def min(cls) -> VyperDecimal:
         result = cls(0)
         result.value = cls.MIN_VALUE
         return result
@@ -128,13 +130,13 @@ class VyperDecimal:
         if not (self.MIN_VALUE <= self.value <= self.MAX_VALUE):
             raise ValueError("Decimal value out of bounds")
 
-    def __add__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __add__(self, other: VyperDecimal) -> VyperDecimal:
         return VyperDecimal(self.value + other.value, scaled=True)
 
-    def __sub__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __sub__(self, other: VyperDecimal) -> VyperDecimal:
         return VyperDecimal(self.value - other.value, scaled=True)
 
-    def __mul__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __mul__(self, other: VyperDecimal) -> VyperDecimal:
         product = self.value * other.value
         scaled = _trunc_div(product, self.SCALING_FACTOR)
 
@@ -143,7 +145,7 @@ class VyperDecimal:
 
         return VyperDecimal(scaled, scaled=True)
 
-    def __truediv__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __truediv__(self, other: VyperDecimal) -> VyperDecimal:
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
@@ -154,7 +156,7 @@ class VyperDecimal:
 
         return VyperDecimal(scaled, scaled=True)
 
-    def __floordiv__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __floordiv__(self, other: VyperDecimal) -> VyperDecimal:
         if other.value == 0:
             raise ZeroDivisionError("Division by zero")
 
@@ -166,17 +168,17 @@ class VyperDecimal:
 
         return VyperDecimal(q, scaled=True)
 
-    def __mod__(self, other: "VyperDecimal") -> "VyperDecimal":
+    def __mod__(self, other: VyperDecimal) -> VyperDecimal:
         if other.value == 0:
             raise ZeroDivisionError("Cannot modulo by zero")
 
         rem = self.value - _trunc_div(self.value, other.value) * other.value
         return VyperDecimal(rem, scaled=True)
 
-    def __lt__(self, other: "VyperDecimal") -> bool:
+    def __lt__(self, other: VyperDecimal) -> bool:
         return self.value < other.value
 
-    def __le__(self, other: "VyperDecimal") -> bool:
+    def __le__(self, other: VyperDecimal) -> bool:
         return self.value <= other.value
 
     def __eq__(self, other: object) -> bool:
@@ -192,13 +194,13 @@ class VyperDecimal:
     def __ne__(self, other: object) -> bool:
         return not self == other
 
-    def __ge__(self, other: "VyperDecimal") -> bool:
+    def __ge__(self, other: VyperDecimal) -> bool:
         return self.value >= other.value
 
-    def __gt__(self, other: "VyperDecimal") -> bool:
+    def __gt__(self, other: VyperDecimal) -> bool:
         return self.value > other.value
 
-    def truncate(self) -> "VyperDecimal":
+    def truncate(self) -> VyperDecimal:
         truncated_int = (
             _trunc_div(self.value, self.SCALING_FACTOR) * self.SCALING_FACTOR
         )
@@ -219,7 +221,7 @@ T = TypeVar("T")
 
 class _Container:
     def __init__(self, vyper_type: VyperType):
-        self._typ = vyper_type
+        self._typ: VyperType = vyper_type
         self._values: Dict[Any, Any] = {}
 
     def _journal(self, key: Any, loc: Optional[DataLocation] = None):
