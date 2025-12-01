@@ -3247,3 +3247,59 @@ def get_child_creator() -> address:
     # The child's creator (msg.sender during its constructor) should be
     # the deployer contract's address, not b"" or the EOA
     assert deployer.get_child_creator() == deployer.address
+
+
+def test_tx_origin_is_sender(get_contract, env):
+    """Test that tx.origin is set to the transaction sender, not the 'to' address."""
+    src = """
+@external
+def get_origin() -> address:
+    return tx.origin
+
+@external
+def get_sender() -> address:
+    return msg.sender
+    """
+
+    c = get_contract(src)
+
+    # tx.origin should be the deployer (EOA that initiated the transaction)
+    # msg.sender should also be the deployer for a direct call
+    assert c.get_origin() == env.deployer
+    assert c.get_sender() == env.deployer
+
+
+def test_tx_origin_through_subcall(get_contract, env):
+    """Test that tx.origin remains the EOA even through contract-to-contract calls."""
+    callee_src = """
+@external
+def get_origin() -> address:
+    return tx.origin
+
+@external
+def get_sender() -> address:
+    return msg.sender
+    """
+
+    caller_src = """
+interface Callee:
+    def get_origin() -> address: view
+    def get_sender() -> address: view
+
+@external
+def call_get_origin(target: address) -> address:
+    return staticcall Callee(target).get_origin()
+
+@external
+def call_get_sender(target: address) -> address:
+    return staticcall Callee(target).get_sender()
+    """
+
+    callee = get_contract(callee_src)
+    caller = get_contract(caller_src)
+
+    # tx.origin should still be the deployer (original EOA)
+    assert caller.call_get_origin(callee) == env.deployer
+
+    # msg.sender should be the caller contract
+    assert caller.call_get_sender(callee) == caller.address

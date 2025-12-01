@@ -65,7 +65,7 @@ class EVMCore:
         self.state.env = Environment(
             caller=sender,
             block_hashes=[],
-            origin=to,
+            origin=sender,
             coinbase=sender,
             block_number=1,
             time=1750080732,
