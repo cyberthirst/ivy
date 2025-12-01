@@ -3152,3 +3152,65 @@ def foo(inp: Bytes[32]) -> bytes16:
     inp = b"0123456789abcdef" + b"\xff" * 16
     with pytest.raises(Revert):
         c.foo(inp)
+
+
+def test_deploy_with_value(get_contract, env):
+    """Test that deploying a contract with value credits the contract's balance."""
+    src = """
+@deploy
+@payable
+def __init__():
+    pass
+
+@external
+def get_balance() -> uint256:
+    return self.balance
+    """
+
+    env.set_balance(env.deployer, 100)
+    c = get_contract(src, value=10)
+
+    # Contract should have received the 10 wei
+    assert env.get_balance(c.address) == 10
+    assert c.get_balance() == 10
+
+
+def test_create_from_constructor_with_value(get_contract, env):
+    """Test that creating a contract from within a constructor uses correct caller."""
+    blueprint_src = """
+@deploy
+@payable
+def __init__():
+    pass
+
+@external
+def get_balance() -> uint256:
+    return self.balance
+    """
+
+    deployer_src = """
+child: public(address)
+
+@deploy
+@payable
+def __init__(blueprint: address):
+    # Create a child contract with value=5 from within constructor
+    self.child = create_from_blueprint(blueprint, value=5)
+    """
+
+    # Deploy blueprint first
+    blueprint = get_contract(blueprint_src)
+
+    # Set deployer balance
+    env.set_balance(env.deployer, 100)
+
+    # Deploy the deployer contract with value=10
+    # It should create a child with value=5, keeping 5 for itself
+    deployer = get_contract(deployer_src, blueprint, value=10)
+
+    # The deployer should have 5 (10 - 5 sent to child)
+    assert env.get_balance(deployer.address) == 5
+
+    # The child should have 5
+    child_addr = deployer.child()
+    assert env.get_balance(child_addr) == 5

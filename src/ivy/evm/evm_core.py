@@ -343,7 +343,9 @@ class EVMCore:
             if self.state[message.caller].balance < message.value:
                 raise EVMException("Insufficient balance for transfer")
             self.state[message.caller].balance -= message.value
-            self.state[message.to].balance += message.value
+            # For deployments, message.to is b"" but create_address holds the new contract address
+            recipient = message.create_address if message.create_address else message.to
+            self.state[recipient].balance += message.value
 
     def generate_create_address(self, sender):
         # Make sure we're using the sender as an Address object
