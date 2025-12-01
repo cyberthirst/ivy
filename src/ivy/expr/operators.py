@@ -2,7 +2,8 @@
 from typing import Any, Callable, Optional, Type
 from vyper.ast import nodes as ast
 from vyper.utils import unsigned_to_signed
-from ivy.types import VyperDecimal
+from ivy.types import VyperDecimal, Flag
+
 
 OPERATOR_REGISTRY: dict[Type[ast.VyperNode], Callable[..., Any]] = {}
 
@@ -191,7 +192,10 @@ def usub_op(operand: Any) -> Any:
 
 
 @register_operator(ast.Invert)
-def invert_op(operand: Any, *, typ) -> int:
+def invert_op(operand: Any, *, typ) -> Any:
+    if isinstance(operand, Flag):
+        return ~operand
+
     bits = typ.bits
     mask = (1 << bits) - 1
     return mask ^ operand
