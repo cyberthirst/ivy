@@ -4,7 +4,7 @@ from typing import Union, Dict, Any, Optional, TypeVar, Generic
 import copy
 from decimal import Decimal
 
-from eth_utils import to_canonical_address, to_checksum_address
+from eth_utils.address import to_canonical_address, to_checksum_address
 from eth_typing.evm import Address as EthAddress
 
 from vyper.semantics.types import (
@@ -397,6 +397,8 @@ class Map(_Container):
 
 
 class Struct(_Container):
+    _typ: StructT
+
     def __init__(
         self,
         typ: StructT,
@@ -426,7 +428,7 @@ class Struct(_Container):
 
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
-        result.typ = self._typ
+        result._typ = self._typ
         return result
 
 
