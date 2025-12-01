@@ -410,6 +410,12 @@ def builtin_floor(x):
     return x.value // x.SCALING_FACTOR
 
 
+def builtin_ceil(x):
+    assert isinstance(x, VyperDecimal)
+    # negate, floor divide (rounds toward negative infinity), negate (changing the floor to ceil)
+    return -((-x.value) // x.SCALING_FACTOR)
+
+
 def builtin_epsilon(typ):
     assert isinstance(typ, DecimalT)
     return VyperDecimal(1, scaled=True)

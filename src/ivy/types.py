@@ -99,6 +99,7 @@ class Flag:
 class VyperDecimal:
     """Fixed‑point decimal matching Vyper/EVM 10‑dec semantics."""
 
+    value: int
     PRECISION = 10
     SCALING_FACTOR = 10**PRECISION
 
@@ -117,10 +118,11 @@ class VyperDecimal:
         result.value = cls.MIN_VALUE
         return result
 
-    def __init__(self, value: Union[str, int, float], *, scaled: bool = False):
+    def __init__(self, value: Union[Decimal, int, float], *, scaled: bool = False):
         if not scaled:
             self.value = int(value * self.SCALING_FACTOR)
         else:
+            assert isinstance(value, int)
             self.value = value
 
         if not (self.MIN_VALUE <= self.value <= self.MAX_VALUE):
