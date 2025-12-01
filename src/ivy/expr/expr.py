@@ -207,7 +207,11 @@ class ExprVisitor(BaseVisitor):
 
     def _eval_op(self, node, *args):
         handler = get_operator_handler(node.op)
-        res = handler(*args)
+        if isinstance(node.op, (ast.LShift, ast.Invert)):
+            typ = node._metadata["type"]
+            res = handler(*args, typ=typ)
+        else:
+            res = handler(*args)
         validate_value(node, res)
         return res
 

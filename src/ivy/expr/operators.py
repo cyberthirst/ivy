@@ -1,6 +1,7 @@
 # ivy/evaluator/operators.py
 from typing import Any, Callable, Optional, Type
 from vyper.ast import nodes as ast
+from vyper.utils import unsigned_to_signed
 from ivy.types import VyperDecimal
 
 OPERATOR_REGISTRY: dict[Type[ast.VyperNode], Callable[..., Any]] = {}
@@ -106,8 +107,13 @@ def pow_op(left: Any, right: Any) -> Any:
 
 
 @register_operator(ast.LShift)
-def lshift_op(left: int, right: int) -> int:
-    return left << right
+def lshift_op(left: int, right: int, *, typ) -> int:
+    bits = typ.bits
+    mask = (1 << bits) - 1
+    result = (left << right) & mask
+    if typ.is_signed:
+        result = unsigned_to_signed(result, bits)
+    return result
 
 
 @register_operator(ast.RShift)
@@ -186,8 +192,10 @@ def usub_op(operand: Any) -> Any:
 
 
 @register_operator(ast.Invert)
-def invert_op(operand: Any) -> Any:
-    return ~operand
+def invert_op(operand: Any, *, typ) -> int:
+    bits = typ.bits
+    mask = (1 << bits) - 1
+    return mask ^ operand
 
 
 # ----------------------------------------------------------------------------
