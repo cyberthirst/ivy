@@ -161,37 +161,37 @@ def validate_exports(
     return results
 
 
-def test_replay_exports():
-    print("Starting test_replay_exports...")
+def get_replay_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=False)
-    test_filter.include_path(r"functional/codegen/")
+    test_filter.include_path(r"functional")
+    #test_filter.include_path(r"functional/builtins/codegen/test_convert")
 
-    # ---- unsupported features
-    test_filter.exclude_source(r"pragma nonreentrancy")
-    test_filter.exclude_source(r"import math")
-    test_filter.exclude_source(r"raw_log")
-    test_filter.exclude_source(r"selfdestruct")
-    test_filter.exclude_source(r"gas=")
-    test_filter.exclude_name("test_tx_gasprice")
-    test_filter.exclude_name("test_blockhash")
-    test_filter.exclude_name("test_blobbasefee")
-    test_filter.exclude_name("test_block_number")
-    test_filter.exclude_name("test_gas_call")
-    test_filter.exclude_name("test_mana")
-    # ---- unsupported features
+    (
+        test_filter
+        .exclude_source(r"pragma nonreentrancy")
+        .exclude_source(r"import math")
+        .exclude_source(r"raw_log")
+        .exclude_source(r"selfdestruct")
+        .exclude_source(r"gas=")
+        .exclude_source("salt=")
+        .exclude_source(r"\.code")
+        .exclude_source("sha256")
+        .exclude_source("ecrecover")
+        .exclude_source("raw_create")
+        .exclude_name("test_tx_gasprice")
+        .exclude_name("test_blockhash")
+        .exclude_name("test_blobbasefee")
+        .exclude_name("test_block_number")
+        .exclude_name("test_gas_call")
+        .exclude_name("test_mana")
+        .exclude_name("test_ec")
+        .exclude_name("test_blobhash")
+        # not yet supported by the compiler version we use
+        .exclude_path("test_flag_pure_functions")
+            )
 
-    # Only run python_args mode for now
-    test_modes = [("python_args", True)]
-    results = validate_exports(
-        "tests/vyper-exports", test_filter=test_filter, test_modes=test_modes
-    )
+    return test_filter
 
-    # Report summary
-    passed = sum(1 for v in results.values() if v)
-    failed = sum(1 for v in results.values() if not v)
-    print(f"\nSummary: {passed} passed, {failed} failed out of {len(results)} tests")
-
-    assert all(results.values()), f"{failed} tests failed"
 
 def get_replay_test_cases():
     test_filter = get_replay_test_filter()
