@@ -455,6 +455,33 @@ def builtin_isqrt(a: int) -> int:
     return math.isqrt(a)
 
 
+def builtin_uint256_addmod(a: int, b: int, c: int) -> int:
+    """Return (a + b) % c. Reverts if c == 0.
+    The intermediate (a + b) is not subject to 2^256 modulo (EVM ADDMOD semantics).
+    """
+    if c == 0:
+        raise Revert(data=b"")
+    return (a + b) % c
+
+
+def builtin_uint256_mulmod(a: int, b: int, c: int) -> int:
+    """Return (a * b) % c. Reverts if c == 0.
+    The intermediate (a * b) is not subject to 2^256 modulo (EVM MULMOD semantics).
+    """
+    if c == 0:
+        raise Revert(data=b"")
+    return (a * b) % c
+
+
+def builtin_shift(x: int, shift: int) -> int:
+    """Shift x by shift bits. Positive = left shift, negative = right shift.
+    Always returns uint256.
+    """
+    if shift >= 0:
+        return (x << shift) % 2**256
+    return x >> (-shift)
+
+
 def builtin_keccak256(value: Union[str, bytes]) -> bytes:
     if isinstance(value, str):
         # Convert string to bytes using UTF-8 encoding

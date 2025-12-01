@@ -33,6 +33,9 @@ from ivy.builtins.builtins import (
     builtin_isqrt,
     builtin_keccak256,
     builtin_extract32,
+    builtin_uint256_addmod,
+    builtin_uint256_mulmod,
+    builtin_shift,
 )
 
 
@@ -107,6 +110,9 @@ class BuiltinRegistry:
             "isqrt": BuiltinWrapper(builtin_isqrt),
             "keccak256": BuiltinWrapper(builtin_keccak256),
             "extract32": BuiltinWrapper(builtin_extract32),
+            "uint256_addmod": BuiltinWrapper(builtin_uint256_addmod),
+            "uint256_mulmod": BuiltinWrapper(builtin_uint256_mulmod),
+            "shift": BuiltinWrapper(builtin_shift),
         }
 
     def get(self, name):

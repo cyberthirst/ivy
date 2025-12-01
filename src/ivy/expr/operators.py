@@ -109,8 +109,7 @@ def pow_op(left: Any, right: Any) -> Any:
 @register_operator(ast.LShift)
 def lshift_op(left: int, right: int, *, typ) -> int:
     bits = typ.bits
-    mask = (1 << bits) - 1
-    result = (left << right) & mask
+    result = (left << right) % 2**bits
     if typ.is_signed:
         result = unsigned_to_signed(result, bits)
     return result
