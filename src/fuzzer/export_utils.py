@@ -5,6 +5,8 @@ This module provides data structures and functions for loading,
 filtering, and extracting test cases from Vyper test exports.
 """
 
+from __future__ import annotations
+
 import json
 import re
 from pathlib import Path
@@ -146,42 +148,42 @@ class TestFilter:
         self.name_excludes: List[re.Pattern[str]] = []
         self.exclude_multi_module = exclude_multi_module
 
-    def include_path(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def include_path(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Only include tests from paths matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.path_includes.append(pattern)
         return self
 
-    def exclude_path(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def exclude_path(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Exclude tests from paths matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.path_excludes.append(pattern)
         return self
 
-    def exclude_source(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def exclude_source(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Exclude tests with source code matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.source_excludes.append(pattern)
         return self
 
-    def include_source(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def include_source(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Only include tests with source code matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.source_includes.append(pattern)
         return self
 
-    def include_name(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def include_name(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Only include tests with names matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
         self.name_includes.append(pattern)
         return self
 
-    def exclude_name(self, pattern: Union[str, re.Pattern[str]]) -> "TestFilter":
+    def exclude_name(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Exclude tests with names matching the pattern."""
         if isinstance(pattern, str):
             pattern = re.compile(pattern)
@@ -213,7 +215,7 @@ class TestFilter:
         self,
         item: TestItem,
         export_path: Path,
-        export: Optional["TestExport"] = None,
+        export: Optional[TestExport] = None,
         checked_deps: Optional[set] = None,
     ) -> bool:
         """Check if a test item should be skipped, including checking all dependencies."""
