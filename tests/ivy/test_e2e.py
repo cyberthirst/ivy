@@ -3214,3 +3214,36 @@ def __init__(blueprint: address):
     # The child should have 5
     child_addr = deployer.child()
     assert env.get_balance(child_addr) == 5
+
+
+def test_create_from_constructor_caller(get_contract):
+    """Test that msg.sender is the deploying contract when creating from constructor."""
+    blueprint_src = """
+creator: public(address)
+
+@deploy
+def __init__():
+    self.creator = msg.sender
+    """
+
+    deployer_src = """
+interface Child:
+    def creator() -> address: view
+
+child: public(address)
+
+@deploy
+def __init__(blueprint: address):
+    self.child = create_from_blueprint(blueprint)
+
+@external
+def get_child_creator() -> address:
+    return staticcall Child(self.child).creator()
+    """
+
+    blueprint = get_contract(blueprint_src)
+    deployer = get_contract(deployer_src, blueprint)
+
+    # The child's creator (msg.sender during its constructor) should be
+    # the deployer contract's address, not b"" or the EOA
+    assert deployer.get_child_creator() == deployer.address

@@ -311,7 +311,7 @@ class EVMCore:
             return empty_output, Address(0)
 
         msg = Message(
-            caller=self.state.current_context.msg.to,
+            caller=current_address,
             to=b"",
             create_address=create_address,
             value=value,
