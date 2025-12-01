@@ -11,9 +11,17 @@ from ivy.evm.evm_structures import ContractData
 from ivy.types import Address
 
 
-def deepcopy_code(state: StateAccess, target: Address):
+def deepcopy_code(state: StateAccess, target: Address, reset_global_vars: bool = False):
+    from ivy.variable import GlobalVariables
+
+    # TODO what about the case when the target is empty?
     code = state.get_code(target)
-    return copy.deepcopy(code)
+    code_copy = copy.deepcopy(code)
+    if reset_global_vars:
+        # For blueprint creation, we need fresh global_vars since the new contract
+        # will run its constructor and allocate variables
+        code_copy.global_vars = GlobalVariables()
+    return code_copy
 
 
 # TODO find a better name

@@ -332,18 +332,27 @@ def builtin_create_from_blueprint(
     evm: EVMCore,
     typs: tuple[VyperType],
     target: Address,
-    values: tuple[Any],
+    *args,
     value: int = 0,
     raw_args: bool = False,
     code_offset: int = 3,
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
-    code = create_utils.deepcopy_code(evm.state, target)
+    # reset_global_vars=True because blueprint creation runs the constructor
+    # which will allocate fresh variables
+    code = create_utils.deepcopy_code(evm.state, target, reset_global_vars=True)
+
+    # typs[0] is the target address type, typs[1:] are constructor arg types
+    constructor_arg_typs = typs[1:]
+    values = args  # remaining positional args are constructor values
 
     if not raw_args:
         # encode the arguments
-        encoded_args = builtin_abi_encode(typs, values)
+        if constructor_arg_typs and values:
+            encoded_args = builtin_abi_encode(constructor_arg_typs, *values)
+        else:
+            encoded_args = b""
     else:
         assert len(values) == 1
         encoded_args = values[0]

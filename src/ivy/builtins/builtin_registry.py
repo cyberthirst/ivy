@@ -93,7 +93,7 @@ class BuiltinRegistry:
             "send": BuiltinWrapper(builtin_send, context=self.evm),
             "create_copy_of": BuiltinWrapper(builtin_create_copy_of, context=self.evm),
             "create_from_blueprint": BuiltinWrapper(
-                builtin_create_from_blueprint, context=self.evm
+                builtin_create_from_blueprint, context=self.evm, needs_types=True
             ),
             "create_minimal_proxy_to": BuiltinWrapper(
                 builtin_create_minimal_proxy_to, context=self.evm
