@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+import pytest
+
 from fuzzer.runner.base_scenario_runner import ScenarioResult
 from fuzzer.export_utils import (
     TestExport,
@@ -190,3 +192,23 @@ def test_replay_exports():
     print(f"\nSummary: {passed} passed, {failed} failed out of {len(results)} tests")
 
     assert all(results.values()), f"{failed} tests failed"
+
+def get_replay_test_cases():
+    test_filter = get_replay_test_filter()
+    exports = load_all_exports("tests/vyper-exports")
+    exports = filter_exports(exports, test_filter=test_filter)
+
+    cases = []
+    for path, export in exports.items():
+        for item_name, item in export.items.items():
+            if item.item_type == "fixture":
+                continue
+            test_id = f"{Path(path).stem}::{item_name}"
+            cases.append(pytest.param(export, item_name, id=test_id))
+    return cases
+
+
+@pytest.mark.parametrize("export,item_name", get_replay_test_cases())
+def test_replay(export, item_name):
+    replay = TestReplay(use_python_args=True)
+    replay.execute_item(export, item_name)
