@@ -321,6 +321,32 @@ class TestFilter:
         return False
 
 
+def apply_unsupported_exclusions(test_filter: TestFilter) -> TestFilter:
+    """Apply common exclusions for unsupported Vyper features."""
+    return (
+        test_filter.exclude_source(r"pragma nonreentrancy")
+        .exclude_source(r"import math")
+        .exclude_source(r"raw_log")
+        .exclude_source(r"selfdestruct")
+        .exclude_source(r"gas=")
+        .exclude_source("salt=")
+        .exclude_source(r"\.code")
+        .exclude_source("sha256")
+        .exclude_source("ecrecover")
+        .exclude_source("raw_create")
+        .exclude_name("test_tx_gasprice")
+        .exclude_name("test_blockhash")
+        .exclude_name("test_blobbasefee")
+        .exclude_name("test_block_number")
+        .exclude_name("test_gas_call")
+        .exclude_name("test_mana")
+        .exclude_name("test_ec")
+        .exclude_name("test_blobhash")
+        # not yet supported by the compiler version we use
+        .exclude_path("test_flag_pure_functions")
+    )
+
+
 def _create_env_from_data(env_data: Dict[str, Any]) -> Env:
     tx_data = env_data["tx"]
     block_data = env_data["block"]

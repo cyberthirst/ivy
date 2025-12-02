@@ -10,6 +10,7 @@ from fuzzer.export_utils import (
     load_export,
     load_all_exports,
     filter_exports,
+    apply_unsupported_exclusions,
 )
 from fuzzer.runner.scenario import Scenario, create_scenario_from_export
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
@@ -164,32 +165,7 @@ def validate_exports(
 def get_replay_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=False)
     test_filter.include_path(r"functional")
-    #test_filter.include_path(r"functional/builtins/codegen/test_convert")
-
-    (
-        test_filter
-        .exclude_source(r"pragma nonreentrancy")
-        .exclude_source(r"import math")
-        .exclude_source(r"raw_log")
-        .exclude_source(r"selfdestruct")
-        .exclude_source(r"gas=")
-        .exclude_source("salt=")
-        .exclude_source(r"\.code")
-        .exclude_source("sha256")
-        .exclude_source("ecrecover")
-        .exclude_source("raw_create")
-        .exclude_name("test_tx_gasprice")
-        .exclude_name("test_blockhash")
-        .exclude_name("test_blobbasefee")
-        .exclude_name("test_block_number")
-        .exclude_name("test_gas_call")
-        .exclude_name("test_mana")
-        .exclude_name("test_ec")
-        .exclude_name("test_blobhash")
-        # not yet supported by the compiler version we use
-        .exclude_path("test_flag_pure_functions")
-            )
-
+    apply_unsupported_exclusions(test_filter)
     return test_filter
 
 

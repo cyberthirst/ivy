@@ -11,7 +11,7 @@ from typing import Optional
 
 from .base_fuzzer import BaseFuzzer
 from .corpus import FuzzCorpus
-from .export_utils import TestFilter
+from .export_utils import TestFilter, apply_unsupported_exclusions
 from .issue_filter import IssueFilter, default_issue_filter
 from .runner.scenario import create_scenario_from_item
 
@@ -144,8 +144,8 @@ class GenerativeFuzzer(BaseFuzzer):
 def main():
     """Run generative fuzzing."""
     test_filter = TestFilter(exclude_multi_module=True)
-    test_filter.include_path("functional/builtins/codegen/test_slice")
-    test_filter.exclude_source(r"\.code")
+    apply_unsupported_exclusions(test_filter)
+    test_filter.include_path("functional/builtins/codegen/")
     test_filter.exclude_name("zero_length_side_effects")
 
     issue_filter = default_issue_filter()
