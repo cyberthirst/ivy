@@ -27,11 +27,11 @@ def register_operator(
     return decorator
 
 
-def get_operator_handler(op_node: ast.VyperNode) -> Optional[Callable[..., Any]]:
+def get_operator_handler(op_node: ast.VyperNode) -> Callable[..., Any]:
     handler = OPERATOR_REGISTRY.get(type(op_node))
     if handler is None:
         raise NotImplementedError(f"{op_node} is not implemented")
-    return OPERATOR_REGISTRY.get(type(op_node))
+    return handler
 
 
 # ----------------------------------------------------------------------------

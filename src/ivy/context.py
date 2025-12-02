@@ -4,8 +4,9 @@ from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import ContractFunctionT
 
 from ivy.expr.default_values import get_default_value
-from ivy.evm.evm_structures import Account, Message
+from ivy.evm.evm_structures import Account, Message, EntryPointInfo
 from ivy.types import Address
+from ivy.variable import GlobalVariables
 
 
 class FunctionContext:
@@ -55,6 +56,11 @@ class FunctionContext:
 
 
 class ExecutionContext:
+    global_vars: Optional[GlobalVariables]
+    immutables: Optional[dict[str, Any]]
+    constants: Optional[dict[str, Any]]
+    entry_points: Optional[dict[bytes, EntryPointInfo]]
+
     def __init__(self, acc: Account, msg: Message):
         self.msg = msg
         self.contract = msg.code

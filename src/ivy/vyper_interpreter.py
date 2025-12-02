@@ -69,6 +69,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
     @property
     def globals(self):
+        assert self.current_context.global_vars is not None
         return self.current_context.global_vars
 
     @property
@@ -194,6 +195,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise PayabilityViolation(f"Function {func_t.name} is not payable")
 
     def dispatch(self):
+        assert self.current_context.entry_points is not None
+        assert self.current_context.contract is not None
+
         try:
             if len(self.msg.data) < 4:
                 raise FunctionNotFound()
@@ -280,13 +284,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self, node: Optional[ast.VyperNode] = None
     ) -> tuple[Optional[VarInfo], bool]:
         # in some scenarios (eg auxiliary helper variables) we don't have a node
-        varinfo = node._expr_info.var_info if node else None
+        varinfo = node._expr_info.var_info if node else None  # type: ignore[attr-defined]
         is_global = self._is_global_var(varinfo)
         return varinfo, is_global
 
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
         varinfo, is_global = self._resolve_variable_info(node)
         if is_global:
+            assert varinfo is not None
             res = self.globals[varinfo].value
         else:
             res = self.memory[name]
@@ -296,6 +301,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
         varinfo, is_global = self._resolve_variable_info(node)
         if is_global:
+            assert varinfo is not None
             var = self.globals[varinfo]
             var.value = value
         else:
@@ -377,7 +383,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             assert False, "unreachable"
 
     def _handle_env_variable(self, node: ast.Attribute):
-        key = f"{node.value.id}.{node.attr}"
+        key = f"{node.value.id}.{node.attr}"  # type: ignore[attr-defined]
         if key == "msg.sender":
             return self.msg.caller
         elif key == "msg.data":
@@ -416,7 +422,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             assert False, "unreachable"
 
     def _inside_minimal_proxy(self):
+        assert self.current_context.contract is not None
         decl_node = self.current_context.contract.module_t.decl_node
+        assert decl_node is not None
         return "is_minimal_proxy" in decl_node._metadata
 
     def _encode_log_topics(self, event: EventT, arg_nodes: list[tuple[Any, VyperType]]):
@@ -439,8 +447,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         return topics
 
     def _log(self, event: EventT, args):
-        topic_nodes = []
-        data_nodes = []
+        topic_nodes: list[tuple[Any, VyperType]] = []
+        data_nodes: list[tuple[Any, VyperType]] = []
         typs = event.members.values()
         assert len(args) == len(event.indexed) and len(typs) == len(args)
         for arg, typ, is_indexed in zip(args, typs, event.indexed):
@@ -451,8 +459,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         topics = self._encode_log_topics(event, topic_nodes)
 
-        data_values = tuple((arg for arg, _ in data_nodes))
-        data_typs = TupleT(list(typ for _, typ in data_nodes))
+        data_values = tuple(arg for arg, _ in data_nodes)
+        data_typs = TupleT(tuple(typ for _, typ in data_nodes))
 
         encoded_data = abi_encode(data_typs, data_values)
 
@@ -470,13 +478,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         kws,
         typs,
         target: Optional[Address] = None,
-        is_static: Optional[bool] = None,
+        is_static: bool = False,
     ):
         # `None` is a special case: range is not assigned `type` in Vyper's frontend
         func_t = call.func._metadata.get("type", None)
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
-            id = call.func.id
+            id = call.func.id  # type: ignore[attr-defined]
             return self.builtins.get(id).execute(*args, typs=typs, **kws)
 
         if isinstance(func_t, TYPE_T):
@@ -500,7 +508,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 assert len(args) == 1
                 return args[0]
             # the function is an attribute of the array
-            darray = self.visit(call.func.value)
+            darray = self.visit(call.func.value)  # type: ignore[attr-defined]
             assert isinstance(darray, DynamicArray)
             if func_t.name == "append":
                 assert len(args) == 1
@@ -571,6 +579,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         decoded = abi_decode(typ, to_decode)
         if not needs_external_call_wrap(func_t.return_type):
             return decoded
+        # external call wrap means result is wrapped in a 1-tuple
+        assert isinstance(decoded, IvyTuple)
         assert len(decoded) == 1
-        # unwrap the tuple
         return decoded[0]

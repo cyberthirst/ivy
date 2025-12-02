@@ -143,7 +143,7 @@ class Message:  # msg from execution specs
     value: Any  # U256
     data: Any  # Bytes
     code_address: Any  # Optional[Address]
-    code: ContractData
+    code: Optional[ContractData]
     depth: Any  # Uint
     is_static: bool
 

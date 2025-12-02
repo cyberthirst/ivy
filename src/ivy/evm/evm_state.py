@@ -193,6 +193,9 @@ class StateAccessor(StateAccess):
     def get_code(self, address):
         return self._state.get_code(address)
 
+    def get_storage(self, address: Address) -> dict:
+        return self._state.get_storage(address)
+
     def add_accessed_account(self, acc):
         self._state.add_accessed_account(acc)
 

@@ -4,7 +4,7 @@
 #   - structs get decoded as tuples, ivy returns them as struct objects
 #   - boolean get decoded as ints, ivy returns them as bools
 
-from typing import Iterable
+from typing import Iterable, Union
 
 from eth_utils import to_checksum_address
 
@@ -32,6 +32,7 @@ from vyper.semantics.types import (
 )
 
 from ivy.types import (
+    Address,
     Flag,
     Struct,
     StaticArray,
@@ -39,6 +40,22 @@ from ivy.types import (
     VyperDecimal,
     Tuple as IvyTuple,
 )
+
+# Union of all possible decoded types
+DecodedValue = Union[
+    tuple,
+    Struct,
+    IvyTuple,
+    StaticArray,
+    DynamicArray,
+    bytes,
+    str,
+    int,
+    bool,
+    Address,
+    Flag,
+    VyperDecimal,
+]
 
 
 class DecodeError(Exception):
@@ -83,7 +100,7 @@ def _read_int(payload, ofst, from_calldata=False):
 # vyper abi_decode spec implementation
 def abi_decode(
     typ: VyperType, payload: bytes, ivy_compat: bool = True, from_calldata: bool = False
-):
+) -> DecodedValue:
     abi_t = typ.abi_type
 
     lo, hi = abi_t.static_size(), abi_t.size_bound()
@@ -202,8 +219,6 @@ def _decode_r(
             raise DecodeError(f"invalid {u}int{abi_t.m_bits}")
 
         if isinstance(abi_t, ABI_Address):
-            from ivy.types import Address
-
             return Address(to_checksum_address(ret.to_bytes(20, "big")))
 
         if isinstance(abi_t, ABI_Bool):

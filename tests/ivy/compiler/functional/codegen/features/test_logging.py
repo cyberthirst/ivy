@@ -1,6 +1,6 @@
 import pytest
 
-from eth_utils import to_text
+from eth_utils.conversions import to_text
 
 from vyper.utils import keccak256
 

@@ -40,12 +40,14 @@ class EVMCore:
 
         # TODO merge this with do_create_message_call and do_message_call
         if is_deploy:
+            assert module is not None
             module_t = module._metadata["type"]
             assert isinstance(module_t, ModuleT)
             # Compute address with current nonce (before incrementing)
             create_address = self.generate_create_address(sender)
             code = ContractData(module_t)
         else:
+            assert isinstance(to, Address)
             code = self.state.get_code(to)
 
         self.state.increment_nonce(sender)
@@ -165,18 +167,19 @@ class EVMCore:
         try:
             self._handle_value_transfer(message)
 
-            module_t = message.code.module_t
-
-            if not is_runtime_copy:
-                self.callbacks.allocate_variables(module_t)
-
             new_contract_code = message.code
 
-            # skip if we're doing a runtime code copy
-            if module_t.init_function is not None and not is_runtime_copy:
-                new_contract_code = self.callbacks.execute_init_function(
-                    module_t.init_function
-                )
+            if message.code is not None:
+                module_t = message.code.module_t
+
+                if not is_runtime_copy:
+                    self.callbacks.allocate_variables(module_t)
+
+                # skip if we're doing a runtime code copy
+                if module_t.init_function is not None and not is_runtime_copy:
+                    new_contract_code = self.callbacks.execute_init_function(
+                        module_t.init_function
+                    )
 
             new_account.contract_data = new_contract_code
 
@@ -323,17 +326,16 @@ class EVMCore:
         )
 
         child_output = self.process_create_message(msg, is_runtime_copy=is_runtime_copy)
-        current_output = self.state.current_output
+        current_context = self.state.current_context
         return_address = create_address
 
         if child_output.is_error:
-            # TODO: eventually implemente this incorporate
-            # self.incorporate_child_on_error(evm, child_evm)
-            current_output.return_data = child_output.output
+            # TODO: eventually implement incorporate_child_on_error
+            current_context.returndata = child_output.output
             return_address = Address(0)
         else:
             self.incorporate_child_on_success(child_output)
-            current_output.return_data = b""
+            current_context.returndata = b""
 
         # TODO we probably shouldn't return this tuple
         return child_output, return_address
