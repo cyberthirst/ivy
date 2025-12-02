@@ -131,7 +131,7 @@ def default_issue_filter() -> IssueFilter:
     f.add_rule(
         name="eip3860_code_size_limit",
         contains="Contract code size exceeds EIP-3860 limit",
-        issue_types={IssueType.COMPILE_FAILURE}
+        issue_types={IssueType.COMPILE_FAILURE},
     )
 
     # Boa feature not implemented
@@ -144,7 +144,7 @@ def default_issue_filter() -> IssueFilter:
     f.add_rule(
         name="static_assertion_failure",
         contains="assertion found to fail at compile time",
-        issue_types={IssueType.COMPILE_FAILURE}
+        issue_types={IssueType.COMPILE_FAILURE, IssueType.DIVERGENCE},
     )
 
     # Known compiler bugs
