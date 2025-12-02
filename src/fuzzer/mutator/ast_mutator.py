@@ -9,6 +9,7 @@ from vyper.semantics.types.primitives import NumericT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
+from .literal_generator import LiteralGenerator
 from .value_mutator import ValueMutator
 from src.fuzzer.mutator.function_registry import FunctionRegistry
 from .context import Context, ScopeType, state_to_expr_mutability
@@ -117,6 +118,7 @@ class AstMutator(VyperNodeTransformer):
         self.mutations_done = 0
         self.context = Context()
         self.name_generator = FreshNameGenerator()
+        self.literal_generator = LiteralGenerator(rng)
         self.value_mutator = ValueMutator(rng)
         # Type generator for random types
         self.type_generator = TypeGenerator(rng)
@@ -129,7 +131,10 @@ class AstMutator(VyperNodeTransformer):
         self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
         # Expression generator with function registry
         self.expr_generator = ExprGenerator(
-            self.value_mutator, self.rng, self.function_registry, self.type_generator
+            self.literal_generator,
+            self.rng,
+            self.function_registry,
+            self.type_generator,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
@@ -159,9 +164,6 @@ class AstMutator(VyperNodeTransformer):
                 return expr
 
         return ast.UnaryOp(op=ast.Not(), operand=expr)
-        # Control statement injection
-        self.inject_statements_prob = 0.3
-        self.max_injection_depth = 4
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.reset_state()

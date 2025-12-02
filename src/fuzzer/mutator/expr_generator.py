@@ -21,7 +21,7 @@ from vyper.semantics.types import (
 from vyper.semantics.analysis.base import Modifiability
 from vyper.semantics.types.subscriptable import _SequenceT
 
-from .value_mutator import ValueMutator
+from .literal_generator import LiteralGenerator
 from .context import Context, ExprMutability
 from .function_registry import FunctionRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
@@ -34,12 +34,12 @@ from src.fuzzer.xfail import XFailExpectation
 class ExprGenerator:
     def __init__(
         self,
-        value_mutator: ValueMutator,
+        literal_generator: LiteralGenerator,
         rng: random.Random,
         function_registry: Optional[FunctionRegistry] = None,
         type_generator=None,
     ):
-        self.value_mutator = value_mutator
+        self.literal_generator = literal_generator
         self.rng = rng
         self.function_registry = function_registry
         self.type_generator = type_generator
@@ -331,7 +331,7 @@ class ExprGenerator:
         self, target_type: VyperType, context: Context
     ) -> ast.VyperNode:
         """Generate AST node for a literal value of the given type."""
-        value = self.value_mutator.generate_value_for_type(target_type)
+        value = self.literal_generator.generate(target_type)
         return self._value_to_ast(value, target_type)
 
     def _value_to_ast(self, value, typ: VyperType) -> ast.VyperNode:
