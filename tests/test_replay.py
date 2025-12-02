@@ -30,7 +30,7 @@ class TestReplay:
     def validate_result(self, scenario: Scenario, result: ScenarioResult) -> None:
         """Validate execution result matches expected outcomes."""
         # Get all traces to execute (respects mutations if any)
-        traces = scenario.get_traces_to_execute()
+        traces = scenario.active_traces()
 
         # Validate each trace result
         for trace_result in result.results:

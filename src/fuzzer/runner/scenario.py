@@ -48,16 +48,15 @@ class Scenario:
     # Configuration
     use_python_args: bool = True  # Default to python args for fuzzing
 
-    def get_traces_to_execute(
+    def active_traces(
         self,
     ) -> List[
         Union[CallTrace, SetBalanceTrace, ClearTransientStorageTrace, DeploymentTrace]
     ]:
         """
-        Get the traces to execute, using mutated traces if available.
+        Get the active traces (mutated if available, otherwise original).
 
-        Returns either the mutated traces (if mutations were applied) or the original traces.
-        The order is always preserved exactly as specified.
+        Used for both execution and as the base for further mutations.
         """
         if self.mutated_traces is not None:
             return self.mutated_traces

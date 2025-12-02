@@ -148,7 +148,10 @@ class BaseFuzzer:
         mutated_traces = []
         deployment_compiler_data = {}
 
-        for trace in scenario.traces:
+        # if scenario already has mutated_traces, we mutate those (not original)
+        base_traces = scenario.active_traces()
+
+        for trace in base_traces:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
                 compiler_data = self.get_compiler_data(trace)
 
@@ -197,8 +200,9 @@ class BaseFuzzer:
                 mutated_traces.append(trace)
 
         # Create new scenario with mutated traces
+        # Store base_traces as the new "original" so further mutations build on this
         mutated_scenario = Scenario(
-            traces=scenario.traces,
+            traces=base_traces,
             dependencies=scenario.dependencies,
             use_python_args=scenario.use_python_args,
         )

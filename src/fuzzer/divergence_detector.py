@@ -38,6 +38,7 @@ class Divergence:
     ivy_result: Optional[Union[DeploymentResult, CallResult]] = None
     boa_result: Optional[Union[DeploymentResult, CallResult]] = None
     function: Optional[str] = None  # For execution divergences
+    details: Optional[str] = None  # Additional diagnostic info
     xfail_expected: Optional[str] = None
     xfail_actual: Optional[str] = None  # What actually happened
     xfail_reasons: list[str] = field(default_factory=list)
@@ -76,10 +77,13 @@ class Divergence:
             if self.boa_result:
                 result["boa_call"] = self.boa_result.to_dict()
 
+        if self.details:
+            result["details"] = self.details
+
         # Add relevant traces up to the divergence point
-        if self.scenario.get_traces_to_execute():
+        if self.scenario.active_traces():
             result["traces"] = []
-            for trace in self.scenario.get_traces_to_execute()[: self.step + 1]:
+            for trace in self.scenario.active_traces()[: self.step + 1]:
                 trace_dict = asdict(trace)
                 # Remove large fields that aren't needed for replay
                 trace_dict.pop("annotated_ast", None)
@@ -130,7 +134,7 @@ class DivergenceDetector:
                 scenario=scenario,
                 divergent_runner=divergent_runner,
                 divergent_config=config,
-                function=f"Result count mismatch: Ivy has {len(ivy_result.results)} results, Boa has {len(boa_result.results)} results",
+                details=f"Result count mismatch: Ivy={len(ivy_result.results)}, Boa={len(boa_result.results)}",
             )
 
         # Compare each trace result
@@ -215,7 +219,7 @@ class DivergenceDetector:
                 if not self._compare_call_results(ivy_res, boa_res):
                     # Find the function name from the scenario
                     function_name = None
-                    traces = scenario.get_traces_to_execute()
+                    traces = scenario.active_traces()
                     trace = traces[ivy_trace_result.trace_index]
                     trace_info = trace.to_trace_info(ivy_trace_result.trace_index)
                     function_name = trace_info.get("function")
@@ -242,6 +246,7 @@ class DivergenceDetector:
             return False
 
         # If both failed, consider them equal
+        # TODO: catch cases where semantically different errors occur
         if not ivy_res.success:
             return True
 

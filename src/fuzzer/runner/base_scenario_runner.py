@@ -241,7 +241,7 @@ class BaseScenarioRunner(ABC):
 
         # Execute all traces in order
         result = ScenarioResult()
-        traces_to_execute = scenario.get_traces_to_execute()
+        traces_to_execute = scenario.active_traces()
 
         for trace_index, trace in enumerate(traces_to_execute):
             if isinstance(trace, DeploymentTrace):
@@ -446,9 +446,9 @@ class BaseScenarioRunner(ABC):
             if result is None:
                 output = b""
 
-            # Get storage dump if requested
+            # Get storage dump if requested (only if we have a contract)
             storage_dump = None
-            if self.collect_storage_dumps:
+            if self.collect_storage_dumps and contract is not None:
                 storage_dump = self._get_storage_dump(contract)
 
             return CallResult(
