@@ -41,10 +41,26 @@ class BaseResult:
             self.error, (VyperException, ParserException)
         )
 
+    def _format_error(self) -> Optional[str]:
+        """Format error with type, message, and last 3 traceback frames."""
+        if not self.error:
+            return None
+        import traceback
+
+        error_type = type(self.error).__name__
+        error_msg = str(self.error)
+        # Get last 3 frames of traceback
+        tb_lines = traceback.format_exception(
+            type(self.error), self.error, self.error.__traceback__
+        )
+        # Keep header + last 3 frame pairs (each frame is 2 lines: location + code)
+        tb_str = "".join(tb_lines[-7:]) if len(tb_lines) > 7 else "".join(tb_lines)
+        return f"{error_type}: {error_msg}\n\n{tb_str}"
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "success": self.success,
-            "error": str(self.error) if self.error else None,
+            "error": self._format_error(),
             "storage_dump": self.storage_dump,
         }
 
@@ -333,7 +349,7 @@ class BaseScenarioRunner(ABC):
                 solc_json=trace.solc_json,
                 args=args,
                 kwargs=kwargs,
-                sender=trace.env.tx.origin if hasattr(trace, "env") else None,
+                sender=trace.env.tx.origin if trace.env else None,
                 compiler_settings=trace.compiler_settings,
             )
 

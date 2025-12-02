@@ -4,7 +4,7 @@ Divergence detection for differential fuzzing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from functools import cached_property
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
@@ -78,12 +78,12 @@ class Divergence:
 
         # Add relevant traces up to the divergence point
         if self.scenario.get_traces_to_execute():
-            result["traces"] = [
-                trace.to_trace_info(i)
-                for i, trace in enumerate(
-                    self.scenario.get_traces_to_execute()[: self.step + 1]
-                )
-            ]
+            result["traces"] = []
+            for trace in self.scenario.get_traces_to_execute()[: self.step + 1]:
+                trace_dict = asdict(trace)
+                # Remove large fields that aren't needed for replay
+                trace_dict.pop("annotated_ast", None)
+                result["traces"].append(trace_dict)
 
         return result
 
