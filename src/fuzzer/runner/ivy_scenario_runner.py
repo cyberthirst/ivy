@@ -23,7 +23,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
     def _deploy_from_source(
         self,
         source: str,
-        solc_json: Dict[str, Any],
+        solc_json: Optional[Dict[str, Any]],
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
@@ -37,7 +37,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
                 self.env.eoa,
                 self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
             )
-            if self.no_solc_json and source:
+            if (self.no_solc_json and source) or solc_json is None:
                 contract = loads(
                     source, *args, compiler_args=compiler_settings, **kwargs
                 )

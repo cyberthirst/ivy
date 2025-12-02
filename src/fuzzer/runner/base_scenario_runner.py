@@ -7,7 +7,7 @@ execution environments (Ivy, Boa) with all shared execution logic.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 from pathlib import Path
 
 from .scenario import Scenario
@@ -144,7 +144,7 @@ class ScenarioResult:
     def get_deployment_results(self) -> List[Tuple[int, DeploymentResult]]:
         """Get all deployment results with their trace indices."""
         return [
-            (r.trace_index, r.result)
+            (r.trace_index, cast(DeploymentResult, r.result))
             for r in self.results
             if r.trace_type == "deployment" and r.result is not None
         ]
@@ -152,7 +152,7 @@ class ScenarioResult:
     def get_call_results(self) -> List[Tuple[int, CallResult]]:
         """Get all call results with their trace indices."""
         return [
-            (r.trace_index, r.result)
+            (r.trace_index, cast(CallResult, r.result))
             for r in self.results
             if r.trace_type == "call" and r.result is not None
         ]
@@ -171,7 +171,7 @@ class BaseScenarioRunner(ABC):
     def _deploy_from_source(
         self,
         source: str,
-        solc_json: Dict[str, Any],
+        solc_json: Optional[Dict[str, Any]],
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
@@ -387,10 +387,10 @@ class BaseScenarioRunner(ABC):
         """Execute a call trace."""
         try:
             # Get the target address from call_args
-            to_address = trace.call_args.get("to")
+            to_address: str = trace.call_args.get("to", "")
 
             # Look up contract by address
-            contract = self.deployed_contracts.get(to_address)
+            contract = self.deployed_contracts.get(to_address) if to_address else None
 
             method_name = trace.function_name
             calldata = trace.call_args.get("calldata", "")

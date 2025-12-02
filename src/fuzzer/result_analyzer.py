@@ -70,9 +70,7 @@ class ResultAnalyzer:
         self.issue_filter = issue_filter
         self.divergence_detector = DivergenceDetector()
 
-    def _check_filter(
-        self, issue_dict: dict, issue_type: IT
-    ) -> Optional[KeepDecision]:
+    def _check_filter(self, issue_dict: dict, issue_type: IT) -> Optional[KeepDecision]:
         """Check if issue should be filtered. Returns DedupDecision if filtered, None otherwise."""
         if not self.issue_filter:
             return None

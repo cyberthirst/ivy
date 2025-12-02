@@ -31,6 +31,7 @@ def normalize_storage_dump(
 
     for name, value in storage_dump.items():
         vyper_type = type_map.get(name)
+        assert vyper_type is not None, f"Unknown storage variable: {name}"
 
         pruned_value = _prune_defaults(value, vyper_type)
         if _is_default_value(pruned_value, vyper_type):

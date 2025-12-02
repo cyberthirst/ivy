@@ -24,7 +24,7 @@ class BoaScenarioRunner(BaseScenarioRunner):
     def _deploy_from_source(
         self,
         source: str,
-        solc_json: Dict[str, Any],
+        solc_json: Optional[Dict[str, Any]],
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
