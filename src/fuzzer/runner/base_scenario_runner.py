@@ -8,11 +8,10 @@ execution environments (Ivy, Boa) with all shared execution logic.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
-from pathlib import Path
 
 from .scenario import Scenario
-from ..export_utils import load_export
 from ..trace_types import (
+    Trace,
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,
@@ -230,27 +229,35 @@ class BaseScenarioRunner(ABC):
         return self.env.eoa
 
     def run(self, scenario: Scenario) -> ScenarioResult:
-        """Run a complete scenario including dependencies."""
-        # Reset state for each scenario
+        """Run a complete scenario (including dependencies)"""
+        # Reset state
         self.deployed_contracts = {}
         self.executed_dependencies = set()
 
-        # Execute dependencies first
-        for dep_path, dep_item_name in scenario.dependencies:
-            self._execute_dependency(dep_path, dep_item_name)
+        for dep_scenario in scenario.dependencies:
+            self._execute_dependency_scenario(dep_scenario)
 
-        # Execute all traces in order
-        result = ScenarioResult()
-        traces_to_execute = scenario.active_traces()
+        # Execute main scenario traces
+        results = self._execute_traces(
+            scenario.active_traces(), scenario.use_python_args
+        )
+        return ScenarioResult(results=results)
 
-        for trace_index, trace in enumerate(traces_to_execute):
+    def _execute_traces(
+        self,
+        traces: List[Trace],
+        use_python_args: bool,
+    ) -> List[TraceResult]:
+        """Execute a list of traces and return results."""
+        results: List[TraceResult] = []
+
+        for trace_index, trace in enumerate(traces):
             if isinstance(trace, DeploymentTrace):
-                # Execute deployment
                 deployment_result = self._execute_deployment(
                     trace=trace,
-                    use_python_args=scenario.use_python_args,
+                    use_python_args=use_python_args,
                 )
-                result.results.append(
+                results.append(
                     TraceResult(
                         trace_type="deployment",
                         trace_index=trace_index,
@@ -260,15 +267,12 @@ class BaseScenarioRunner(ABC):
                     )
                 )
 
-                # Continue even if deployment fails to match test behavior
-
             elif isinstance(trace, CallTrace):
-                # Execute call
                 call_result = self._execute_call(
                     trace=trace,
-                    use_python_args=scenario.use_python_args,
+                    use_python_args=use_python_args,
                 )
-                result.results.append(
+                results.append(
                     TraceResult(
                         trace_type="call",
                         trace_index=trace_index,
@@ -278,9 +282,8 @@ class BaseScenarioRunner(ABC):
                 )
 
             elif isinstance(trace, SetBalanceTrace):
-                # Execute set_balance (no result to record)
                 self._execute_set_balance(trace)
-                result.results.append(
+                results.append(
                     TraceResult(
                         trace_type="set_balance",
                         trace_index=trace_index,
@@ -289,9 +292,8 @@ class BaseScenarioRunner(ABC):
                 )
 
             elif isinstance(trace, ClearTransientStorageTrace):
-                # Execute clear_transient_storage (no result to record)
                 self._execute_clear_transient_storage(trace)
-                result.results.append(
+                results.append(
                     TraceResult(
                         trace_type="clear_transient_storage",
                         trace_index=trace_index,
@@ -299,7 +301,7 @@ class BaseScenarioRunner(ABC):
                     )
                 )
 
-        return result
+        return results
 
     def _execute_deployment(
         self,
@@ -471,52 +473,18 @@ class BaseScenarioRunner(ABC):
         """Execute a clear_transient_storage trace."""
         self._clear_transient_storage()
 
-    def _execute_dependency(self, dep_path: Path, dep_item_name: str) -> None:
-        """Execute a dependency if not already executed."""
-        dep_key = f"{dep_path}::{dep_item_name}"
-
-        # Skip if already executed
-        if dep_key in self.executed_dependencies:
+    def _execute_dependency_scenario(self, scenario: Scenario) -> None:
+        """Execute a dependency scenario if not already executed."""
+        # Skip if already executed (use scenario_id for deduplication)
+        if scenario.scenario_id and scenario.scenario_id in self.executed_dependencies:
             return
 
         # Mark as executed
-        self.executed_dependencies.add(dep_key)
+        if scenario.scenario_id:
+            self.executed_dependencies.add(scenario.scenario_id)
 
-        # Load the dependency export
-        try:
-            dep_export = load_export(dep_path)
-        except Exception as e:
-            raise ValueError(f"Failed to load dependency export {dep_path}: {e}")
+        # Execute nested dependencies first (depth-first, same order as before)
+        for nested_dep in scenario.dependencies:
+            self._execute_dependency_scenario(nested_dep)
 
-        if dep_item_name not in dep_export.items:
-            raise ValueError(f"Dependency {dep_item_name} not found in {dep_path}")
-
-        dep_item = dep_export.items[dep_item_name]
-
-        # Execute the dependency's dependencies first (recursive)
-        for nested_dep in dep_item.deps:
-            nested_dep_path_str, nested_dep_name = nested_dep.rsplit("/", 1)
-            # Fix the path prefix from "tests/export/" to "tests/vyper-exports/"
-            if nested_dep_path_str.startswith("tests/export/"):
-                nested_dep_path_str = nested_dep_path_str.replace(
-                    "tests/export/", "tests/vyper-exports/", 1
-                )
-            nested_dep_path = Path(nested_dep_path_str)
-            self._execute_dependency(nested_dep_path, nested_dep_name)
-
-        # Execute the dependency's traces
-        for trace in dep_item.traces:
-            if isinstance(trace, DeploymentTrace):
-                self._execute_deployment(
-                    trace=trace,
-                    use_python_args=True,  # Dependencies typically use python args
-                )
-            elif isinstance(trace, CallTrace):
-                self._execute_call(
-                    trace=trace,
-                    use_python_args=True,
-                )
-            elif isinstance(trace, SetBalanceTrace):
-                self._execute_set_balance(trace)
-            elif isinstance(trace, ClearTransientStorageTrace):
-                self._execute_clear_transient_storage(trace)
+        _ = self._execute_traces(scenario.traces, scenario.use_python_args)

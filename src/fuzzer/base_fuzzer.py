@@ -22,6 +22,7 @@ from .trace_types import (
     CallTrace,
     SetBalanceTrace,
     ClearTransientStorageTrace,
+    TestExport,
 )
 from src.ivy.frontend.loader import loads_from_solc_json
 
@@ -82,7 +83,9 @@ class BaseFuzzer:
             )
         return self._multi_runner
 
-    def load_filtered_exports(self, test_filter: Optional[TestFilter] = None) -> Dict:
+    def load_filtered_exports(
+        self, test_filter: Optional[TestFilter] = None
+    ) -> Dict[Path, TestExport]:
         """Load and filter test exports."""
         exports = load_all_exports(self.exports_dir)
         if test_filter:
