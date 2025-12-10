@@ -12,8 +12,6 @@ from typing import Any, Dict, List
 
 from vyper.compiler.settings import OptimizationLevel
 
-from .test_fuzzer import TestFuzzer
-from .export_utils import TestFilter
 from .trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
 from .xfail import XFailExpectation
 from .runner.scenario import Scenario
@@ -24,14 +22,6 @@ from .divergence_detector import DivergenceDetector
 def _load_divergence(path: Path) -> dict:
     with open(path, "r") as f:
         return json.load(f)
-
-
-def _find_item(fuzzer: TestFuzzer, item_name: str):
-    exports = fuzzer.load_filtered_exports(TestFilter(exclude_multi_module=True))
-    for export in exports.values():
-        if item_name in export.items:
-            return export.items[item_name]
-    return None
 
 
 def _deserialize_env(data: Dict[str, Any] | None) -> Env | None:
@@ -121,27 +111,11 @@ def _build_scenario_from_traces(data: dict) -> Scenario:
 def replay_divergence(divergence_path: Path) -> bool:
     data = _load_divergence(divergence_path)
 
-    item_name = data.get("item_name")
-    base_seed = data.get("seed")
-    scenario_seed = data.get("scenario_seed")
+    if not data.get("traces"):
+        raise ValueError("Cannot replay: no traces in divergence file")
 
-    # Try reconstruction from exports first (original behavior)
-    if item_name and base_seed is not None and scenario_seed is not None:
-        fuzzer = TestFuzzer(seed=base_seed)
-        item = _find_item(fuzzer, item_name)
-
-        if item is not None:
-            scenario = fuzzer.create_mutated_scenario(item, scenario_seed=scenario_seed)
-            return _run_and_check(scenario)
-
-    # Fallback: build scenario directly from stored traces
-    if data.get("traces"):
-        scenario = _build_scenario_from_traces(data)
-        return _run_and_check(scenario)
-
-    raise ValueError(
-        "Cannot replay: no item found in exports and no traces in divergence"
-    )
+    scenario = _build_scenario_from_traces(data)
+    return _run_and_check(scenario)
 
 
 def _run_and_check(scenario: Scenario) -> bool:
