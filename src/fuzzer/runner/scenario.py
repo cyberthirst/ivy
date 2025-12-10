@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Union, Tuple
 from pathlib import Path
 
-from ..export_utils import (
+from ..trace_types import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,

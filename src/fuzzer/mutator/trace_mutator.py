@@ -10,10 +10,7 @@ import random
 from typing import Optional, Dict, Any
 from copy import deepcopy
 
-from ..export_utils import (
-    CallTrace,
-    DeploymentTrace,
-)
+from ..trace_types import CallTrace, DeploymentTrace
 from .value_mutator import ValueMutator
 from .argument_mutator import ArgumentMutator
 from .ast_mutator import AstMutator

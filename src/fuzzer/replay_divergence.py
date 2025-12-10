@@ -13,14 +13,8 @@ from typing import Any, Dict, List
 from vyper.compiler.settings import OptimizationLevel
 
 from .test_fuzzer import TestFuzzer
-from .export_utils import (
-    TestFilter,
-    DeploymentTrace,
-    CallTrace,
-    Env,
-    Tx,
-    Block,
-)
+from .export_utils import TestFilter
+from .trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
 from .xfail import XFailExpectation
 from .runner.scenario import Scenario
 from .runner.multi_runner import MultiRunner

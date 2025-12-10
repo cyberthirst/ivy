@@ -5,13 +5,13 @@ import pytest
 
 from fuzzer.runner.base_scenario_runner import ScenarioResult
 from fuzzer.export_utils import (
-    TestExport,
     TestFilter,
     load_export,
     load_all_exports,
     filter_exports,
     apply_unsupported_exclusions,
 )
+from fuzzer.trace_types import TestExport
 from fuzzer.runner.scenario import Scenario, create_scenario_from_export
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 

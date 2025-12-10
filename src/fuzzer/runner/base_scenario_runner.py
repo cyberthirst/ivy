@@ -11,12 +11,12 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 from pathlib import Path
 
 from .scenario import Scenario
-from ..export_utils import (
+from ..export_utils import load_export
+from ..trace_types import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,
     ClearTransientStorageTrace,
-    load_export,
 )
 from vyper.exceptions import VyperException, VyperInternalException, ParserException
 from ..xfail import XFailExpectation

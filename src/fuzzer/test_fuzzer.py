@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Optional
 
 from .base_fuzzer import BaseFuzzer
-from .export_utils import TestFilter, TestItem
+from .export_utils import TestFilter
+from .trace_types import TestItem
 from .runner.scenario import Scenario, create_scenario_from_item
 
 

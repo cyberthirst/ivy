@@ -16,10 +16,8 @@ from .mutator.ast_mutator import AstMutator
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
-from .export_utils import (
-    load_all_exports,
-    filter_exports,
-    TestFilter,
+from .export_utils import load_all_exports, filter_exports, TestFilter
+from .trace_types import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,
