@@ -47,3 +47,5 @@ ivy/.idea/*.xml
 .idea/
 
 tests/vyper-exports
+
+reports/
