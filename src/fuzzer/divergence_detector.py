@@ -57,10 +57,6 @@ class Divergence:
                 "compiler_args": self.divergent_config.compiler_args,
             }
 
-        # Add mutation information if traces were mutated
-        if self.scenario.mutated_traces:
-            result["has_mutations"] = True
-
         if self.type == DivergenceType.XFAIL:
             result["xfail_expected"] = self.xfail_expected
             result["xfail_actual"] = self.xfail_actual
@@ -81,9 +77,9 @@ class Divergence:
             result["details"] = self.details
 
         # Add relevant traces up to the divergence point
-        if self.scenario.active_traces():
+        if self.scenario.traces:
             result["traces"] = []
-            for trace in self.scenario.active_traces()[: self.step + 1]:
+            for trace in self.scenario.traces[: self.step + 1]:
                 trace_dict = asdict(trace)
                 # Remove large fields that aren't needed for replay
                 trace_dict.pop("annotated_ast", None)
@@ -219,7 +215,7 @@ class DivergenceDetector:
                 if not self._compare_call_results(ivy_res, boa_res):
                     # Find the function name from the scenario
                     function_name = None
-                    traces = scenario.active_traces()
+                    traces = scenario.traces
                     trace = traces[ivy_trace_result.trace_index]
                     trace_info = trace.to_trace_info(ivy_trace_result.trace_index)
                     function_name = trace_info.get("function")

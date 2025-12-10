@@ -22,7 +22,6 @@ class Scenario:
     """
 
     traces: List[Trace] = field(default_factory=list)
-    mutated_traces: Optional[List[Trace]] = None
 
     # Dependencies as fully-resolved Scenario objects (executed depth-first)
     dependencies: List[Scenario] = field(default_factory=list)
@@ -32,16 +31,6 @@ class Scenario:
 
     # Configuration
     use_python_args: bool = True  # Default to python args for fuzzing
-
-    def active_traces(self) -> List[Trace]:
-        """
-        Get the active traces (mutated if available, otherwise original).
-
-        Used for both execution and as the base for further mutations.
-        """
-        if self.mutated_traces is not None:
-            return self.mutated_traces
-        return self.traces
 
 
 def _fixup_dep_path(dep_path_str: str) -> Path:

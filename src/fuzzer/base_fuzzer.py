@@ -146,13 +146,11 @@ class BaseFuzzer:
         argument_mutator = ArgumentMutator(rng, value_mutator)
         trace_mutator = TraceMutator(rng, value_mutator, argument_mutator, ast_mutator)
 
-        mutated_traces = []
+        new_scenario = deepcopy(scenario)
+        new_traces = []
         deployment_compiler_data = {}
 
-        # if scenario already has mutated_traces, we mutate those (not original)
-        base_traces = scenario.active_traces()
-
-        for trace in base_traces:
+        for trace in new_scenario.traces:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
                 compiler_data = self.get_compiler_data(trace)
 
@@ -175,7 +173,7 @@ class BaseFuzzer:
                     settings["enable_decimals"] = True
                     mutated_trace.compiler_settings = settings
 
-                mutated_traces.append(mutated_trace)
+                new_traces.append(mutated_trace)
 
                 if compiler_data:
                     deployment_compiler_data[mutated_trace.deployed_address] = (
@@ -191,25 +189,17 @@ class BaseFuzzer:
                 mutated_trace = trace_mutator.mutate_and_normalize_call_args(
                     trace, mutate_args, deployment_compiler_data
                 )
-                mutated_traces.append(mutated_trace)
+                new_traces.append(mutated_trace)
 
                 if rng.random() < self.call_duplicate_prob:
-                    mutated_traces.append(deepcopy(mutated_trace))
+                    new_traces.append(deepcopy(mutated_trace))
 
             else:
                 assert isinstance(trace, (SetBalanceTrace, ClearTransientStorageTrace))
-                mutated_traces.append(trace)
+                new_traces.append(trace)
 
-        # Create new scenario with mutated traces
-        # Store base_traces as the new "original" so further mutations build on this
-        mutated_scenario = Scenario(
-            traces=base_traces,
-            dependencies=scenario.dependencies,
-            use_python_args=scenario.use_python_args,
-        )
-        mutated_scenario.mutated_traces = mutated_traces
-
-        return mutated_scenario
+        new_scenario.traces = new_traces
+        return new_scenario
 
     def run_scenario(self, scenario: Scenario):
         """Run a scenario and analyze results."""

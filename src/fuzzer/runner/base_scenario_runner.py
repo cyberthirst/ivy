@@ -239,7 +239,7 @@ class BaseScenarioRunner(ABC):
 
         # Execute main scenario traces
         results = self._execute_traces(
-            scenario.active_traces(), scenario.use_python_args
+            scenario.traces, scenario.use_python_args
         )
         return ScenarioResult(results=results)
 
