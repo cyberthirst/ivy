@@ -238,9 +238,7 @@ class BaseScenarioRunner(ABC):
             self._execute_dependency_scenario(dep_scenario)
 
         # Execute main scenario traces
-        results = self._execute_traces(
-            scenario.traces, scenario.use_python_args
-        )
+        results = self._execute_traces(scenario.traces, scenario.use_python_args)
         return ScenarioResult(results=results)
 
     def _execute_traces(
