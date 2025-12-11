@@ -24,14 +24,15 @@ class TraceMutator:
         rng: random.Random,
         value_mutator: Optional[ValueMutator] = None,
         argument_mutator: Optional[ArgumentMutator] = None,
-        ast_mutator: Optional[AstMutator] = None,
+        *,
+        ast_mutator: AstMutator,
     ):
         self.rng = rng
         self.value_mutator = value_mutator or ValueMutator(rng)
         self.argument_mutator = argument_mutator or ArgumentMutator(
             rng, self.value_mutator
         )
-        self.ast_mutator = ast_mutator or AstMutator(rng)
+        self.ast_mutator = ast_mutator
 
     # TODO split into 2 funs - mutation and normalization
     def mutate_and_normalize_call_args(

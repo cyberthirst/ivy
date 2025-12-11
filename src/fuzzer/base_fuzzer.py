@@ -13,6 +13,7 @@ from typing import Dict, Optional
 from copy import deepcopy
 
 from .mutator.ast_mutator import AstMutator
+from .mutator.mode import MutationMode
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
@@ -133,6 +134,8 @@ class BaseFuzzer:
         self,
         scenario: Scenario,
         scenario_seed: Optional[int] = None,
+        *,
+        mode: MutationMode,
     ) -> Scenario:
         """
         Apply mutations to a scenario's traces.
@@ -141,10 +144,14 @@ class BaseFuzzer:
         """
         rng = random.Random(scenario_seed) if scenario_seed else self.rng
 
-        ast_mutator = AstMutator(rng, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS)
+        ast_mutator = AstMutator(
+            rng, mode=mode, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
+        )
         value_mutator = ValueMutator(rng)
         argument_mutator = ArgumentMutator(rng, value_mutator)
-        trace_mutator = TraceMutator(rng, value_mutator, argument_mutator, ast_mutator)
+        trace_mutator = TraceMutator(
+            rng, value_mutator, argument_mutator, ast_mutator=ast_mutator
+        )
 
         new_scenario = deepcopy(scenario)
         new_traces = []

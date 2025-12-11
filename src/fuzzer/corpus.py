@@ -63,6 +63,10 @@ class FuzzCorpus:
         return None
 
     @property
+    def seeds(self) -> List:
+        return self._seeds
+
+    @property
     def seed_count(self) -> int:
         return len(self._seeds)
 
