@@ -29,6 +29,11 @@ class FreshNameGenerator:
 
 
 class StatementGenerator:
+    # Probability of allowing recursive statements (if, for, etc.)
+    # Terminal statements (assign, vardecl) are always allowed.
+    # With 0.2: ~80% terminal only, ~20% may nest
+    CONTINUATION_PROB = 0.2
+
     def __init__(self, expr_generator, type_generator, rng: random.Random):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
@@ -316,9 +321,17 @@ class StatementGenerator:
         if depth >= self.max_depth:
             return self._generate_simple_statement(context, parent)
 
+        # Decide whether to allow recursive (nesting) statements
+        # ~80% of the time, only terminal statements are considered
+        allow_recursive = self.rng.random() < self.CONTINUATION_PROB
+        if allow_recursive:
+            include_tags = ("stmt",)  # All statement strategies
+        else:
+            include_tags = ("terminal",)  # Only terminal (assign, vardecl)
+
         # Collect available statement strategies and execute with retry
         strategies = self._strategy_registry.collect(
-            include_tags=("stmt",),
+            include_tags=include_tags,
             context={
                 "context": context,
                 "parent": parent,

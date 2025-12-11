@@ -69,6 +69,12 @@ class ExprGenerator:
 
         self._register_strategies()
 
+    # Probability of continuing to build recursive expressions.
+    # At each level, only this fraction will attempt complex structures.
+    # P(reaching depth k) = continuation_prob^k
+    # With 0.2: depth1=20%, depth2=4%, depth3=0.8%
+    CONTINUATION_PROB = 0.2
+
     def generate(
         self, target_type: VyperType, context: Context, depth: int = 3
     ) -> ast.VyperNode:
@@ -76,7 +82,8 @@ class ExprGenerator:
         if isinstance(target_type, StructT):
             return self._generate_struct(target_type, context, depth)
 
-        if depth == 0:
+        # Early termination: probabilistic + hard depth limit
+        if depth <= 0 or self.rng.random() > self.CONTINUATION_PROB:
             return self._generate_terminal(target_type, context)
 
         # Collect strategies via registry and execute with retry
