@@ -27,6 +27,9 @@ class MutationResult:
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
 
+from .mode import MutationMode  # noqa: E402
+
+
 class VyperNodeTransformer:
     """Base class for transforming Vyper AST nodes.
 
@@ -110,9 +113,15 @@ class AstMutator(VyperNodeTransformer):
     }
 
     def __init__(
-        self, rng: random.Random, *, max_mutations: int = 8, mutate_prob: float = 0.3
+        self,
+        rng: random.Random,
+        *,
+        mode: MutationMode,
+        max_mutations: int = 8,
+        mutate_prob: float = 0.3,
     ):
         self.rng = rng
+        self.mode = mode
         self.max_mutations = max_mutations
         self.mutate_prob = mutate_prob
         self.mutations_done = 0
@@ -135,11 +144,16 @@ class AstMutator(VyperNodeTransformer):
             self.rng,
             self.function_registry,
             self.type_generator,
+            mode=self.mode,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
             self.expr_generator, self.type_generator, self.rng
         )
+
+    @property
+    def is_generate_mode(self) -> bool:
+        return self.mode == MutationMode.GENERATE
 
     def _negate_condition(self, expr: ast.VyperNode) -> ast.VyperNode:
         """Return a logically negated version of the test expression.
@@ -237,24 +251,27 @@ class AstMutator(VyperNodeTransformer):
         # Preprocess: register all existing functions and module-level variables
         self._preprocess_module(node)
 
-        # inject before visiting, more variable will be available
-        self.stmt_generator.inject_statements(node.body, self.context, node, depth=0)
+        if self.is_generate_mode:
+            self.stmt_generator.inject_statements(
+                node.body, self.context, node, depth=0
+            )
 
         # Visit all existing nodes first
         node = super().generic_visit(node)
 
-        while True:
-            pending_funcs = self.function_registry.get_pending_implementations()
-            if not pending_funcs:
-                break
+        if self.is_generate_mode:
+            while True:
+                pending_funcs = self.function_registry.get_pending_implementations()
+                if not pending_funcs:
+                    break
 
-            for func in pending_funcs:
-                if func.ast_def:
-                    assert isinstance(func.ast_def, ast.FunctionDef)
-                    # Visit the function to fill its body
-                    self.visit_FunctionDef(func.ast_def)
-                    assert func.ast_def.body
-                    node.body.append(func.ast_def)
+                for func in pending_funcs:
+                    if func.ast_def:
+                        assert isinstance(func.ast_def, ast.FunctionDef)
+                        # Visit the function to fill its body
+                        self.visit_FunctionDef(func.ast_def)
+                        assert func.ast_def.body
+                        node.body.append(func.ast_def)
 
         return node
 
@@ -324,16 +341,16 @@ class AstMutator(VyperNodeTransformer):
 
                 # Use statement generator to inject statements
                 # For generated functions with empty bodies, ensure they get statements
-                if not node.body:
-                    n_stmts = self.rng.randint(1, 5)
-                    self.stmt_generator.inject_statements(
-                        node.body, self.context, node, depth=0, n_stmts=n_stmts
-                    )
-                else:
-                    # For existing functions, use normal probability-based injection
-                    self.stmt_generator.inject_statements(
-                        node.body, self.context, node, depth=0
-                    )
+                if self.is_generate_mode:
+                    if not node.body:
+                        n_stmts = self.rng.randint(1, 5)
+                        self.stmt_generator.inject_statements(
+                            node.body, self.context, node, depth=0, n_stmts=n_stmts
+                        )
+                    else:
+                        self.stmt_generator.inject_statements(
+                            node.body, self.context, node, depth=0
+                        )
 
             # Let the base class handle visiting children
             node = super().generic_visit(node)
@@ -409,18 +426,17 @@ class AstMutator(VyperNodeTransformer):
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
 
-        # Push scope for if body
-        with self.context.new_scope(ScopeType.IF):
-            self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=1
-            )
-
-        if node.orelse:
-            # Push scope for else body
+        if self.is_generate_mode:
             with self.context.new_scope(ScopeType.IF):
                 self.stmt_generator.inject_statements(
-                    node.orelse, self.context, node, depth=1
+                    node.body, self.context, node, depth=1
                 )
+
+            if node.orelse:
+                with self.context.new_scope(ScopeType.IF):
+                    self.stmt_generator.inject_statements(
+                        node.orelse, self.context, node, depth=1
+                    )
 
         node = super().generic_visit(node)
 
@@ -480,7 +496,10 @@ class AstMutator(VyperNodeTransformer):
 
         rhs_type = self._type_of(node.value)
 
-        mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
+        if self.is_generate_mode:
+            mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
+        else:
+            mutation_type = "use_var_as_rhs"
 
         if mutation_type == "use_var_as_rhs" and rhs_type is not None:
             other_var = self.pick_var(rhs_type)
@@ -583,11 +602,11 @@ class AstMutator(VyperNodeTransformer):
         node.iter = self.visit(node.iter)
 
         with self.context.new_scope(ScopeType.FOR):
-            self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=1
-            )
+            if self.is_generate_mode:
+                self.stmt_generator.inject_statements(
+                    node.body, self.context, node, depth=1
+                )
 
-            # Use generic_visit to handle body list
             node = super().generic_visit(node)
 
         if not self.should_mutate(ast.For):
