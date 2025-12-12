@@ -2,17 +2,58 @@ import random
 from typing import Type
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types import TupleT
 
 
 class CandidateSelector:
     """
     Selects mutation targets via weighted sampling.
-    Without replacement:  each node can be selected at most once.
+    Without replacement: each node can be selected at most once.
     """
 
-    def __init__(self, rng: random.Random, prob_map: dict[Type, float]):
+    PROB: dict[Type, float] = {
+        # ─────────────────────────────────────────────
+        # Top-level
+        # ─────────────────────────────────────────────
+        ast.Module: 0.01,
+        ast.FunctionDef: 0.01,
+        # ─────────────────────────────────────────────
+        # Literals
+        # ─────────────────────────────────────────────
+        ast.Int: 0.15,
+        ast.Decimal: 0.1,
+        ast.Hex: 0.1,
+        # ─────────────────────────────────────────────
+        # Operators
+        # ─────────────────────────────────────────────
+        ast.BinOp: 0.35,
+        ast.UnaryOp: 0.15,
+        ast.BoolOp: 0.15,
+        ast.Compare: 0.35,
+        # ─────────────────────────────────────────────
+        # Control flow - safe, negate/swap branches
+        # ─────────────────────────────────────────────
+        ast.If: 0.25,
+        ast.IfExp: 0.2,
+        ast.For: 0.15,
+        ast.Assert: 0.15,
+        # ─────────────────────────────────────────────
+        # Assignments - safe with type-aware RHS swap
+        # ─────────────────────────────────────────────
+        ast.Assign: 0.25,
+        ast.AugAssign: 0.2,
+        ast.VariableDecl: 0.2,
+        ast.Return: 0.1,
+        # ─────────────────────────────────────────────
+        # Access patterns - moderate risk, keep lower
+        # ─────────────────────────────────────────────
+        ast.Subscript: 0.2,
+        ast.Attribute: 0.15,
+    }
+
+    def __init__(self, rng: random.Random, prob_map: dict[Type, float] | None = None):
         self.rng = rng
-        self.prob_map = prob_map
+        self.prob_map = prob_map if prob_map is not None else self.PROB
 
     def select(self, root: ast.VyperNode, max_mutations: int) -> set[int]:
         """Walk tree, collect candidates, return set of node IDs to mutate."""

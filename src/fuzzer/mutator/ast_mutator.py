@@ -99,20 +99,6 @@ class FreshNameGenerator:
 
 
 class AstMutator(VyperNodeTransformer):
-    PROB = {
-        ast.Int: 0.4,
-        ast.BinOp: 0.3,
-        ast.If: 0.2,
-        ast.Assign: 0.2,
-        ast.Return: 0.1,
-        ast.UnaryOp: 0.1,
-        ast.BoolOp: 0.1,
-        ast.Attribute: 0.2,
-        ast.Subscript: 0.2,
-        ast.For: 0.2,
-        ast.Compare: 0.3,
-    }
-
     def __init__(
         self,
         rng: random.Random,
@@ -125,7 +111,7 @@ class AstMutator(VyperNodeTransformer):
         self.max_mutations = max_mutations
         self.mutations_done = 0
         self._mutation_targets: set[int] = set()
-        self._candidate_selector = CandidateSelector(rng, self.PROB)
+        self._candidate_selector = CandidateSelector(rng)
         self.context = Context()
         self.name_generator = FreshNameGenerator()
         self.literal_generator = LiteralGenerator(rng)
