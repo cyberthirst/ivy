@@ -368,27 +368,22 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Int(self, node: ast.Int):
-        return node
-        if not self.should_mutate(ast.Int):
+        if not self.should_mutate(node):
             return node
 
-        # Get the type if available
         node_type = self._type_of(node)
 
-        if node_type and isinstance(node_type, IntegerT):
-            # Use the value mutator with proper type
-            node.value = self.value_mutator.mutate_value(node.value, node_type)
+        if node_type and isinstance(node_type, IntegerT) and self.rng.random() < 0.1:
+            node.value = self.value_mutator.mutate(node.value, node_type)
         else:
-            # Fallback to simple mutations
-            mutation_type = self.rng.choice(["add_one", "subtract_one", "bit_flip"])
+            mutation_type = self.rng.choice(["add_one", "subtract_one", "set_zero"])
 
             if mutation_type == "add_one":
                 node.value += 1
             elif mutation_type == "subtract_one":
                 node.value -= 1
-            elif mutation_type == "bit_flip":
-                bit_position = self.rng.randint(0, 63)  # Limit to 64 bits for safety
-                node.value ^= 1 << bit_position
+            elif mutation_type == "set_zero":
+                node.value = 0
 
         self.mutations_done += 1
         return node
