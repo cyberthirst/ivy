@@ -43,7 +43,8 @@ class CandidateSelector:
         ast.Assign: 0.25,
         ast.AugAssign: 0.2,
         ast.VariableDecl: 0.2,
-        ast.Return: 0.1,
+        # TODO
+        ast.Return: 0.0,
         # ─────────────────────────────────────────────
         # Access patterns - moderate risk, keep lower
         # ─────────────────────────────────────────────
@@ -61,6 +62,9 @@ class CandidateSelector:
         weights: list[float] = []
 
         for node in self._walk(root):
+            if not self.filter(node):
+                continue
+
             w = self.prob_map.get(type(node), 0.0)
             if w > 0:
                 candidates.append(node)
@@ -73,14 +77,44 @@ class CandidateSelector:
         )
         return {id(n) for n in chosen}
 
+    def filter(self, node: ast.VyperNode) -> bool:
+        """Return True if node is a valid mutation candidate."""
+        # Tuple subscript indices - changing index changes result type
+        if isinstance(node, ast.Subscript):
+            base_type = self._type_of(node.value)
+            if isinstance(base_type, TupleT) and isinstance(node.slice, ast.Int):
+                return False
+
+        return True
+
+    def _type_of(self, node: ast.VyperNode):
+        """Safely extract the inferred type from AST metadata."""
+        return getattr(node, "_metadata", {}).get("type")
+
     def _walk(self, node: ast.VyperNode):
-        """Yield all nodes in the AST (preorder)."""
+        """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""
         if node is None:
             return
+
         yield node
+
         for field_name in node.get_fields():
             if not hasattr(node, field_name):
                 continue
+
+            # Skip type annotation subtrees - never mutate type definitions
+            if field_name in ("annotation", "returns"):
+                continue
+
+            # Skip range() arguments - bounds define loop semantics
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "range"
+                and field_name in ("args", "keywords")
+            ):
+                continue
+
             val = getattr(node, field_name)
             if isinstance(val, list):
                 for item in val:
