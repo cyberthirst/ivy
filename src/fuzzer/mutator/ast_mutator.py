@@ -4,7 +4,7 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, IntegerT, ContractFunctionT, TupleT
+from vyper.semantics.types import VyperType, ContractFunctionT, TupleT
 from vyper.semantics.types.primitives import NumericT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
@@ -16,6 +16,10 @@ from src.fuzzer.mutator.function_registry import FunctionRegistry
 from .context import Context, ScopeType, state_to_expr_mutability
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
+from .strategy import StrategyRegistry
+from .mutation_engine import MutationEngine
+from .mutations import register_all as register_all_mutations
+from .mutations.base import MutationCtx
 from src.unparser.unparser import unparse
 from src.fuzzer.type_generator import TypeGenerator
 from src.fuzzer.xfail import XFailExpectation
@@ -111,11 +115,6 @@ class AstMutator(VyperNodeTransformer):
         self.value_mutator = ValueMutator(rng)
         # Type generator for random types
         self.type_generator = TypeGenerator(rng)
-        # Control how many variables to generate per scope
-        self.min_vars_per_scope = 0
-        self.max_vars_per_scope = 6
-        # Probability of injecting variables into a scope
-        self.inject_vars_prob = 0.5
         # Function registry for tracking and generating functions
         self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
         # Expression generator with function registry
@@ -129,6 +128,30 @@ class AstMutator(VyperNodeTransformer):
         self.stmt_generator = StatementGenerator(
             self.expr_generator, self.type_generator, self.rng
         )
+
+        # Mutation engine
+        self._mutation_registry = StrategyRegistry()
+        register_all_mutations(self._mutation_registry)
+        self._mutation_engine = MutationEngine(self._mutation_registry, self.rng)
+
+    def _build_ctx(self, node: ast.VyperNode, **kwargs) -> MutationCtx:
+        return MutationCtx(
+            node=node,
+            rng=self.rng,
+            context=self.context,
+            expr_gen=self.expr_generator,
+            stmt_gen=self.stmt_generator,
+            function_registry=self.function_registry,
+            value_mutator=self.value_mutator,
+            **kwargs,
+        )
+
+    def _try_mutate(self, node: ast.VyperNode, **ctx_kwargs) -> ast.VyperNode:
+        if not self.should_mutate(node):
+            return node
+        mutated = self._mutation_engine.mutate(self._build_ctx(node, **ctx_kwargs))
+        assert isinstance(mutated, type(node))
+        return mutated
 
     def _negate_condition(self, expr: ast.VyperNode) -> ast.VyperNode:
         """Return a logically negated version of the test expression.
@@ -229,18 +252,13 @@ class AstMutator(VyperNodeTransformer):
         return self.expr_generator.generate(target_type, self.context, depth=4)
 
     def visit_Module(self, node: ast.Module):
-        # Preprocess: register all existing functions and module-level variables
         self._preprocess_module(node)
-
-        if self.should_mutate(node):
-            self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=0,n_stmts=1
-            )
-
+        node = self._try_mutate(node)
         node = super().generic_visit(node)
+        self._dispatch_pending_functions(node)
+        return node
 
-        # always dispatch pending functions regardless `should_mutate`
-        # to avoid missing definitions
+    def _dispatch_pending_functions(self, node: ast.Module):
         while True:
             pending_funcs = self.function_registry.get_pending_implementations()
             if not pending_funcs:
@@ -249,12 +267,9 @@ class AstMutator(VyperNodeTransformer):
             for func in pending_funcs:
                 if func.ast_def:
                     assert isinstance(func.ast_def, ast.FunctionDef)
-                    # Visit the function to fill its body
                     self.visit_FunctionDef(func.ast_def)
                     assert func.ast_def.body
                     node.body.append(func.ast_def)
-
-        return node
 
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
@@ -276,10 +291,20 @@ class AstMutator(VyperNodeTransformer):
                     self.context.add_variable(item.target.id, var_info)
 
     def visit_VariableDecl(self, node: ast.VariableDecl):
-      """Visit variable declaration value if present."""
-      if self.should_mutate(node) and node.value is not None:
-          node.value = self.visit(node.value)
-      return node
+        # VariableDecl is module-level only (storage, immutables, transient, constants).
+        # Per Vyper's VariableDecl.validate(): only constants have a value,
+        # and non-constants cannot have one. Constants are out of scope for mutation for now.
+        return node
+
+    def visit_AnnAssign(self, node: ast.AnnAssign):
+        """Handle local variable declaration."""
+        node.value = self.visit(node.value)
+
+        var_info = node._metadata.get("varinfo")
+        if var_info:
+            self.context.add_local(node.target.id, var_info.typ)
+
+        return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Interface functions are just signatures so we skip them
@@ -321,17 +346,14 @@ class AstMutator(VyperNodeTransformer):
                     )
                     self.add_variable(arg.name, var_info)
 
-                # Use statement generator to inject statements
-                # For generated functions with empty bodies, ensure they get statements
-                if self.should_mutate(node):
-                    if not node.body:
-                        self.stmt_generator.inject_statements(
-                            node.body, self.context, node, depth=0, n_stmts=1
-                        )
-                    else:
-                        self.stmt_generator.inject_statements(
-                            node.body, self.context, node, depth=0, n_stmts=1
-                        )
+                # Generated functions with empty bodies need statements
+                if not node.body:
+                    n_stmts = self.rng.randint(2, 5)
+                    self.stmt_generator.inject_statements(
+                        node.body, self.context, node, depth=0, n_stmts=n_stmts
+                    )
+                else:
+                    node = self._try_mutate(node)
 
             # Let the base class handle visiting children
             node = super().generic_visit(node)
@@ -341,24 +363,7 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Int(self, node: ast.Int):
-        if not self.should_mutate(node):
-            return node
-
-        node_type = self._type_of(node)
-
-        if node_type and isinstance(node_type, IntegerT) and self.rng.random() < 0.1:
-            node.value = self.value_mutator.mutate(node.value, node_type)
-        else:
-            mutation_type = self.rng.choice(["add_one", "subtract_one", "set_zero"])
-
-            if mutation_type == "add_one":
-                node.value += 1
-            elif mutation_type == "subtract_one":
-                node.value -= 1
-            elif mutation_type == "set_zero":
-                node.value = 0
-
-        return node
+        return self._try_mutate(node, inferred_type=self._type_of(node))
 
     def visit_BinOp(self, node: ast.BinOp):
         node.left = self.visit(node.left)
