@@ -25,7 +25,6 @@ from .literal_generator import LiteralGenerator
 from .context import Context, ExprMutability
 from .function_registry import FunctionRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
-from .mode import MutationMode
 from vyper.semantics.analysis.base import DataLocation
 from vyper.semantics.types.function import StateMutability
 
@@ -39,14 +38,11 @@ class ExprGenerator:
         rng: random.Random,
         function_registry: Optional[FunctionRegistry] = None,
         type_generator=None,
-        *,
-        mode: MutationMode,
     ):
         self.literal_generator = literal_generator
         self.rng = rng
         self.function_registry = function_registry
         self.type_generator = type_generator
-        self.mode = mode
 
         # Build dispatch table for efficient type-to-AST conversion
         self._ast_builders = {
@@ -256,8 +252,6 @@ class ExprGenerator:
     def _is_func_call_applicable(self, **ctx) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
-        if self.mode == MutationMode.MUTATE:
-            return False
         mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
         if mutability == ExprMutability.CONST:
             return False

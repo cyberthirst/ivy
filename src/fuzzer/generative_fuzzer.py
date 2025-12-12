@@ -13,7 +13,6 @@ from .base_fuzzer import BaseFuzzer
 from .corpus import FuzzCorpus
 from .export_utils import TestFilter, apply_unsupported_exclusions
 from .issue_filter import IssueFilter, default_issue_filter
-from .mutator.mode import MutationMode
 from .runner.scenario import create_scenario_from_item
 
 
@@ -75,7 +74,7 @@ class GenerativeFuzzer(BaseFuzzer):
             mutated = self.mutate_scenario(
                 seed_scenario,
                 scenario_seed=scenario_seed,
-                mode=MutationMode.GENERATE,
+                n_mutations=8,
             )
 
             self.reporter.set_context(
@@ -135,14 +134,14 @@ class GenerativeFuzzer(BaseFuzzer):
 
                 scenario_seed = self.derive_scenario_seed("gen", self._iteration)
 
-                # Use GENERATE mode rarely, MUTATE mode by default
+                # Rarely use 8 mutations to help escape local optima
                 if self.rng.random() < self.generate_prob:
-                    mode = MutationMode.GENERATE
+                    n_mutations = 8
                 else:
-                    mode = MutationMode.MUTATE
+                    n_mutations = 1
 
                 mutated_scenario = self.mutate_scenario(
-                    base_scenario, scenario_seed=scenario_seed, mode=mode
+                    base_scenario, scenario_seed=scenario_seed, n_mutations=n_mutations
                 )
 
                 self.reporter.set_context(

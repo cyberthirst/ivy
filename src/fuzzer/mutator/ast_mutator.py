@@ -28,9 +28,6 @@ class MutationResult:
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
 
-from .mode import MutationMode  # noqa: E402
-
-
 class VyperNodeTransformer:
     """Base class for transforming Vyper AST nodes.
 
@@ -102,12 +99,9 @@ class AstMutator(VyperNodeTransformer):
     def __init__(
         self,
         rng: random.Random,
-        *,
-        mode: MutationMode,
         max_mutations: int = 5,
     ):
         self.rng = rng
-        self.mode = mode
         self.max_mutations = max_mutations
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
@@ -130,16 +124,11 @@ class AstMutator(VyperNodeTransformer):
             self.rng,
             self.function_registry,
             self.type_generator,
-            mode=self.mode,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
             self.expr_generator, self.type_generator, self.rng
         )
-
-    @property
-    def is_generate_mode(self) -> bool:
-        return self.mode == MutationMode.GENERATE
 
     def _negate_condition(self, expr: ast.VyperNode) -> ast.VyperNode:
         """Return a logically negated version of the test expression.
@@ -447,7 +436,7 @@ class AstMutator(VyperNodeTransformer):
 
         rhs_type = self._type_of(node.value)
 
-        if self.is_generate_mode:
+        if self.max_mutations > 1:
             mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
         else:
             mutation_type = "use_var_as_rhs"
@@ -547,7 +536,7 @@ class AstMutator(VyperNodeTransformer):
         node.iter = self.visit(node.iter)
 
         with self.context.new_scope(ScopeType.FOR):
-            if self.is_generate_mode:
+            if self.max_mutations > 1:
                 self.stmt_generator.inject_statements(
                     node.body, self.context, node, depth=1
                 )

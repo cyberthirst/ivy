@@ -13,7 +13,6 @@ from typing import Dict, Optional
 from copy import deepcopy
 
 from .mutator.ast_mutator import AstMutator
-from .mutator.mode import MutationMode
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
@@ -38,7 +37,7 @@ from vyper.compiler.phases import CompilerData
 from vyper.exceptions import CompilerPanic, VyperException
 
 
-MAX_AST_MUTATIONS = 8
+DEFAULT_AST_MUTATIONS = 8
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -135,7 +134,7 @@ class BaseFuzzer:
         scenario: Scenario,
         scenario_seed: Optional[int] = None,
         *,
-        mode: MutationMode,
+        n_mutations: int = DEFAULT_AST_MUTATIONS,
     ) -> Scenario:
         """
         Apply mutations to a scenario's traces.
@@ -144,9 +143,7 @@ class BaseFuzzer:
         """
         rng = random.Random(scenario_seed) if scenario_seed else self.rng
 
-        ast_mutator = AstMutator(
-            rng, mode=mode, mutate_prob=0.5, max_mutations=MAX_AST_MUTATIONS
-        )
+        ast_mutator = AstMutator(rng, max_mutations=n_mutations)
         value_mutator = ValueMutator(rng)
         argument_mutator = ArgumentMutator(rng, value_mutator)
         trace_mutator = TraceMutator(
