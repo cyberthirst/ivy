@@ -245,27 +245,27 @@ class AstMutator(VyperNodeTransformer):
         # Preprocess: register all existing functions and module-level variables
         self._preprocess_module(node)
 
-        if self.is_generate_mode:
+        if self.should_mutate(node):
             self.stmt_generator.inject_statements(
-                node.body, self.context, node, depth=0
+                node.body, self.context, node, depth=0,n_stmts=1
             )
 
-        # Visit all existing nodes first
         node = super().generic_visit(node)
 
-        if self.is_generate_mode:
-            while True:
-                pending_funcs = self.function_registry.get_pending_implementations()
-                if not pending_funcs:
-                    break
+        # always dispatch pending functions regardless `should_mutate`
+        # to avoid missing definitions
+        while True:
+            pending_funcs = self.function_registry.get_pending_implementations()
+            if not pending_funcs:
+                break
 
-                for func in pending_funcs:
-                    if func.ast_def:
-                        assert isinstance(func.ast_def, ast.FunctionDef)
-                        # Visit the function to fill its body
-                        self.visit_FunctionDef(func.ast_def)
-                        assert func.ast_def.body
-                        node.body.append(func.ast_def)
+            for func in pending_funcs:
+                if func.ast_def:
+                    assert isinstance(func.ast_def, ast.FunctionDef)
+                    # Visit the function to fill its body
+                    self.visit_FunctionDef(func.ast_def)
+                    assert func.ast_def.body
+                    node.body.append(func.ast_def)
 
         return node
 
@@ -289,9 +289,10 @@ class AstMutator(VyperNodeTransformer):
                     self.context.add_variable(item.target.id, var_info)
 
     def visit_VariableDecl(self, node: ast.VariableDecl):
-        """Skip processing variable declarations - they're handled in preprocessing."""
-        # Don't visit children or mutate - already registered in preprocessing
-        return node
+      """Visit variable declaration value if present."""
+      if self.should_mutate(node) and node.value is not None:
+          node.value = self.visit(node.value)
+      return node
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Interface functions are just signatures so we skip them
@@ -335,15 +336,14 @@ class AstMutator(VyperNodeTransformer):
 
                 # Use statement generator to inject statements
                 # For generated functions with empty bodies, ensure they get statements
-                if self.is_generate_mode:
+                if self.should_mutate(node):
                     if not node.body:
-                        n_stmts = self.rng.randint(1, 5)
                         self.stmt_generator.inject_statements(
-                            node.body, self.context, node, depth=0, n_stmts=n_stmts
+                            node.body, self.context, node, depth=0, n_stmts=1
                         )
                     else:
                         self.stmt_generator.inject_statements(
-                            node.body, self.context, node, depth=0
+                            node.body, self.context, node, depth=0, n_stmts=1
                         )
 
             # Let the base class handle visiting children
@@ -375,105 +375,74 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_BinOp(self, node: ast.BinOp):
-        left = self.visit(node.left)
-        right = self.visit(node.right)
-        assert isinstance(left, ast.ExprNode) and isinstance(right, ast.ExprNode)
-        node.left = left
-        node.right = right
+        node.left = self.visit(node.left)
+        node.right = self.visit(node.right)
 
         if not self.should_mutate(node):
             return node
 
-        left_type = self._type_of(node.left)
-        right_type = self._type_of(node.right)
+        op_swaps = {
+            ast.Add: ast.Sub,
+            ast.Sub: ast.Add,
+            ast.Mult: ast.FloorDiv,
+            ast.FloorDiv: ast.Mult,
+            ast.Mod: ast.FloorDiv,
+            ast.BitAnd: ast.BitOr,
+            ast.BitOr: ast.BitAnd,
+            ast.BitXor: ast.BitAnd,
+            ast.LShift: ast.RShift,
+            ast.RShift: ast.LShift,
+        }
 
-        if left_type is not None and right_type is not None and left_type != right_type:
-            return node
+        op_type = type(node.op)
+        if op_type in op_swaps:
+            node.op = op_swaps[op_type]()
+            self.mutations_done += 1
 
-        mutation_type = self.rng.choice(["swap_operands", "change_operator"])
-
-        if mutation_type == "swap_operands":
-            node.left, node.right = node.right, node.left
-
-        elif mutation_type == "change_operator":
-            if isinstance(node.op, (ast.Add, ast.Sub)):
-                # Swap + and -
-                if isinstance(node.op, ast.Add):
-                    node.op = ast.Sub()
-                else:
-                    node.op = ast.Add()
-            elif isinstance(node.op, (ast.Mult, ast.FloorDiv)):
-                # Swap * and //
-                if isinstance(node.op, ast.Mult):
-                    node.op = ast.FloorDiv()
-                else:
-                    node.op = ast.Mult()
-
-        self.mutations_done += 1
         return node
 
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
 
-        if self.is_generate_mode:
+        if not self.should_mutate(node):
+            node = super().generic_visit(node)
+            return node
+
+        mutation_type = self.rng.choice([
+            "negate_condition",
+            "swap_branches",
+            "inject_statements",
+        ])
+
+        if mutation_type == "inject_statements":
+            # Pick which branch to inject into
+            if node.orelse and self.rng.random() < 0.5:
+                target = node.orelse
+            else:
+                target = node.body
             with self.context.new_scope(ScopeType.IF):
                 self.stmt_generator.inject_statements(
-                    node.body, self.context, node, depth=1
+                    target, self.context, node, depth=1, n_stmts=1
                 )
+            self.mutations_done += 1
 
-            if node.orelse:
-                with self.context.new_scope(ScopeType.IF):
-                    self.stmt_generator.inject_statements(
-                        node.orelse, self.context, node, depth=1
-                    )
-
-        node = super().generic_visit(node)
-
-        # Visit body and orelse using generic_visit to handle lists properly
-        if not self.should_mutate(node):
-            return node
-
-        if isinstance(node.test, ast.Call):
-            return node
-
-        mutation_type = self.rng.choice(["negate_condition", "swap_branches"])
-        mutated = False
-
-        if mutation_type == "negate_condition":
+        elif mutation_type == "negate_condition":
             node.test = self._negate_condition(node.test)
-            mutated = True
+            self.mutations_done += 1
 
         elif mutation_type == "swap_branches":
-            # Swap body and orelse
-            # Only swap when both branches are non-empty to avoid empty if bodies
             if node.body and node.orelse:
                 node.body, node.orelse = node.orelse, node.body
-                # If we're swapping branches, also negate the condition
                 node.test = self._negate_condition(node.test)
-                mutated = True
+                self.mutations_done += 1
 
-        if mutated:
-            self.mutations_done += 1
+        node = super().generic_visit(node)
         return node
 
     def visit_Return(self, node: ast.Return):
+        # TODO: mutate return value (e.g. replace with var/generated expr of same type)
         if node.value:
             node.value = self.visit(node.value)
-
-        if not self.should_mutate(node):
-            return node
-
-        if (
-            node.value
-            and hasattr(node.value, "is_literal_value")
-            and node.value.is_literal_value
-        ):
-            # TODO
-            # In a real implementation, we would use vyper.eval_fold here
-            # For this example, we just skip this part as we don't have the actual fold helper
-            pass
-
-        # self.mutations_done += 1
         return node
 
     def visit_Assign(self, node: ast.Assign):
