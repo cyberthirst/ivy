@@ -109,7 +109,6 @@ class AstMutator(VyperNodeTransformer):
         self.rng = rng
         self.mode = mode
         self.max_mutations = max_mutations
-        self.mutations_done = 0
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
         self.context = Context()
@@ -188,7 +187,6 @@ class AstMutator(VyperNodeTransformer):
 
     def reset_state(self) -> None:
         """Reset all per-mutation internal state to a clean baseline."""
-        self.mutations_done = 0
         self._mutation_targets = set()
         self.context = Context()
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
@@ -371,7 +369,6 @@ class AstMutator(VyperNodeTransformer):
             elif mutation_type == "set_zero":
                 node.value = 0
 
-        self.mutations_done += 1
         return node
 
     def visit_BinOp(self, node: ast.BinOp):
@@ -397,7 +394,6 @@ class AstMutator(VyperNodeTransformer):
         op_type = type(node.op)
         if op_type in op_swaps:
             node.op = op_swaps[op_type]()
-            self.mutations_done += 1
 
         return node
 
@@ -424,17 +420,14 @@ class AstMutator(VyperNodeTransformer):
                 self.stmt_generator.inject_statements(
                     target, self.context, node, depth=1, n_stmts=1
                 )
-            self.mutations_done += 1
 
         elif mutation_type == "negate_condition":
             node.test = self._negate_condition(node.test)
-            self.mutations_done += 1
 
         elif mutation_type == "swap_branches":
             if node.body and node.orelse:
                 node.body, node.orelse = node.orelse, node.body
                 node.test = self._negate_condition(node.test)
-                self.mutations_done += 1
 
         node = super().generic_visit(node)
         return node
@@ -468,7 +461,6 @@ class AstMutator(VyperNodeTransformer):
             new_expr = self.expr_generator.generate(rhs_type, self.context, depth=2)
             node.value = new_expr
 
-        self.mutations_done += 1
         return node
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
@@ -484,7 +476,6 @@ class AstMutator(VyperNodeTransformer):
             # Choose to either drop the unary operator or add one
             if isinstance(node.op, (ast.USub, ast.Invert)):
                 # Just return the operand, effectively removing the UnaryOp node
-                self.mutations_done += 1
                 return node.operand
             else:
                 # Add a unary operator
@@ -493,7 +484,6 @@ class AstMutator(VyperNodeTransformer):
                     op_choice = self.rng.choice([ast.USub(), ast.Invert()])
                     node.op = op_choice
 
-        self.mutations_done += 1
         return node
 
     def visit_BoolOp(self, node: ast.BoolOp):
@@ -516,7 +506,6 @@ class AstMutator(VyperNodeTransformer):
             duplicate_idx = self.rng.randint(0, len(node.values) - 1)
             node.values[1 - duplicate_idx] = node.values[duplicate_idx]
 
-        self.mutations_done += 1
         return node
 
     def visit_Attribute(self, node: ast.Attribute):
@@ -532,7 +521,6 @@ class AstMutator(VyperNodeTransformer):
             # Could implement storage variable reordering here
             pass
 
-        self.mutations_done += 1
         return node
 
     def visit_Subscript(self, node: ast.Subscript):
@@ -551,7 +539,6 @@ class AstMutator(VyperNodeTransformer):
                     [0, 1, node.slice.value + 1, node.slice.value - 1]
                 )
 
-        self.mutations_done += 1
         return node
 
     def visit_For(self, node: ast.For):
@@ -570,9 +557,6 @@ class AstMutator(VyperNodeTransformer):
         if not self.should_mutate(node):
             return node
 
-        # Could swap loop bounds or modify iteration
-        # This is a simplified implementation
-        # self.mutations_done += 1
         return node
 
     def visit_Compare(self, node: ast.Compare):
@@ -598,7 +582,6 @@ class AstMutator(VyperNodeTransformer):
                 node.op = ast.NotEq()
             elif isinstance(node.op, ast.NotEq):
                 node.op = ast.Eq()
-            self.mutations_done += 1
 
         return node
 
