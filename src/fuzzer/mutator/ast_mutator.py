@@ -1,6 +1,6 @@
 import copy
 import random
-from typing import List, Optional, Type
+from typing import List, Optional
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
@@ -11,6 +11,7 @@ from vyper.compiler.phases import CompilerData
 
 from .literal_generator import LiteralGenerator
 from .value_mutator import ValueMutator
+from .candidate_selector import CandidateSelector
 from src.fuzzer.mutator.function_registry import FunctionRegistry
 from .context import Context, ScopeType, state_to_expr_mutability
 from .expr_generator import ExprGenerator
@@ -117,14 +118,14 @@ class AstMutator(VyperNodeTransformer):
         rng: random.Random,
         *,
         mode: MutationMode,
-        max_mutations: int = 8,
-        mutate_prob: float = 0.3,
+        max_mutations: int = 5,
     ):
         self.rng = rng
         self.mode = mode
         self.max_mutations = max_mutations
-        self.mutate_prob = mutate_prob
         self.mutations_done = 0
+        self._mutation_targets: set[int] = set()
+        self._candidate_selector = CandidateSelector(rng, self.PROB)
         self.context = Context()
         self.name_generator = FreshNameGenerator()
         self.literal_generator = LiteralGenerator(rng)
@@ -185,7 +186,12 @@ class AstMutator(VyperNodeTransformer):
         # Deep copy the root to avoid modifying the original
         new_root = copy.deepcopy(root)
 
-        # Visit and get the potentially transformed root
+        # Pass 1: select mutation targets
+        self._mutation_targets = self._candidate_selector.select(
+            new_root, self.max_mutations
+        )
+
+        # Pass 2: visit and mutate selected nodes
         new_root = self.visit(new_root)
         assert isinstance(new_root, ast.Module)
 
@@ -197,6 +203,7 @@ class AstMutator(VyperNodeTransformer):
     def reset_state(self) -> None:
         """Reset all per-mutation internal state to a clean baseline."""
         self.mutations_done = 0
+        self._mutation_targets = set()
         self.context = Context()
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
         self.name_generator.counter = 0
@@ -233,12 +240,13 @@ class AstMutator(VyperNodeTransformer):
         node._metadata = {"type": selected_var_info.typ, "varinfo": selected_var_info}
         return node
 
-    def should_mutate(self, node_type: Type) -> bool:
-        node_prob = self.PROB.get(node_type, 0)
-        return (
-            self.mutations_done < self.max_mutations
-            and self.rng.random() < self.mutate_prob * node_prob
-        )
+    def should_mutate(self, node: ast.VyperNode) -> bool:
+        """Check if node was selected for mutation. Consumes the target."""
+        node_id = id(node)
+        if node_id not in self._mutation_targets:
+            return False
+        self._mutation_targets.discard(node_id)
+        return True
 
     def _type_of(self, node: ast.VyperNode):
         """Safely extract the inferred type from AST metadata."""
@@ -392,7 +400,7 @@ class AstMutator(VyperNodeTransformer):
         node.left = left
         node.right = right
 
-        if not self.should_mutate(ast.BinOp):
+        if not self.should_mutate(node):
             return node
 
         left_type = self._type_of(node.left)
@@ -441,7 +449,7 @@ class AstMutator(VyperNodeTransformer):
         node = super().generic_visit(node)
 
         # Visit body and orelse using generic_visit to handle lists properly
-        if not self.should_mutate(ast.If):
+        if not self.should_mutate(node):
             return node
 
         if isinstance(node.test, ast.Call):
@@ -471,7 +479,7 @@ class AstMutator(VyperNodeTransformer):
         if node.value:
             node.value = self.visit(node.value)
 
-        if not self.should_mutate(ast.Return):
+        if not self.should_mutate(node):
             return node
 
         if (
@@ -491,7 +499,7 @@ class AstMutator(VyperNodeTransformer):
         node.target = self.visit(node.target)
         node.value = self.visit(node.value)
 
-        if not self.should_mutate(ast.Assign):
+        if not self.should_mutate(node):
             return node
 
         rhs_type = self._type_of(node.value)
@@ -516,7 +524,7 @@ class AstMutator(VyperNodeTransformer):
     def visit_UnaryOp(self, node: ast.UnaryOp):
         node.operand = self.visit(node.operand)
 
-        if not self.should_mutate(ast.UnaryOp):
+        if not self.should_mutate(node):
             return node
 
         # Only apply to Int operands that are not already negative
@@ -542,7 +550,7 @@ class AstMutator(VyperNodeTransformer):
         # Visit all values
         node.values = [self.visit(value) for value in node.values]
 
-        if not self.should_mutate(ast.BoolOp):
+        if not self.should_mutate(node):
             return node
 
         # Check if all operands are boolean typed
@@ -565,7 +573,7 @@ class AstMutator(VyperNodeTransformer):
         """Mutate attribute access (e.g., self.foo)"""
         node.value = self.visit(node.value)
 
-        if not self.should_mutate(ast.Attribute):
+        if not self.should_mutate(node):
             return node
 
         # For now, we can swap attribute names if we have a mapping
@@ -582,7 +590,7 @@ class AstMutator(VyperNodeTransformer):
         node.value = self.visit(node.value)
         node.slice = self.visit(node.slice)
 
-        if not self.should_mutate(ast.Subscript):
+        if not self.should_mutate(node):
             return node
 
         # Mutate the index; skip tuples entirely to avoid changing element types.
@@ -609,7 +617,7 @@ class AstMutator(VyperNodeTransformer):
 
             node = super().generic_visit(node)
 
-        if not self.should_mutate(ast.For):
+        if not self.should_mutate(node):
             return node
 
         # Could swap loop bounds or modify iteration
@@ -622,7 +630,7 @@ class AstMutator(VyperNodeTransformer):
         node.left = self.visit(node.left)
         node.right = self.visit(node.right)
 
-        if not self.should_mutate(ast.Compare):
+        if not self.should_mutate(node):
             return node
 
         typ = self._type_of(node) or self._type_of(node.left)
