@@ -8,38 +8,46 @@ from .base import MutationCtx
 
 
 def register(registry: StrategyRegistry) -> None:
-    registry.register(Strategy(
-        name="int.add_one",
-        type_classes=(ast.Int,),
-        tags=frozenset({"mutation", "int"}),
-        is_applicable=lambda **_: True,
-        weight=lambda **_: 1.0,
-        run=_add_one,
-    ))
-    registry.register(Strategy(
-        name="int.subtract_one",
-        type_classes=(ast.Int,),
-        tags=frozenset({"mutation", "int"}),
-        is_applicable=lambda **_: True,
-        weight=lambda **_: 1.0,
-        run=_subtract_one,
-    ))
-    registry.register(Strategy(
-        name="int.set_zero",
-        type_classes=(ast.Int,),
-        tags=frozenset({"mutation", "int"}),
-        is_applicable=lambda **_: True,
-        weight=lambda **_: 1.0,
-        run=_set_zero,
-    ))
-    registry.register(Strategy(
-        name="int.type_aware",
-        type_classes=(ast.Int,),
-        tags=frozenset({"mutation", "int"}),
-        is_applicable=_has_integer_type,
-        weight=lambda **_: 2.0,
-        run=_type_aware_mutate,
-    ))
+    registry.register(
+        Strategy(
+            name="int.add_one",
+            type_classes=(ast.Int,),
+            tags=frozenset({"mutation", "int"}),
+            is_applicable=lambda **_: True,
+            weight=lambda **_: 1.0,
+            run=_add_one,
+        )
+    )
+    registry.register(
+        Strategy(
+            name="int.subtract_one",
+            type_classes=(ast.Int,),
+            tags=frozenset({"mutation", "int"}),
+            is_applicable=lambda **_: True,
+            weight=lambda **_: 1.0,
+            run=_subtract_one,
+        )
+    )
+    registry.register(
+        Strategy(
+            name="int.set_zero",
+            type_classes=(ast.Int,),
+            tags=frozenset({"mutation", "int"}),
+            is_applicable=lambda **_: True,
+            weight=lambda **_: 1.0,
+            run=_set_zero,
+        )
+    )
+    registry.register(
+        Strategy(
+            name="int.type_aware",
+            type_classes=(ast.Int,),
+            tags=frozenset({"mutation", "int"}),
+            is_applicable=_has_integer_type,
+            weight=lambda **_: 2.0,
+            run=_type_aware_mutate,
+        )
+    )
 
 
 def _has_integer_type(*, ctx: MutationCtx, **_) -> bool:

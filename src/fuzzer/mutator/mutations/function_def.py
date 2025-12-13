@@ -7,14 +7,16 @@ from .base import MutationCtx
 
 
 def register(registry: StrategyRegistry) -> None:
-    registry.register(Strategy(
-        name="function.inject_statement",
-        type_classes=(ast.FunctionDef,),
-        tags=frozenset({"mutation", "function"}),
-        is_applicable=_has_body,
-        weight=lambda **_: 1.0,
-        run=_inject_statement,
-    ))
+    registry.register(
+        Strategy(
+            name="function.inject_statement",
+            type_classes=(ast.FunctionDef,),
+            tags=frozenset({"mutation", "function"}),
+            is_applicable=_has_body,
+            weight=lambda **_: 1.0,
+            run=_inject_statement,
+        )
+    )
 
 
 def _has_body(*, ctx: MutationCtx, **_) -> bool:

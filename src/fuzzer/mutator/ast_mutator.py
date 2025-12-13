@@ -4,8 +4,7 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT, TupleT
-from vyper.semantics.types.primitives import NumericT
+from vyper.semantics.types import VyperType, ContractFunctionT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -149,33 +148,7 @@ class AstMutator(VyperNodeTransformer):
     def _try_mutate(self, node: ast.VyperNode, **ctx_kwargs) -> ast.VyperNode:
         if not self.should_mutate(node):
             return node
-        mutated = self._mutation_engine.mutate(self._build_ctx(node, **ctx_kwargs))
-        assert isinstance(mutated, type(node))
-        return mutated
-
-    def _negate_condition(self, expr: ast.VyperNode) -> ast.VyperNode:
-        """Return a logically negated version of the test expression.
-
-        - For Compare nodes, invert the operator directly.
-        - For all other expressions, wrap with a boolean Not.
-        """
-        if isinstance(expr, ast.Compare):
-            op_map = {
-                ast.Lt: ast.GtE(),
-                ast.LtE: ast.Gt(),
-                ast.Gt: ast.LtE(),
-                ast.GtE: ast.Lt(),
-                ast.Eq: ast.NotEq(),
-                ast.NotEq: ast.Eq(),
-                ast.In: ast.NotIn(),
-                ast.NotIn: ast.In(),
-            }
-
-            if type(expr.op) in op_map:
-                expr.op = op_map[type(expr.op)]
-                return expr
-
-        return ast.UnaryOp(op=ast.Not(), operand=expr)
+        return self._mutation_engine.mutate(self._build_ctx(node, **ctx_kwargs))
 
     def mutate(self, root: ast.Module) -> ast.Module:
         self.reset_state()
@@ -347,63 +320,12 @@ class AstMutator(VyperNodeTransformer):
     def visit_BinOp(self, node: ast.BinOp):
         node.left = self.visit(node.left)
         node.right = self.visit(node.right)
-
-        if not self.should_mutate(node):
-            return node
-
-        op_swaps = {
-            ast.Add: ast.Sub,
-            ast.Sub: ast.Add,
-            ast.Mult: ast.FloorDiv,
-            ast.FloorDiv: ast.Mult,
-            ast.Mod: ast.FloorDiv,
-            ast.BitAnd: ast.BitOr,
-            ast.BitOr: ast.BitAnd,
-            ast.BitXor: ast.BitAnd,
-            ast.LShift: ast.RShift,
-            ast.RShift: ast.LShift,
-        }
-
-        op_type = type(node.op)
-        if op_type in op_swaps:
-            node.op = op_swaps[op_type]()
-
-        return node
+        return self._try_mutate(node)
 
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
-
-        if not self.should_mutate(node):
-            node = super().generic_visit(node)
-            return node
-
-        mutation_type = self.rng.choice([
-            "negate_condition",
-            "swap_branches",
-            "inject_statements",
-        ])
-
-        if mutation_type == "inject_statements":
-            # Pick which branch to inject into
-            if node.orelse and self.rng.random() < 0.5:
-                target = node.orelse
-            else:
-                target = node.body
-            with self.context.new_scope(ScopeType.IF):
-                self.stmt_generator.inject_statements(
-                    target, self.context, node, depth=1, n_stmts=1
-                )
-
-        elif mutation_type == "negate_condition":
-            node.test = self._negate_condition(node.test)
-
-        elif mutation_type == "swap_branches":
-            if node.body and node.orelse:
-                node.body, node.orelse = node.orelse, node.body
-                node.test = self._negate_condition(node.test)
-
-        node = super().generic_visit(node)
-        return node
+        node = self._try_mutate(node)
+        return super().generic_visit(node)
 
     def visit_Return(self, node: ast.Return):
         # TODO: mutate return value (e.g. replace with var/generated expr of same type)
@@ -414,149 +336,42 @@ class AstMutator(VyperNodeTransformer):
     def visit_Assign(self, node: ast.Assign):
         node.target = self.visit(node.target)
         node.value = self.visit(node.value)
-
-        if not self.should_mutate(node):
-            return node
-
-        rhs_type = self._type_of(node.value)
-
-        if self.max_mutations > 1:
-            mutation_type = self.rng.choice(["use_var_as_rhs", "generate_new_expr"])
-        else:
-            mutation_type = "use_var_as_rhs"
-
-        if mutation_type == "use_var_as_rhs" and rhs_type is not None:
-            other_var = self.pick_var(rhs_type)
-            if other_var:
-                node.value = other_var
-
-        elif mutation_type == "generate_new_expr" and rhs_type is not None:
-            new_expr = self.expr_generator.generate(rhs_type, self.context, depth=2)
-            node.value = new_expr
-
-        return node
+        return self._try_mutate(node, inferred_type=self._type_of(node.value))
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
         node.operand = self.visit(node.operand)
-
-        if not self.should_mutate(node):
-            return node
-
-        # Only apply to Int operands that are not already negative
-        if isinstance(node.operand, ast.Int) and (
-            isinstance(node.op, (ast.USub, ast.Invert)) or node.operand.value >= 0
-        ):
-            # Choose to either drop the unary operator or add one
-            if isinstance(node.op, (ast.USub, ast.Invert)):
-                # Just return the operand, effectively removing the UnaryOp node
-                return node.operand
-            else:
-                # Add a unary operator
-                if node.operand.value >= 0:
-                    # Add a negation or bitwise not
-                    op_choice = self.rng.choice([ast.USub(), ast.Invert()])
-                    node.op = op_choice
-
-        return node
+        return self._try_mutate(node)
 
     def visit_BoolOp(self, node: ast.BoolOp):
-        # Visit all values
         node.values = [self.visit(value) for value in node.values]
-
-        if not self.should_mutate(node):
-            return node
-
-        # Check if all operands are boolean typed
-        all_bool = True
-        for value in node.values:
-            value_type = self._type_of(value)
-            if value_type is not None and "bool" not in str(value_type):
-                all_bool = False
-                break
-
-        if all_bool and len(node.values) > 0:
-            # Duplicate one input (a and b → a and a)
-            duplicate_idx = self.rng.randint(0, len(node.values) - 1)
-            node.values[1 - duplicate_idx] = node.values[duplicate_idx]
-
-        return node
+        return self._try_mutate(node)
 
     def visit_Attribute(self, node: ast.Attribute):
-        """Mutate attribute access (e.g., self.foo)"""
         node.value = self.visit(node.value)
-
-        if not self.should_mutate(node):
-            return node
-
-        # For now, we can swap attribute names if we have a mapping
-        # This is a simplified implementation
-        if isinstance(node.value, ast.Name) and node.value.id == "self":
-            # Could implement storage variable reordering here
-            pass
-
+        # No mutations for attribute access yet
         return node
 
     def visit_Subscript(self, node: ast.Subscript):
-        """Mutate subscript access (e.g., arr[i])"""
         node.value = self.visit(node.value)
         node.slice = self.visit(node.slice)
-
-        if not self.should_mutate(node):
-            return node
-
-        # Mutate the index; skip tuples entirely to avoid changing element types.
-        base_type = self._type_of(node.value)
-        if isinstance(node.slice, ast.Int):
-            if not isinstance(base_type, TupleT):
-                node.slice.value = self.rng.choice(
-                    [0, 1, node.slice.value + 1, node.slice.value - 1]
-                )
-
-        return node
+        return self._try_mutate(node)
 
     def visit_For(self, node: ast.For):
-        """Mutate for loops"""
         node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
+        # Mutation happens inside scope context so injected statements have access to loop var
         with self.context.new_scope(ScopeType.FOR):
-            if self.max_mutations > 1:
-                self.stmt_generator.inject_statements(
-                    node.body, self.context, node, depth=1
-                )
-
+            node = self._try_mutate(node)
             node = super().generic_visit(node)
-
-        if not self.should_mutate(node):
-            return node
 
         return node
 
     def visit_Compare(self, node: ast.Compare):
-        """Mutate comparison operations"""
         node.left = self.visit(node.left)
         node.right = self.visit(node.right)
-
-        if not self.should_mutate(node):
-            return node
-
-        typ = self._type_of(node) or self._type_of(node.left)
-
-        if typ and isinstance(typ, NumericT):
-            # For numeric types, any comparison operator is valid
-            # TODO add mutations for other operators (shifting etc)
-            ops = [ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq]
-            new_op_type = self.rng.choice(ops)
-            node.op = new_op_type()
-        else:
-            # For non-numeric types, only eq/neq are valid
-            # TODO add mutations for other operators
-            if isinstance(node.op, ast.Eq):
-                node.op = ast.NotEq()
-            elif isinstance(node.op, ast.NotEq):
-                node.op = ast.Eq()
-
-        return node
+        inferred = self._type_of(node) or self._type_of(node.left)
+        return self._try_mutate(node, inferred_type=inferred)
 
     def _ensure_init_with_immutables(self, module: ast.Module):
         if not self.context.immutables_to_init:

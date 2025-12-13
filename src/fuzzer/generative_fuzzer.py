@@ -28,7 +28,7 @@ class GenerativeFuzzer(BaseFuzzer):
         self,
         exports_dir: Path = Path("tests/vyper-exports"),
         seed: Optional[int] = None,
-        debug_mode: bool = True,
+        debug_mode: bool = False,
         seed_selection_prob: float = 0.3,
         generate_prob: float = 1e-4,
         issue_filter: Optional[IssueFilter] = None,
