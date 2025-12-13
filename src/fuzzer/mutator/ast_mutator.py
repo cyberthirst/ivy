@@ -215,27 +215,6 @@ class AstMutator(VyperNodeTransformer):
         """Convenience method to add a local variable."""
         self.context.add_local(name, typ)
 
-    def pick_var(self, want_type: Optional[VyperType] = None) -> Optional[ast.Name]:
-        """Pick a variable from all accessible variables matching the type."""
-        if not self.context.all_vars:
-            return None
-
-        vars_pool = []
-
-        # Check all variables in the global pool
-        for name, var_info in self.context.all_vars.items():
-            if want_type is None or var_info.typ == want_type:
-                vars_pool.append((name, var_info))
-
-        if not vars_pool:
-            return None
-
-        selected_name, selected_var_info = self.rng.choice(vars_pool)
-
-        node = ast.Name(id=selected_name)
-        node._metadata = {"type": selected_var_info.typ, "varinfo": selected_var_info}
-        return node
-
     def should_mutate(self, node: ast.VyperNode) -> bool:
         """Check if node was selected for mutation. Consumes the target."""
         node_id = id(node)

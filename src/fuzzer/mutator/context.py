@@ -1,8 +1,10 @@
-from typing import Dict, List
+from typing import Dict, List, Optional, TYPE_CHECKING
+import random
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum, auto
 
+from vyper.ast import nodes as ast
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import StateMutability
@@ -110,3 +112,24 @@ class Context:
             yield
         finally:
             self.current_function_mutability = prev
+
+    def pick_var(
+        self, rng: random.Random, want_type: Optional[VyperType] = None
+    ) -> Optional[ast.Name]:
+        """Pick a random variable matching the type, returns an ast.Name node."""
+        if not self.all_vars:
+            return None
+
+        candidates = [
+            (name, var_info)
+            for name, var_info in self.all_vars.items()
+            if want_type is None or var_info.typ == want_type
+        ]
+
+        if not candidates:
+            return None
+
+        selected_name, selected_var_info = rng.choice(candidates)
+        node = ast.Name(id=selected_name)
+        node._metadata = {"type": selected_var_info.typ, "varinfo": selected_var_info}
+        return node
