@@ -5,6 +5,21 @@ from vyper.semantics.types import IntegerT
 
 from ..strategy import Strategy, StrategyRegistry
 from .base import MutationCtx
+from src.fuzzer.xfail import XFailExpectation
+
+
+def _check_bounds_and_xfail(ctx: MutationCtx, new_value: int) -> None:
+    """Check if new_value is within type bounds, add xfail if not."""
+    if ctx.inferred_type is None or not isinstance(ctx.inferred_type, IntegerT):
+        return
+    lower, upper = ctx.inferred_type.ast_bounds
+    if new_value < lower or new_value > upper:
+        ctx.context.compilation_xfails.append(
+            XFailExpectation(
+                kind="compilation",
+                reason=f"integer literal {new_value} out of bounds for {ctx.inferred_type}",
+            )
+        )
 
 
 def register(registry: StrategyRegistry) -> None:
@@ -55,12 +70,16 @@ def _has_integer_type(*, ctx: MutationCtx, **_) -> bool:
 
 
 def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
-    ctx.node.value += 1
+    new_value = ctx.node.value + 1
+    _check_bounds_and_xfail(ctx, new_value)
+    ctx.node.value = new_value
     return ctx.node
 
 
 def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
-    ctx.node.value -= 1
+    new_value = ctx.node.value - 1
+    _check_bounds_and_xfail(ctx, new_value)
+    ctx.node.value = new_value
     return ctx.node
 
 
