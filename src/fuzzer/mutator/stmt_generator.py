@@ -1,5 +1,5 @@
 import random
-from typing import Optional
+from typing import Optional, Union
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -442,25 +442,25 @@ class StatementGenerator:
 
     def create_vardecl_and_register(
         self, context, parent: Optional[ast.VyperNode]
-    ) -> ast.VariableDecl:
+    ) -> Union[ast.VariableDecl, ast.AnnAssign]:
         var_decl, var_name, var_info = self.generate_vardecl(context, parent)
         self.add_variable(context, var_name, var_info)
         return var_decl
 
     def generate_vardecl(
         self, context, parent: Optional[ast.VyperNode]
-    ) -> tuple[ast.VariableDecl, str, VarInfo]:
+    ) -> tuple[Union[ast.VariableDecl, ast.AnnAssign], str, VarInfo]:
         """
-        Build a random VariableDecl that is *valid* for the Vyper AST.
+        Build a variable declaration valid for the current scope.
 
-        Returns
-        -------
-        (var_decl, var_name, var_info)
+        Module scope: returns ast.VariableDecl (supports flags like constant, public, etc.)
+        Function/block scope: returns ast.AnnAssign (always has init value, no flags)
         """
         var_name, var_info = self._generate_varinfo(context)
 
         anno: ast.VyperNode = ast.Name(id=str(var_info.typ))
 
+        # These flags only apply to module scope (var_info already reflects this)
         if var_info.modifiability == Modifiability.CONSTANT:
             anno = ast.Call(func=ast.Name(id="constant"), args=[anno])
         if var_info.modifiability == Modifiability.RUNTIME_CONSTANT:
@@ -490,12 +490,19 @@ class StatementGenerator:
         else:
             init_val = None
 
-        var_decl = ast.VariableDecl(
-            parent=parent,
-            target=ast.Name(id=var_name),
-            annotation=anno,
-            value=init_val,  # may be None
-        )
+        if context.is_module_scope:
+            var_decl = ast.VariableDecl(
+                parent=parent,
+                target=ast.Name(id=var_name),
+                annotation=anno,
+                value=init_val,
+            )
+        else:
+            var_decl = ast.AnnAssign(
+                target=ast.Name(id=var_name),
+                annotation=anno,
+                value=init_val,
+            )
 
         return var_decl, var_name, var_info
 
