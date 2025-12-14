@@ -18,14 +18,13 @@ from vyper.semantics.types import (
     HashMapT,
     DecimalT,
 )
-from vyper.semantics.analysis.base import Modifiability
 from vyper.semantics.types.subscriptable import _SequenceT
 
 from .literal_generator import LiteralGenerator
 from .context import Context, ExprMutability
 from .function_registry import FunctionRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
-from vyper.semantics.analysis.base import DataLocation
+from vyper.semantics.analysis.base import DataLocation, VarInfo
 from vyper.semantics.types.function import StateMutability
 
 from src.fuzzer.xfail import XFailExpectation
@@ -236,13 +235,13 @@ class ExprGenerator:
     def _is_var_ref_applicable(self, **ctx) -> bool:
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
-        return bool(self._find_matching_variables(target_type, context))
+        return bool(context.find_matching_vars(target_type))
 
     def _weight_var_ref(self, **ctx) -> float:
         # Slightly bias towards var refs when there are many
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
-        n = len(self._find_matching_variables(target_type, context))
+        n = len(context.find_matching_vars(target_type))
         return 1.0 if n == 0 else min(2.0, 0.5 + 0.1 * n)
 
     def _is_unary_minus_applicable(self, **ctx) -> bool:
@@ -284,7 +283,7 @@ class ExprGenerator:
     def _run_var_ref(self, **ctx):
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
-        matches = self._find_matching_variables(target_type, context)
+        matches = context.find_matching_vars(target_type)
         if not matches:
             return None
         return self._generate_variable_ref(self.rng.choice(matches), context)
@@ -327,7 +326,7 @@ class ExprGenerator:
         if isinstance(target_type, StructT):
             return self._generate_struct(target_type, context, depth=0)
 
-        matching_vars = self._find_matching_variables(target_type, context)
+        matching_vars = context.find_matching_vars(target_type)
 
         if matching_vars and self.rng.random() < 0.95:
             return self._generate_variable_ref(self.rng.choice(matching_vars), context)
@@ -417,21 +416,14 @@ class ExprGenerator:
         call_node._metadata["type"] = typ
         return call_node
 
-    def _find_matching_variables(
+    def random_var_ref(
         self, target_type: VyperType, context: Context
-    ) -> list[str]:
-        matches = []
-        const_only = context.current_mutability == ExprMutability.CONST
-        for name, var_info in context.all_vars.items():
-            # Directional assignability: a value of var_info.typ must be assignable
-            # to a expr of target_type
-            if target_type.compare_type(var_info.typ):
-                if const_only and var_info.modifiability != Modifiability.CONSTANT:
-                    continue
-            # Directional: can var_type be used where target_type is expected?
-            if target_type.compare_type(var_info.typ):
-                matches.append(name)
-        return matches
+    ) -> Optional[Union[ast.Attribute, ast.Name]]:
+        """Pick a random variable matching target_type, returns proper AST ref."""
+        matches = context.find_matching_vars(target_type)
+        if not matches:
+            return None
+        return self._generate_variable_ref(self.rng.choice(matches), context)
 
     def _find_subscript_bases(
         self, target_type: VyperType, context: Context
@@ -478,8 +470,14 @@ class ExprGenerator:
                 result.append((name, t))
         return result
 
-    def _generate_variable_ref(self, name: str, context: Context) -> ast.VyperNode:
-        var_info = context.all_vars[name]
+    def _generate_variable_ref(
+        self, target: Union[str, tuple[str, VarInfo]], context: Context
+    ) -> Union[ast.Attribute, ast.Name]:
+        if isinstance(target, str):
+            name = target
+            var_info = context.all_vars[name]
+        else:
+            name, var_info = target
 
         if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
             node = ast.Attribute(value=ast.Name(id="self"), attr=name)

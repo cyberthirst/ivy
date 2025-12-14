@@ -12,7 +12,7 @@ def register(registry: StrategyRegistry) -> None:
             name="assign.use_var_as_rhs",
             type_classes=(ast.Assign,),
             tags=frozenset({"mutation", "assign"}),
-            is_applicable=_has_rhs_type,
+            is_applicable=_has_matching_var,
             weight=lambda **_: 1.0,
             run=_use_var_as_rhs,
         )
@@ -33,10 +33,17 @@ def _has_rhs_type(*, ctx: MutationCtx, **_) -> bool:
     return ctx.inferred_type is not None
 
 
+def _has_matching_var(*, ctx: MutationCtx, **_) -> bool:
+    return ctx.inferred_type is not None and bool(
+        ctx.context.find_matching_vars(ctx.inferred_type)
+    )
+
+
 def _use_var_as_rhs(*, ctx: MutationCtx, **_) -> ast.Assign:
-    other_var = ctx.context.pick_var(ctx.rng, ctx.inferred_type)
-    if other_var:
-        ctx.node.value = other_var
+    assert ctx.inferred_type is not None
+    other_var = ctx.expr_gen.random_var_ref(ctx.inferred_type, ctx.context)
+    assert other_var is not None
+    ctx.node.value = other_var
     return ctx.node
 
 
