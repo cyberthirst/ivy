@@ -149,10 +149,6 @@ class StatementGenerator:
     def add_variable(self, context, name: str, var_info: VarInfo):
         context.add_variable(name, var_info)
 
-    def add_local(self, context, name: str, typ: VyperType):
-        """Convenience method to add a local variable."""
-        context.add_local(name, typ)
-
     def generate_type(
         self,
         context,

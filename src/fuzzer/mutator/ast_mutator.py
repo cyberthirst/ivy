@@ -184,10 +184,6 @@ class AstMutator(VyperNodeTransformer):
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
 
-    def add_local(self, name: str, typ: VyperType):
-        """Convenience method to add a local variable."""
-        self.context.add_local(name, typ)
-
     def should_mutate(self, node: ast.VyperNode) -> bool:
         """Check if node was selected for mutation. Consumes the target."""
         node_id = id(node)
@@ -252,9 +248,17 @@ class AstMutator(VyperNodeTransformer):
         """Handle local variable declaration."""
         node.value = self.visit(node.value)
 
-        var_info = node._metadata.get("varinfo")
-        if var_info:
-            self.context.add_local(node.target.id, var_info.typ)
+        # Local variables don't have VarInfo persisted in metadata after analysis,
+        # so we construct it from the type info
+        assert isinstance(node.target, ast.Name)
+        var_type = self._type_of(node.target)
+        if var_type:
+            var_info = VarInfo(
+                typ=var_type,
+                location=DataLocation.MEMORY,
+                modifiability=Modifiability.MODIFIABLE,
+            )
+            self.context.add_variable(node.target.id, var_info)
 
         return node
 
@@ -362,6 +366,20 @@ class AstMutator(VyperNodeTransformer):
 
         # Mutation happens inside scope context so injected statements have access to loop var
         with self.context.new_scope(ScopeType.FOR):
+            # Register the loop variable (Vyper loop vars are RUNTIME_CONSTANT - can't reassign)
+            # node.target is AnnAssign, node.target.target is the Name
+            loop_annassign = node.target
+            assert isinstance(loop_annassign, ast.AnnAssign)
+            loop_var_name = loop_annassign.target
+            assert isinstance(loop_var_name, ast.Name)
+            target_type = self._type_of(loop_var_name)
+            if target_type:
+                var_info = VarInfo(
+                    typ=target_type,
+                    modifiability=Modifiability.RUNTIME_CONSTANT,
+                )
+                self.context.add_variable(loop_var_name.id, var_info)
+
             node = self._try_mutate(node)
             node = super().generic_visit(node)
 
@@ -370,8 +388,8 @@ class AstMutator(VyperNodeTransformer):
     def visit_Compare(self, node: ast.Compare):
         node.left = self.visit(node.left)
         node.right = self.visit(node.right)
-        inferred = self._type_of(node) or self._type_of(node.left)
-        return self._try_mutate(node, inferred_type=inferred)
+        # Pass operand type for mutation decisions (result type is always BoolT)
+        return self._try_mutate(node, inferred_type=self._type_of(node.left))
 
     def _ensure_init_with_immutables(self, module: ast.Module):
         if not self.context.immutables_to_init:

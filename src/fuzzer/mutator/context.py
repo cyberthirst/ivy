@@ -72,17 +72,6 @@ class Context:
         ):
             self.immutables_to_init.append((name, var_info))
 
-    # TODO probably remove this
-    def add_local(self, name: str, typ: VyperType) -> None:
-        var_info = VarInfo(
-            typ=typ,
-            location=DataLocation.MEMORY,
-            modifiability=Modifiability.MODIFIABLE,
-            is_public=False,
-            decl_node=None,
-        )
-        self.add_variable(name, var_info)
-
     @property
     def is_module_scope(self) -> bool:
         return self.current_scope.scope_type == ScopeType.MODULE
