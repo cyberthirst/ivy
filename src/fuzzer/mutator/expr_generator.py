@@ -17,17 +17,19 @@ from vyper.semantics.types import (
     TupleT,
     HashMapT,
     DecimalT,
+    TYPE_T,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
+from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
+from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from .literal_generator import LiteralGenerator
 from .context import Context, ExprMutability
 from .function_registry import FunctionRegistry
+from .interface_registry import InterfaceRegistry
 from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
-from vyper.semantics.analysis.base import DataLocation, VarInfo
-from vyper.semantics.types.function import StateMutability
-
 from src.fuzzer.xfail import XFailExpectation
+from src.fuzzer.type_generator import TypeGenerator
 
 
 class ExprGenerator:
@@ -35,12 +37,14 @@ class ExprGenerator:
         self,
         literal_generator: LiteralGenerator,
         rng: random.Random,
-        function_registry: Optional[FunctionRegistry] = None,
-        type_generator=None,
+        interface_registry: InterfaceRegistry,
+        function_registry: FunctionRegistry,
+        type_generator: TypeGenerator,
     ):
         self.literal_generator = literal_generator
         self.rng = rng
         self.function_registry = function_registry
+        self.interface_registry = interface_registry
         self.type_generator = type_generator
 
         # Build dispatch table for efficient type-to-AST conversion
@@ -916,16 +920,6 @@ class ExprGenerator:
             func_t = compatible_func
 
         func_name = func_t.name
-        if func_t.is_external:
-            func_node = ast.Name(id=func_name)
-        else:
-            assert func_t.is_internal, (
-                f"Expected internal or external function, got {func_t}"
-            )
-            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_name)
-
-        func_node._metadata = getattr(func_node, "_metadata", {})
-        func_node._metadata["type"] = func_t
 
         # Generate arguments
         args = []
@@ -934,8 +928,22 @@ class ExprGenerator:
                 arg_expr = self.generate(pos_arg.typ, context, max(0, depth))
                 args.append(arg_expr)
 
-        # Build and maybe wrap
-        result_node = self._finalize_call(func_node, args, func_t.return_type, func_t)
+        if func_t.is_external:
+            # External functions must be called through an interface
+            if not self.interface_registry:
+                return None
+            # External calls use `self` as address, which is not allowed in @pure
+            # TODO: support literal addresses for pure function calls
+            if context.current_function_mutability == StateMutability.PURE:
+                return None
+            result_node = self._generate_external_call(func_t, args)
+        else:
+            assert func_t.is_internal, (
+                f"Expected internal or external function, got {func_t}"
+            )
+            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_name)
+            func_node._metadata = {"type": func_t}
+            result_node = self._finalize_call(func_node, args, func_t.return_type)
 
         # Record the call in the call graph
         if self.function_registry.current_function:
@@ -944,6 +952,32 @@ class ExprGenerator:
             )
 
         return result_node
+
+    def _generate_external_call(
+        self, func: ContractFunctionT, args: list
+    ) -> Union[ast.StaticCall, ast.ExtCall]:
+        """Build AST for an external call through an interface."""
+        iface_name, iface_type = self.interface_registry.create_interface(func)
+
+        # Address is always `self` for now
+        # TODO support random addresses
+        address_node = ast.Name(id="self")
+        address_node._metadata = {"type": AddressT()}
+
+        # Build: InterfaceName(address)
+        iface_name_node = ast.Name(id=iface_name)
+        iface_name_node._metadata = {"type": TYPE_T(iface_type)}
+
+        iface_cast = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
+        iface_cast._metadata = {"type": iface_type}
+
+        # Build: Interface(address).func
+        attr_node = ast.Attribute(value=iface_cast, attr=func.name)
+        attr_node._metadata = {"type": func}
+
+        ret = self._finalize_call(attr_node, args, func.return_type, func)
+        assert isinstance(ret, (ast.StaticCall, ast.ExtCall))
+        return ret
 
     def _finalize_call(
         self, func_node, args, return_type, func_t=None
@@ -1035,7 +1069,9 @@ class ExprGenerator:
             arg_t = target_type
             a0 = self.generate(arg_t, context, max(0, depth))
             a1 = self.generate(arg_t, context, max(0, depth))
-            return self._finalize_call(func_node, [a0, a1], arg_t)
+            call_node = ast.Call(func=func_node, args=[a0, a1], keywords=[])
+            call_node._metadata = {"type": arg_t}
+            return call_node
 
         if name == "abs":
             if isinstance(target_type, IntegerT) and not target_type.is_signed:

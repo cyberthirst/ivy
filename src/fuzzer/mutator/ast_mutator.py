@@ -12,6 +12,7 @@ from .literal_generator import LiteralGenerator
 from .value_mutator import ValueMutator
 from .candidate_selector import CandidateSelector
 from src.fuzzer.mutator.function_registry import FunctionRegistry
+from .interface_registry import InterfaceRegistry
 from .context import Context, ScopeType, state_to_expr_mutability
 from .expr_generator import ExprGenerator
 from .stmt_generator import StatementGenerator
@@ -116,10 +117,13 @@ class AstMutator(VyperNodeTransformer):
         self.type_generator = TypeGenerator(rng)
         # Function registry for tracking and generating functions
         self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
-        # Expression generator with function registry
+        # Interface registry for external calls
+        self.interface_registry = InterfaceRegistry(self.rng)
+        # Expression generator with function and interface registries
         self.expr_generator = ExprGenerator(
             self.literal_generator,
             self.rng,
+            self.interface_registry,
             self.function_registry,
             self.type_generator,
         )
@@ -180,6 +184,7 @@ class AstMutator(VyperNodeTransformer):
         self.type_generator.source_fragments = []
         self.stmt_generator.name_generator.counter = 0
         self.function_registry.reset()
+        self.interface_registry.reset()
 
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
@@ -204,6 +209,7 @@ class AstMutator(VyperNodeTransformer):
         node = self._try_mutate(node)
         node = super().generic_visit(node)
         self._dispatch_pending_functions(node)
+        self._add_interface_definitions(node)
         return node
 
     def _dispatch_pending_functions(self, node: ast.Module):
@@ -219,12 +225,19 @@ class AstMutator(VyperNodeTransformer):
                     assert func.ast_def.body
                     node.body.append(func.ast_def)
 
+    def _add_interface_definitions(self, node: ast.Module):
+        """Add generated interface definitions to the module body."""
+        interface_defs = self.interface_registry.get_interface_defs()
+        if interface_defs:
+            # Insert at beginning of module body
+            node.body = interface_defs + node.body
+
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 # Register existing function in the registry
-                func_type = item._metadata.get("type")
+                func_type = item._metadata.get("func_type")
                 if func_type and isinstance(func_type, ContractFunctionT):
                     self.function_registry.register_function(func_type)
 
