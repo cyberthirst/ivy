@@ -122,6 +122,16 @@ class CandidateSelector:
             ):
                 continue
 
+            # Skip empty() arguments - they contain type definitions where
+            # subscript indices represent type lengths (must be >= 1)
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "empty"
+                and field_name in ("args", "keywords")
+            ):
+                continue
+
             val = getattr(node, field_name)
             if isinstance(val, list):
                 for item in val:
