@@ -8,7 +8,7 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability
+from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
 from src.fuzzer.mutator.strategy import (
     Strategy,
     StrategyRegistry,
@@ -100,7 +100,7 @@ class StatementGenerator:
         context: Context = ctx["context"]
         if context.is_module_scope:
             return False
-        return bool(self.get_modifiable_variables(context))
+        return bool(self.get_writable_variables(context))
 
     def _is_if_applicable(self, **ctx) -> bool:
         context: Context = ctx["context"]
@@ -379,24 +379,18 @@ class StatementGenerator:
         last_stmt = body[-1]
         return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
 
-    def get_modifiable_variables(self, context) -> list[tuple[str, VarInfo]]:
-        modifiable_vars = []
-        for name, var_info in context.all_vars.items():
-            if var_info.modifiability == Modifiability.MODIFIABLE:
-                modifiable_vars.append((name, var_info))
-        return modifiable_vars
+    def get_writable_variables(self, context: Context) -> list[tuple[str, VarInfo]]:
+        with context.access_mode(AccessMode.WRITE):
+            return context.find_matching_vars()
 
     def generate_assign(
         self, context, parent: Optional[ast.VyperNode]
     ) -> Optional[ast.Assign]:
-        if not context.all_vars:
+        writable_vars = self.get_writable_variables(context)
+        if not writable_vars:
             return None
 
-        modifiable_vars = self.get_modifiable_variables(context)
-        if not modifiable_vars:
-            return None
-
-        var_name, var_info = self.rng.choice(modifiable_vars)
+        var_name, var_info = self.rng.choice(writable_vars)
 
         # Build base reference (self.x or local)
         if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):

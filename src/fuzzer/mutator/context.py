@@ -17,6 +17,11 @@ class ScopeType(Enum):
     FOR = auto()
 
 
+class AccessMode(Enum):
+    READ = auto()
+    WRITE = auto()
+
+
 class ExprMutability(Enum):
     CONST = auto()  # compile-time constants only (const exprs)
     PURE = auto()  # no state reads/writes
@@ -48,6 +53,7 @@ class Context:
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
     current_mutability: ExprMutability = ExprMutability.STATEFUL
     current_function_mutability: StateMutability = StateMutability.NONPAYABLE
+    current_access_mode: AccessMode = AccessMode.READ
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
@@ -100,16 +106,49 @@ class Context:
         finally:
             self.current_function_mutability = prev
 
+    @contextmanager
+    def access_mode(self, mode: AccessMode):
+        prev = self.current_access_mode
+        self.current_access_mode = mode
+        try:
+            yield
+        finally:
+            self.current_access_mode = prev
+
     def find_matching_vars(
         self, want_type: Optional[VyperType] = None
     ) -> list[tuple[str, VarInfo]]:
-        """Find variables compatible with want_type and current mutability context."""
-        const_only = self.current_mutability == ExprMutability.CONST
+        """Find variables compatible with want_type and current mutability/access context."""
         candidates = []
         for name, var_info in self.all_vars.items():
             if want_type is not None and not want_type.compare_type(var_info.typ):
                 continue
-            if const_only and var_info.modifiability != Modifiability.CONSTANT:
-                continue
+
+            # CONST: Only compile-time constants
+            if self.current_mutability == ExprMutability.CONST:
+                if var_info.modifiability != Modifiability.CONSTANT:
+                    continue
+
+            # PURE: Cannot access state variables
+            elif self.current_mutability == ExprMutability.PURE:
+                if var_info.is_state_variable():
+                    continue
+
+            # VIEW: Can read everything, cannot write storage/transient
+            elif self.current_mutability == ExprMutability.VIEW:
+                if self.current_access_mode == AccessMode.WRITE:
+                    if var_info.location in (
+                        DataLocation.STORAGE,
+                        DataLocation.TRANSIENT,
+                    ):
+                        continue
+
+            # STATEFUL: no filtering needed for mutability
+
+            # WRITE mode: can only write to MODIFIABLE variables
+            if self.current_access_mode == AccessMode.WRITE:
+                if var_info.modifiability != Modifiability.MODIFIABLE:
+                    continue
+
             candidates.append((name, var_info))
         return candidates
