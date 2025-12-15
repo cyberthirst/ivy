@@ -99,11 +99,11 @@ class LiteralGenerator(BaseValueGenerator):
     def _generate_decimal(self, _vyper_type: DecimalT) -> Decimal:
         return self.rng.choice(
             [
-                Decimal(0),
-                Decimal(1),
-                Decimal(-1),
-                Decimal(2),
-                Decimal(-2),
+                Decimal("0.0"),
+                Decimal("1.0"),
+                Decimal("-1.0"),
+                Decimal("2.0"),
+                Decimal("-2.0"),
                 Decimal("0.5"),
                 Decimal("-0.5"),
                 Decimal("1.5"),
