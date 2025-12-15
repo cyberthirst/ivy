@@ -21,8 +21,10 @@ class CandidateSelector:
         # Literals
         # ─────────────────────────────────────────────
         ast.Int: 0.15,
-        ast.Decimal: 0.1,
-        ast.Hex: 0.1,
+        # TODO
+        ast.Decimal: 0.0,
+        # TODO
+        ast.Hex: 0.0,
         # ─────────────────────────────────────────────
         # Operators
         # ─────────────────────────────────────────────
@@ -34,22 +36,27 @@ class CandidateSelector:
         # Control flow - safe, negate/swap branches
         # ─────────────────────────────────────────────
         ast.If: 0.25,
-        ast.IfExp: 0.2,
+        # TODO
+        ast.IfExp: 0.0,
         ast.For: 0.15,
-        ast.Assert: 0.15,
+        # TODO
+        ast.Assert: 0.0,
         # ─────────────────────────────────────────────
         # Assignments - safe with type-aware RHS swap
         # ─────────────────────────────────────────────
         ast.Assign: 0.25,
-        ast.AugAssign: 0.2,
-        ast.VariableDecl: 0.2,
+        # TODO
+        ast.AugAssign: 0.0,
+        # TODO
+        ast.VariableDecl: 0.0,
         # TODO
         ast.Return: 0.0,
         # ─────────────────────────────────────────────
         # Access patterns - moderate risk, keep lower
         # ─────────────────────────────────────────────
         ast.Subscript: 0.2,
-        ast.Attribute: 0.15,
+        # TODO
+        ast.Attribute: 0.0,
     }
 
     def __init__(self, rng: random.Random, prob_map: dict[Type, float] | None = None):
