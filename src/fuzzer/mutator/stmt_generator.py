@@ -403,8 +403,10 @@ class StatementGenerator:
         target_type = var_info.typ
         target_node: ast.VyperNode = base
 
-        # bias subscripting over assigning a whole new array
-        if (
+        # HashMapT must always be subscripted - can't assign directly
+        # For other subscriptable types, bias towards subscripting
+        is_hashmap = isinstance(var_info.typ, HashMapT)
+        if is_hashmap or (
             self.expr_generator.is_subscriptable_type(var_info.typ)
             and self.rng.random() < 0.7
         ):
@@ -417,6 +419,18 @@ class StatementGenerator:
             )
             target_node = cur_node
             target_type = cur_t
+
+            # Keep subscripting while we still have a HashMapT
+            while isinstance(target_type, HashMapT):
+                cur_node, cur_t = self.expr_generator.build_random_chain(
+                    target_node,
+                    target_type,
+                    context,
+                    depth=2,
+                    max_steps=1,
+                )
+                target_node = cur_node
+                target_type = cur_t
 
         value = self.expr_generator.generate(target_type, context, depth=3)
 
