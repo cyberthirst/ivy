@@ -195,7 +195,12 @@ class StrategyExecutor:
             if strat is None:
                 break
 
-            result = strat.run(**ctx)
+            try:
+                result = strat.run(**ctx)
+            except Exception:
+                pool.remove(strat)
+                continue
+
             if result is not None:
                 return result
 
