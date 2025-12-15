@@ -39,8 +39,6 @@ class StatementGenerator:
         self.type_generator = type_generator
         self.rng = rng
         self.name_generator = FreshNameGenerator()
-        # Collect source fragments from type generation
-        self.source_fragments = []
 
         self.max_depth = 5
         self.nest_decay = 0.7
@@ -170,16 +168,10 @@ class StatementGenerator:
                 var_info = self.rng.choice(valid_vars)
                 return var_info.typ
 
-        typ, fragments = self.type_generator.generate_type(
+        # Struct fragments are stored in type_generator.source_fragments
+        return self.type_generator.generate_type(
             nesting=nesting, skip=skip, size_budget=size_budget
         )
-
-        if fragments:
-            for fragment in fragments:
-                if fragment not in self.source_fragments:
-                    self.source_fragments.append(fragment)
-
-        return typ
 
     def _generate_varinfo(self, context: Context) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.

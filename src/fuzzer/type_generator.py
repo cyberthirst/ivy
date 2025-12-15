@@ -1,5 +1,5 @@
 import random
-from typing import List, Tuple, Optional, Set, Callable, Dict
+from typing import List, Optional, Set, Callable, Dict
 
 from vyper.semantics.types import (
     VyperType,
@@ -23,6 +23,7 @@ class TypeGenerator:
     def __init__(self, rng: Optional[random.Random] = None):
         self.rng = rng or random.Random()
         self.struct_counter = 0
+        self.source_fragments: List[str] = []
 
         # Type categories
         self.leaf_types = [BoolT, AddressT, IntegerT, BytesM_T, BytesT, StringT]
@@ -47,24 +48,23 @@ class TypeGenerator:
         self,
         nesting: int = 3,
         skip: Optional[Set[type]] = None,
-        source_fragments: Optional[List[str]] = None,
         size_budget: Optional[int] = None,
-    ) -> Tuple[VyperType, List[str]]:
-        """Generate a random Vyper type and associated source fragments.
+    ) -> VyperType:
+        """Generate a random Vyper type.
+
+        Struct definitions are accumulated in self.source_fragments.
 
         Args:
             nesting: Maximum nesting depth for complex types
             skip: Types to exclude from generation
-            source_fragments: List to append struct definitions to
+            size_budget: Optional memory budget constraint
 
         Returns:
-            Tuple of (generated_type, source_fragments)
+            Generated VyperType
         """
         assert nesting >= 0
 
         skip = skip or set()
-        if source_fragments is None:
-            source_fragments = []
 
         # Choose type category based on nesting
         if nesting == 0:
@@ -81,9 +81,7 @@ class TypeGenerator:
 
         # Generate the type using the appropriate generator
         generator = self.type_generators[type_ctor]
-        generated_type = generator(nesting, skip, source_fragments, size_budget)
-
-        return generated_type, source_fragments
+        return generator(nesting, skip, size_budget)
 
     # ---------- helpers for budgeted sizing ----------
     def _shrink_length_to_fit(self, initial_len: int, make_type, budget: int) -> int:
@@ -108,23 +106,18 @@ class TypeGenerator:
         n: int,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         size_budget: Optional[int],
     ) -> List[VyperType]:
         elements: List[VyperType] = []
         if size_budget is None:
             for _ in range(n):
-                elem_t, _ = self.generate_type(
-                    nesting - 1, skip, fragments, size_budget=None
-                )
+                elem_t = self.generate_type(nesting - 1, skip, size_budget=None)
                 elements.append(elem_t)
             return elements
 
         remaining = size_budget
         for _ in range(n):
-            elem_t, _ = self.generate_type(
-                nesting - 1, skip, fragments, size_budget=remaining
-            )
+            elem_t = self.generate_type(nesting - 1, skip, size_budget=remaining)
             elements.append(elem_t)
             used = elem_t.memory_bytes_required
             remaining = max(0, remaining - used)
@@ -132,27 +125,24 @@ class TypeGenerator:
 
     def _generate_bool(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
         _size_budget: Optional[int],
     ) -> BoolT:
         return BoolT()
 
     def _generate_address(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
         _size_budget: Optional[int],
     ) -> AddressT:
         return AddressT()
 
     def _generate_integer(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
         _size_budget: Optional[int],
     ) -> IntegerT:
         signed = self.rng.choice([True, False])
@@ -161,19 +151,17 @@ class TypeGenerator:
 
     def _generate_bytes_m(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
-        size_budget: Optional[int],
+        _size_budget: Optional[int],
     ) -> BytesM_T:
         m = self.rng.randint(1, 32)
         return BytesM_T(m)
 
     def _generate_bytes(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
         size_budget: Optional[int],
     ) -> BytesT:
         max_length = self.rng.randint(1, 1024)
@@ -185,9 +173,8 @@ class TypeGenerator:
 
     def _generate_string(
         self,
-        _: int,
+        _nesting: int,
         _skip: Set[type],
-        _fragments: List[str],
         size_budget: Optional[int],
     ) -> StringT:
         max_length = self.rng.randint(1, 1024)
@@ -201,14 +188,11 @@ class TypeGenerator:
         self,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         size_budget: Optional[int],
     ) -> SArrayT:
         # Skip types that can't be in arrays
         element_skip = skip | {TupleT, BytesT, StringT, HashMapT}
-        element_type, _ = self.generate_type(
-            nesting - 1, element_skip, fragments, size_budget=size_budget
-        )
+        element_type = self.generate_type(nesting - 1, element_skip, size_budget)
         length = self.rng.randint(1, 6)
         if size_budget is not None:
             elem_size = max(1, element_type.memory_bytes_required)
@@ -220,14 +204,11 @@ class TypeGenerator:
         self,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         size_budget: Optional[int],
     ) -> DArrayT:
         # Dynamic arrays can't contain tuples or hashmaps
         element_skip = skip | {TupleT, HashMapT}
-        element_type, _ = self.generate_type(
-            nesting - 1, element_skip, fragments, size_budget=size_budget
-        )
+        element_type = self.generate_type(nesting - 1, element_skip, size_budget)
         max_length = self.rng.randint(1, 16)
         if size_budget is not None:
             elem_size = max(1, element_type.memory_bytes_required)
@@ -239,7 +220,6 @@ class TypeGenerator:
         self,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         _size_budget: Optional[int],
     ) -> HashMapT:
         # Key must be a hashable type (leaf types only)
@@ -253,19 +233,16 @@ class TypeGenerator:
 
         key_ctor = self.rng.choice(key_available)
         key_generator = self.type_generators[key_ctor]
-        key_type = key_generator(0, skip, fragments, None)  # Keys are always leaf types
+        key_type = key_generator(0, skip, None)  # Keys are always leaf types
 
         # Value can be any type
-        value_type, _ = self.generate_type(
-            nesting - 1, skip, fragments, size_budget=None
-        )
+        value_type = self.generate_type(nesting - 1, skip, size_budget=None)
         return HashMapT(key_type, value_type)
 
     def _generate_tuple(
         self,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         size_budget: Optional[int],
     ) -> TupleT:
         # Tuples must have at least 1 element
@@ -273,7 +250,7 @@ class TypeGenerator:
         element_skip = skip | {HashMapT}  # Tuples can't contain hashmaps
 
         elements = self._generate_elements_with_budget(
-            n_elements, nesting, element_skip, fragments, size_budget
+            n_elements, nesting, element_skip, size_budget
         )
 
         return TupleT(elements)
@@ -282,7 +259,6 @@ class TypeGenerator:
         self,
         nesting: int,
         skip: Set[type],
-        fragments: List[str],
         size_budget: Optional[int],
     ) -> StructT:
         n_fields = self.rng.randint(1, 6)
@@ -290,7 +266,7 @@ class TypeGenerator:
 
         fields = {}
         element_types = self._generate_elements_with_budget(
-            n_fields, nesting, field_skip, fragments, size_budget
+            n_fields, nesting, field_skip, size_budget
         )
         for i, field_type in enumerate(element_types):
             field_name = f"x{i}"
@@ -303,21 +279,23 @@ class TypeGenerator:
         # Create struct type
         struct_type = StructT(struct_name, fields)
 
-        # Use the struct's built-in method for source generation
-        # Based on vyper codebase, StructT should have def_source_str()
+        # Generate source fragment and store internally
         if hasattr(struct_type, "def_source_str"):
-            fragments.append(struct_type.def_source_str())
+            fragment = struct_type.def_source_str()
         else:
             # Fallback if the method doesn't exist
             struct_def_lines = [f"struct {struct_name}:"]
             for field_name, field_type in fields.items():
                 struct_def_lines.append(f"    {field_name}: {field_type}")
-            fragments.append("\n".join(struct_def_lines))
+            fragment = "\n".join(struct_def_lines)
+
+        if fragment not in self.source_fragments:
+            self.source_fragments.append(fragment)
 
         return struct_type
 
-    def generate_simple_type(self) -> Tuple[VyperType, List[str]]:
+    def generate_simple_type(self) -> VyperType:
         return self.generate_type(nesting=0)
 
     def generate_integer_type(self) -> IntegerT:
-        return self._generate_integer(0, set(), [], None)
+        return self._generate_integer(0, set(), None)

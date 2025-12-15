@@ -177,7 +177,7 @@ class AstMutator(VyperNodeTransformer):
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
         self.name_generator.counter = 0
         self.type_generator.struct_counter = 0
-        self.stmt_generator.source_fragments = []
+        self.type_generator.source_fragments = []
         self.stmt_generator.name_generator.counter = 0
         self.function_registry.reset()
 
@@ -452,8 +452,8 @@ class AstMutator(VyperNodeTransformer):
             parts = []
 
             # Add all source fragments (struct declarations, etc.)
-            if self.stmt_generator.source_fragments:
-                parts.append("\n\n".join(self.stmt_generator.source_fragments))
+            if self.type_generator.source_fragments:
+                parts.append("\n\n".join(self.type_generator.source_fragments))
 
             parts.append(result)
 

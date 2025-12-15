@@ -264,11 +264,11 @@ class FunctionRegistry:
         name = self.name_generator.generate()
         self.generated_count += 1
 
-        # Generate arguments
+        # Generate arguments (struct fragments are stored in type_generator)
         num_args = self.rng.randint(0, max_args)
         positional_args = []
         for i in range(num_args):
-            arg_type, _ = type_generator.generate_type(skip={HashMapT}, nesting=1)
+            arg_type = type_generator.generate_type(skip={HashMapT}, nesting=1)
             arg_name = f"arg{i}"
             positional_args.append(PositionalArg(arg_name, arg_type))
 
