@@ -311,8 +311,9 @@ class AstMutator(VyperNodeTransformer):
                 else:
                     node = self._try_mutate(node)
 
-            # Let the base class handle visiting children
-            node = super().generic_visit(node)
+                # Visit children within mutability context so body mutations
+                # respect @pure/@view constraints
+                node = super().generic_visit(node)
 
         self.function_registry.set_current_function(None)
 
@@ -329,7 +330,14 @@ class AstMutator(VyperNodeTransformer):
     def visit_If(self, node: ast.If):
         node.test = self.visit(node.test)
         node = self._try_mutate(node)
-        return super().generic_visit(node)
+
+        # Vyper has block scoping - vars declared in if/else are not visible outside
+        with self.context.new_scope(ScopeType.IF):
+            node.body = [self.visit(stmt) for stmt in node.body]
+        with self.context.new_scope(ScopeType.IF):
+            node.orelse = [self.visit(stmt) for stmt in node.orelse]
+
+        return node
 
     def visit_Return(self, node: ast.Return):
         # TODO: mutate return value (e.g. replace with var/generated expr of same type)
