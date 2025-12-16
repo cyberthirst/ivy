@@ -438,7 +438,9 @@ class ExprGenerator:
         For TupleT, any element matching target_type is acceptable.
         """
         candidates: list[tuple[str, VyperType]] = []
-        for name, var_info in context.all_vars.items():
+        # Use find_matching_vars to respect mutability constraints
+        allowed_vars = dict(context.find_matching_vars(None))
+        for name, var_info in allowed_vars.items():
             var_t = var_info.typ
             # HashMap[key->value]
             # TODO nested hash maps
@@ -466,7 +468,9 @@ class ExprGenerator:
         self, target_type: VyperType, context: Context, max_steps: int
     ) -> list[tuple[str, VyperType]]:
         result: list[tuple[str, VyperType]] = []
-        for name, var_info in context.all_vars.items():
+        # Use find_matching_vars to respect mutability constraints
+        allowed_vars = dict(context.find_matching_vars(None))
+        for name, var_info in allowed_vars.items():
             t = var_info.typ
             if not self.is_subscriptable_type(t):
                 continue
