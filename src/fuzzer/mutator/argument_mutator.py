@@ -67,9 +67,7 @@ class ArgumentMutator:
         for i, (arg_type, arg_value) in enumerate(zip(arg_types, args)):
             if i < len(mutated_args) and self.rng.random() < mutation_prob:
                 if self.rng.random() < 0.2:
-                    mutated_args[i] = self.value_mutator.mutate_value(
-                        arg_value, arg_type
-                    )
+                    mutated_args[i] = self.value_mutator.mutate(arg_value, arg_type)
 
         return mutated_args
 
