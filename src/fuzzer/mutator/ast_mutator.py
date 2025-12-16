@@ -295,15 +295,13 @@ class AstMutator(VyperNodeTransformer):
                 self.context.function_mutability(func_state_mut),
             ):
                 for arg in func_type.arguments:
-                    if func_type.is_external:
-                        location = DataLocation.CALLDATA
-                        modifiability = Modifiability.RUNTIME_CONSTANT
-                    else:
-                        assert func_type.is_internal, (
-                            f"Expected internal function, got {func_type}"
-                        )
+                    if func_type.is_internal:
                         location = DataLocation.MEMORY
                         modifiability = Modifiability.MODIFIABLE
+                    else:
+                        # Both external and deploy functions have immutable args
+                        location = DataLocation.CALLDATA
+                        modifiability = Modifiability.RUNTIME_CONSTANT
 
                     var_info = VarInfo(
                         typ=arg.typ,
