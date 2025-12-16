@@ -380,10 +380,17 @@ class Unparser(VyperNodeVisitorBase):
 
     def visit_Attribute(self, node):
         value = self._expr(node.value)
+        # staticcall/extcall must be parenthesized before attribute access
+        # e.g. (staticcall IFoo(addr).bar()).field, not staticcall IFoo(addr).bar().field
+        if isinstance(node.value, (ast.StaticCall, ast.ExtCall)):
+            value = f"({value})"
         return f"{value}.{node.attr}"
 
     def visit_Subscript(self, node):
         value = self._expr(node.value)
+        # staticcall/extcall must be parenthesized before subscript access
+        if isinstance(node.value, (ast.StaticCall, ast.ExtCall)):
+            value = f"({value})"
         slice_expr = self._expr(node.slice)
         return f"{value}[{slice_expr}]"
 
