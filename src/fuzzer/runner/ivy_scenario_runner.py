@@ -69,7 +69,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
         addr = Address(address)
         return self.env.get_balance(addr)
 
-    def _message_call(
+    def _raw_call(
         self,
         to_address: str,
         data: bytes,

@@ -193,7 +193,7 @@ class BaseScenarioRunner(ABC):
         pass
 
     @abstractmethod
-    def _message_call(
+    def _raw_call(
         self,
         to_address: str,
         data: bytes,
@@ -420,7 +420,7 @@ class BaseScenarioRunner(ABC):
                 else:
                     calldata_bytes = b""
 
-                result = self._message_call(
+                result = self._raw_call(
                     to_address=to_address,
                     data=calldata_bytes,
                     value=trace.call_args.get("value", 0),

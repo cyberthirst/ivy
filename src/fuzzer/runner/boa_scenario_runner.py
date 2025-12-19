@@ -70,17 +70,20 @@ class BoaScenarioRunner(BaseScenarioRunner):
     def _get_balance(self, address: str) -> int:
         return self.env.get_balance(address)
 
-    def _message_call(
+    def _raw_call(
         self,
         to_address: str,
         data: bytes,
         value: int = 0,
         sender: Optional[str] = None,
     ) -> bytes:
-        raise NotImplementedError("TODO does boa support this")
+        sender = self._get_sender(sender)
+        with self.env.prank(sender):
+            computation = self.env.raw_call(to_address, value=value, data=data)
+            return computation.output
 
     def _clear_transient_storage(self) -> None:
-        raise NotImplementedError("TODO does boa support this")
+        self.env.clear_transient_storage()
 
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
         return contract._storage.dump()
@@ -88,8 +91,8 @@ class BoaScenarioRunner(BaseScenarioRunner):
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
         if trace_env is None:
             return
-        self.env.vm.patch.block_number = trace_env.block.number
-        self.env.vm.patch.timestamp = trace_env.block.timestamp
+        self.env.evm.patch.block_number = trace_env.block.number
+        self.env.evm.patch.timestamp = trace_env.block.timestamp
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         with self.env.anchor():
