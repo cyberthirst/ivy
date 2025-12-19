@@ -87,11 +87,12 @@ class Allocator:
         imports = [node for node in vyper_module.body if isinstance(node, import_nodes)]
 
         for node in imports:
-            import_info = node._metadata["import_info"]
-            # could be an interface
-            if isinstance(import_info.typ, ModuleInfo):
-                typ = import_info.typ.module_t
-                self._allocate_constants_r(typ.decl_node, visited)
+            import_infos = node._metadata["import_infos"]
+            for import_info in import_infos:
+                # could be an interface
+                if isinstance(import_info.typ, ModuleInfo):
+                    typ = import_info.typ.module_t
+                    self._allocate_constants_r(typ.decl_node, visited)
 
     def allocate_addresses(self, module_t: ModuleT):
         nonreentrant = self.allocate_nonreentrant_key()
