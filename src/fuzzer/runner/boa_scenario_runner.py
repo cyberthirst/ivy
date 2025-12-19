@@ -8,6 +8,7 @@ import boa
 
 from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from .scenario import Scenario
+from ..trace_types import Env
 
 
 class BoaScenarioRunner(BaseScenarioRunner):
@@ -83,6 +84,12 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
         return contract._storage.dump()
+
+    def _set_block_env(self, trace_env: Optional[Env]) -> None:
+        if trace_env is None:
+            return
+        self.env.vm.patch.block_number = trace_env.block.number
+        self.env.vm.patch.timestamp = trace_env.block.timestamp
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         with self.env.anchor():

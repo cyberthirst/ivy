@@ -10,6 +10,7 @@ from ivy.types import Address
 
 from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from .scenario import Scenario
+from ..trace_types import Env
 
 
 class IvyScenarioRunner(BaseScenarioRunner):
@@ -89,6 +90,12 @@ class IvyScenarioRunner(BaseScenarioRunner):
 
     def _get_storage_dump(self, contract: Any) -> Dict[str, Any]:
         return contract.storage_dump()
+
+    def _set_block_env(self, trace_env: Optional[Env]) -> None:
+        if trace_env is None:
+            return
+        self.env.block_number = trace_env.block.number
+        self.env.timestamp = trace_env.block.timestamp
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         with self.env.anchor():

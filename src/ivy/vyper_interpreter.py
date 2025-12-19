@@ -44,13 +44,13 @@ from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Log
+from ivy.evm.evm_structures import Log, Environment
 from ivy.exceptions import Revert
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
-    def __init__(self):
-        self.evm = EVMCore(callbacks=self)
+    def __init__(self, env: Environment):
+        self.evm = EVMCore(callbacks=self, env=env)
         self.state: StateAccess = self.evm.state
         self.builtins = BuiltinRegistry(self.evm, self.state)
 

@@ -16,6 +16,7 @@ from ..trace_types import (
     CallTrace,
     SetBalanceTrace,
     ClearTransientStorageTrace,
+    Env,
 )
 from vyper.exceptions import VyperException, VyperInternalException, ParserException
 from ..xfail import XFailExpectation
@@ -222,6 +223,11 @@ class BaseScenarioRunner(ABC):
         """Get storage dump from a contract. Must be implemented by subclasses."""
         pass
 
+    @abstractmethod
+    def _set_block_env(self, trace_env: Optional[Env]) -> None:
+        """Set block environment values from trace. Must be implemented by subclasses."""
+        pass
+
     def _get_sender(self, sender: Optional[str]) -> str:
         """Get the sender address, defaulting to env.eoa if not provided."""
         if sender:
@@ -310,6 +316,7 @@ class BaseScenarioRunner(ABC):
         use_python_args: bool = False,
     ) -> DeploymentResult:
         """Execute a deployment trace."""
+        self._set_block_env(trace.env)
         try:
             # Use mutated source if provided
             source_to_deploy = (
@@ -385,6 +392,7 @@ class BaseScenarioRunner(ABC):
         use_python_args: bool = False,
     ) -> CallResult:
         """Execute a call trace."""
+        self._set_block_env(trace.env)
         try:
             # Get the target address from call_args
             to_address: str = trace.call_args.get("to", "")

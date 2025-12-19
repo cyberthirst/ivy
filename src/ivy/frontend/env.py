@@ -8,7 +8,7 @@ from vyper import ast as vy_ast
 from ivy.vyper_interpreter import VyperInterpreter
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Account
+from ivy.evm.evm_structures import Account, Environment
 from ivy.context import ExecutionOutput
 
 # make mypy happy
@@ -26,7 +26,17 @@ class Env:
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.interpreter = VyperInterpreter()
+        self._env = Environment(
+            caller=Address(b""),  # set per-call
+            block_hashes=[],
+            origin=Address(b""),  # set per-call
+            coinbase=Address(b""),
+            block_number=1,
+            time=1750080732,
+            prev_randao=b"",
+            chain_id=0,
+        )
+        self.interpreter = VyperInterpreter(env=self._env)
         self.state: StateAccess = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
@@ -35,7 +45,7 @@ class Env:
 
     def clear_state(self):
         # TODO should we just clear the EVM state instead of instantiating the itp?
-        self.interpreter = VyperInterpreter()
+        self.interpreter = VyperInterpreter(env=self._env)
         self.state = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
@@ -153,11 +163,19 @@ class Env:
 
     @property
     def timestamp(self):
-        return self.state.env.time
+        return self._env.time
+
+    @timestamp.setter
+    def timestamp(self, value: int):
+        self._env.time = value
 
     @property
     def block_number(self):
-        return self.state.env.block_number
+        return self._env.block_number
+
+    @block_number.setter
+    def block_number(self, value: int):
+        self._env.block_number = value
 
     def deploy(
         self,

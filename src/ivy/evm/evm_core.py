@@ -19,9 +19,10 @@ from ivy.evm.precompiles import PRECOMPILE_REGISTRY
 
 
 class EVMCore:
-    def __init__(self, callbacks: EVMCallbacks):
+    def __init__(self, callbacks: EVMCallbacks, env: Environment):
         # TODO use state accessor facade
         self._state = EVMState()
+        self._state._env = env
         self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
@@ -50,6 +51,7 @@ class EVMCore:
             assert isinstance(to, Address)
             code = self.state.get_code(to)
 
+        # TODO should we inc if this is deployment tx?
         self.state.increment_nonce(sender)
 
         message = Message(
@@ -64,16 +66,9 @@ class EVMCore:
             is_static=is_static,
         )
 
-        self.state.env = Environment(
-            caller=sender,
-            block_hashes=[],
-            origin=sender,
-            coinbase=sender,
-            block_number=1,
-            time=1750080732,
-            prev_randao=b"",
-            chain_id=0,
-        )
+        # Update per-call fields on existing env
+        self.state.env.caller = sender
+        self.state.env.origin = sender
 
         assert not self.journal.is_active
 
@@ -114,18 +109,9 @@ class EVMCore:
 
         code = self.state.get_code(to)
 
-        # Set up environment if not already set (first call in test)
-        if self.state.env is None:
-            self.state.env = Environment(
-                caller=sender,
-                block_hashes=[],
-                origin=sender,  # For message calls, origin is the sender
-                coinbase=sender,
-                block_number=1,
-                time=1750080732,
-                prev_randao=b"",
-                chain_id=0,
-            )
+        # Update per-call fields on existing env
+        self.state.env.caller = sender
+        self.state.env.origin = sender
 
         self.journal.begin_call(is_static=False)
 
