@@ -57,6 +57,10 @@ class IvyScenarioRunner(BaseScenarioRunner):
     ) -> Any:
         sender = self._get_sender(sender)
         with self.env.prank(sender):
+            self.env.set_balance(
+                self.env.eoa,
+                self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
+            )
             method = getattr(contract, method_name)
             result = method(*args, **kwargs)
             return result
