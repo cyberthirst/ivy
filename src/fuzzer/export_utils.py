@@ -229,7 +229,7 @@ def apply_unsupported_exclusions(test_filter: TestFilter) -> TestFilter:
         .exclude_name("test_ec")
         .exclude_name("test_blobhash")
         # not yet supported by the compiler version we use
-        .exclude_path("test_flag_pure_functions")
+        # .exclude_path("test_flag_pure_functions")
     )
 
 
