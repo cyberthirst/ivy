@@ -71,9 +71,6 @@ class FuzzerReporter:
     # Xfail validation statistics
     xfail_violations: int = 0  # Count of xfail expectation violations
 
-    # Per-item statistics
-    item_stats: Dict[str, Dict[str, int]] = field(default_factory=dict)
-
     # Timing statistics
     start_time: Optional[float] = None
     end_time: Optional[float] = None
@@ -151,28 +148,6 @@ class FuzzerReporter:
         for trace_idx, call_result in result.get_call_results():
             self.record_call(call_result.success)
 
-    def record_item_stats(self, item_name: str, stat_type: str):
-        """Record statistics for a specific test item."""
-        if item_name not in self.item_stats:
-            self.item_stats[item_name] = {
-                "scenarios": 0,
-                "divergences": 0,
-                "deployments": 0,
-                "calls": 0,
-                "failures": 0,
-            }
-
-        if stat_type == "scenario":
-            self.item_stats[item_name]["scenarios"] += 1
-        elif stat_type == "divergence":
-            self.item_stats[item_name]["divergences"] += 1
-        elif stat_type == "deployment":
-            self.item_stats[item_name]["deployments"] += 1
-        elif stat_type == "call":
-            self.item_stats[item_name]["calls"] += 1
-        elif stat_type == "failure":
-            self.item_stats[item_name]["failures"] += 1
-
     def report(self, analysis: AnalysisResult, debug_mode: bool = False):
         """
         Report results from an AnalysisResult.
@@ -187,7 +162,6 @@ class FuzzerReporter:
 
         # Update scenario stats
         self.total_scenarios += 1
-        self.record_item_stats(item_name, "scenario")
 
         # Update stats from analysis
         self.successful_deployments += analysis.successful_deployments
@@ -238,7 +212,6 @@ class FuzzerReporter:
         # Report divergences
         for divergence, decision in analysis.divergences:
             self.divergences += 1
-            self.record_item_stats(item_name, "divergence")
 
             status = "new" if decision.keep else "dup"
             if divergence.type == DivergenceType.DEPLOYMENT:
@@ -317,27 +290,6 @@ class FuzzerReporter:
         print(f"  Deployment success rate: {self.get_deployment_success_rate():.2f}%")
         print(f"  Call success rate: {self.get_call_success_rate():.2f}%")
 
-        # Print per-item statistics if we have any
-        if self.item_stats:
-            print("\nPer-Item Statistics:")
-            print(
-                f"{'Item Name':<50} {'Scenarios':>10} {'Divergences':>12} {'Div Rate':>10}"
-            )
-            print("-" * 85)
-
-            for item_name, stats in sorted(self.item_stats.items()):
-                div_rate = 0.0
-                if stats["scenarios"] > 0:
-                    div_rate = (stats["divergences"] / stats["scenarios"]) * 100
-
-                # Truncate long names
-                display_name = (
-                    item_name if len(item_name) <= 50 else item_name[:47] + "..."
-                )
-                print(
-                    f"{display_name:<50} {stats['scenarios']:>10} {stats['divergences']:>12} {div_rate:>9.1f}%"
-                )
-
         print("=" * 60 + "\n")
 
     def _format_duration(self, seconds: float) -> str:
@@ -363,7 +315,6 @@ class FuzzerReporter:
             "divergences": self.divergences,
             "deployment_success_rate": self.get_deployment_success_rate(),
             "call_success_rate": self.get_call_success_rate(),
-            "item_stats": self.item_stats,
             "elapsed_time_seconds": self.get_elapsed_time(),
             "scenarios_per_second": self.get_scenarios_per_second(),
         }

@@ -63,9 +63,6 @@ class BaseFuzzer:
         self.issue_filter = issue_filter
         self.result_analyzer = ResultAnalyzer(self.deduper, issue_filter)
 
-        # Cache for CompilerData objects
-        self._compiler_data_cache: Dict[int, CompilerData] = {}
-
         # Mutation probabilities
         self.call_drop_prob = 0.1
         self.call_mutate_args_prob = 0.3
@@ -93,22 +90,15 @@ class BaseFuzzer:
         return exports
 
     def get_compiler_data(self, trace: DeploymentTrace) -> Optional[CompilerData]:
-        """Get CompilerData for a deployment trace, using cache if available."""
+        """Get CompilerData for a deployment trace."""
         if not trace.solc_json:
             return None
 
-        cache_key = id(trace.solc_json)
-
-        if cache_key in self._compiler_data_cache:
-            return self._compiler_data_cache[cache_key]
-
         try:
-            compiler_data = typing.cast(
+            return typing.cast(
                 CompilerData,
                 loads_from_solc_json(trace.solc_json, get_compiler_data=True),
             )
-            self._compiler_data_cache[cache_key] = compiler_data
-            return compiler_data
         except CompilerPanic as e:
             logging.error(f"Compiler panic: {e}")
             self.reporter.record_compiler_crash()
