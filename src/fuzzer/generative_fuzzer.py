@@ -184,6 +184,10 @@ class GenerativeFuzzer(BaseFuzzer):
 
 def main():
     """Run generative fuzzing."""
+    import boa
+
+    boa.interpret.disable_cache()
+
     test_filter = TestFilter(exclude_multi_module=True)
     apply_unsupported_exclusions(test_filter)
     test_filter.include_path("functional/builtins/codegen/")
