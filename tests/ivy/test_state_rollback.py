@@ -8,33 +8,32 @@ from tests.conftest import get_contract
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback(reverts, get_contract):
-    src = f"""
+    src = """
 c: public(uint256)
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c = 10
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> bool:
+def foo(fail: bool) -> bool:
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s
     """
 
     c = get_contract(src)
-    success = c.foo()
+    success = c.foo(reverts)
     assert success == (not reverts)
     assert c.c() == (10 if success else 0)
 
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback2(reverts, get_contract):
-    src = f"""
+    src = """
 c: public(uint256)
 
 @external
@@ -43,31 +42,30 @@ def foobar(u: uint256) -> uint256:
     return 66
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     b: Bytes[32] = b""
     s: bool = False
     s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> bool:
+def foo(fail: bool) -> bool:
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s
     """
 
     c = get_contract(src)
-    success = c.foo()
+    success = c.foo(reverts)
     assert success == (not reverts)
     assert c.c() == (10 if success else 0)
 
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback3(reverts, get_contract):
-    src = f"""
+    src = """
 c: public(uint256)
 
 @external
@@ -76,111 +74,107 @@ def foobar(u: uint256) -> uint256:
     return 66
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c = 20
     b: Bytes[32] = b""
     s: bool = False
     s, b = raw_call(self, abi_encode(self.c, method_id=method_id("foobar(uint256)")), max_outsize=32, revert_on_failure=False)
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> bool:
+def foo(fail: bool) -> bool:
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s
     """
 
     c = get_contract(src)
-    success = c.foo()
+    success = c.foo(reverts)
     assert success == (not reverts)
     assert c.c() == (10 if success else 20)
 
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback4(get_contract, reverts):
-    src = f"""
+    src = """
 c: public(DynArray[uint256, 10])
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c[0] = 2
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> bool:
+def foo(fail: bool) -> bool:
     self.c = [1]
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s
     """
 
     c = get_contract(src)
-    success = c.foo()
+    success = c.foo(reverts)
     assert success == (not reverts)
     assert c.c(0) == (2 if success else 1)
 
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback5(get_contract, reverts):
-    src = f"""
+    src = """
 struct C:
-    a: uint256 
+    a: uint256
 
 c: public(C)
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c.a = 2
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> (bool, uint256):
+def foo(fail: bool) -> (bool, uint256):
     self.c.a = 1
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s, self.c.a
     """
 
     c = get_contract(src)
-    success, c_a = c.foo()
+    success, c_a = c.foo(reverts)
     assert success == (not reverts)
     assert c_a == 2 if success else 1
 
 
 @pytest.mark.parametrize("reverts", [True, False])
 def test_storage_rollback6(get_contract, reverts):
-    src = f"""
+    src = """
 struct C:
-    a: uint256[10] 
+    a: uint256[10]
 
 c: public(C)
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c.a[0] = 2
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> (bool, C):
+def foo(fail: bool) -> (bool, C):
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s, self.c
     """
 
     c = get_contract(src)
-    success, res = c.foo()
+    success, res = c.foo(reverts)
     assert success == (not reverts)
     expected = [2] + [0 for _ in range(9)] if success else [0 for _ in range(10)]
     expected = (expected,)
@@ -188,32 +182,32 @@ def foo() -> (bool, C):
 
 
 def test_storage_rollback7(get_contract):
-    src = f"""
+    src = """
 struct C:
-    a: uint256[10] 
+    a: uint256[10]
 
 c: public(C)
 
 interface Foobar:
-    def foobar(): payable
-
-@external 
-def foobar():
-    self.c.a[0] = 11
-    assert False
+    def foobar(fail: bool): payable
 
 @external
-def bar(u: uint256) -> uint256:
+def foobar(fail: bool):
+    self.c.a[0] = 11
+    assert fail == False
+
+@external
+def bar(fail: bool) -> uint256:
     self.c.a[0] = 2
-    extcall Foobar(self).foobar() 
+    extcall Foobar(self).foobar(fail)
     return 66
 
 @external
 def foo() -> uint256:
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    fail: bool = True
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return self.c.a[0]
     """
 
@@ -227,28 +221,27 @@ def test_storage_rollback8(get_contract, reverts):
     success_array = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     src = f"""
 struct C:
-    a: uint256[10] 
+    a: uint256[10]
 
 c: public(C)
 
 @external
-def bar(u: uint256) -> uint256:
+def bar(fail: bool) -> uint256:
     self.c.a[0] = 2
     self.c.a = {success_array}
-    assert {reverts} == False
+    assert fail == False
     return 66
 
 @external
-def foo() -> (bool, C):
+def foo(fail: bool) -> (bool, C):
     b: Bytes[32] = b""
     s: bool = False
-    u: uint256 = 0
-    s, b = raw_call(self, abi_encode(u, method_id=method_id("bar(uint256)")), max_outsize=32, revert_on_failure=False)
+    s, b = raw_call(self, abi_encode(fail, method_id=method_id("bar(bool)")), max_outsize=32, revert_on_failure=False)
     return s, self.c
     """
 
     c = get_contract(src)
-    success, res = c.foo()
+    success, res = c.foo(reverts)
     assert success == (not reverts)
     expected = success_array if success else [0 for _ in range(10)]
     expected = (expected,)
