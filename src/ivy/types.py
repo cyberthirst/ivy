@@ -335,23 +335,28 @@ class DynamicArray(_Sequence[T]):
     def __len__(self) -> int:
         return self.length
 
-    def append(self, value: T):
+    def _journal_length(self, loc: Optional[DataLocation] = None):
+        if not (loc and Journal().journalable_loc(loc)):
+            return
+        Journal().record(JournalEntryType.ARRAY_LENGTH, self, None, self.length)
+
+    def append(self, value: T, loc: Optional[DataLocation] = None):
         if len(self) >= self.capacity:
             raise ValueError(f"Cannot exceed maximum length {self.capacity}")
 
-        # TODO journal the length change
-
+        self._journal_length(loc)
         idx = self.length
+        self._journal(idx, loc)
         self._values[idx] = value
         self.length += 1
 
-    def pop(self) -> T:
+    def pop(self, loc: Optional[DataLocation] = None) -> T:
         if not self.length:
             raise IndexError("pop from empty array")
 
-        # TODO journal the length change
-
+        self._journal_length(loc)
         idx = self.length - 1
+        self._journal(idx, loc)
         self.length -= 1
 
         value = self._values.pop(idx)

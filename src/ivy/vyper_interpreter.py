@@ -507,16 +507,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             if func_t.name == "__at__":
                 assert len(args) == 1
                 return args[0]
-            # the function is an attribute of the array
             darray = self.visit(call.func.value)  # type: ignore[attr-defined]
             assert isinstance(darray, DynamicArray)
+            loc = call.func.value._expr_info.location  # type: ignore[attr-defined]
             if func_t.name == "append":
                 assert len(args) == 1
-                darray.append(args[0])
+                darray.append(args[0], loc)
                 return None
             else:
                 assert func_t.name == "pop" and len(args) == 0
-                return darray.pop()
+                return darray.pop(loc)
 
         assert isinstance(func_t, ContractFunctionT)
 

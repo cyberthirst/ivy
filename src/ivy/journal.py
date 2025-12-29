@@ -16,6 +16,7 @@ class JournalEntryType(Enum):
     NONCE = auto()
     CODE = auto()
     TRANSIENT_STORAGE = auto()
+    ARRAY_LENGTH = auto()
 
 
 class JournalEntry:
@@ -125,8 +126,12 @@ class Journal:
         frame = self._frame_stack.pop()
 
         # If this isn't the root frame, merge changes upward
+        # Only add entries that parent doesn't already have - this preserves
+        # the earliest old_value for proper rollback on nested calls
         if self._frame_stack:
-            self.current_frame.entries.update(frame.entries)
+            for key, entry in frame.entries.items():
+                if key not in self.current_frame.entries:
+                    self.current_frame.entries[key] = entry
 
     def _rollback(self) -> None:
         """Revert all changes in the current frame."""
@@ -142,7 +147,12 @@ class Journal:
         if entry.entry_type == JournalEntryType.BALANCE:
             entry.obj._balance = entry.old_value
         elif entry.entry_type == JournalEntryType.STORAGE:
-            entry.obj[entry.key] = entry.old_value
+            storage = getattr(entry.obj, "_values", entry.obj)
+            if entry.old_value is None:
+                # Key didn't exist before (e.g., from append), remove it
+                storage.pop(entry.key, None)
+            else:
+                storage[entry.key] = entry.old_value
         elif entry.entry_type == JournalEntryType.TRANSIENT_STORAGE:
             if entry.old_value is None:
                 # Key didn't exist before, remove it
@@ -158,6 +168,8 @@ class Journal:
                 del entry.obj[entry.key]
         elif entry.entry_type == JournalEntryType.ACCOUNT_DESTRUCTION:
             entry.obj[entry.key] = entry.old_value
+        elif entry.entry_type == JournalEntryType.ARRAY_LENGTH:
+            entry.obj.length = entry.old_value
         else:
             raise ValueError(f"Unknown journal entry type: {entry.entry_type}")
 

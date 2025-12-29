@@ -3332,3 +3332,281 @@ def call_get_sender(target: address) -> address:
 
     # msg.sender should be the caller contract
     assert caller.call_get_sender(callee) == caller.address
+
+
+def test_darray_append_rollback(get_contract):
+    src = """
+trace: DynArray[uint256, 3]
+
+@external
+def test(should_fail: bool):
+    self.trace.append(1)
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 3]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == []
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == []
+
+
+def test_darray_append_rollback2(get_contract):
+    src = """
+trace: DynArray[uint256, 3]
+
+@external
+def test(should_fail: bool):
+    self.trace.append(1)
+    self.trace.append(2)
+    self.trace.append(3)
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 3]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == []
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == []
+
+
+def test_darray_pop_rollback(get_contract):
+    src = """
+trace: DynArray[uint256, 3]
+
+@deploy
+def __init__():
+    self.trace = [1, 2, 3]
+
+@external
+def test(should_fail: bool):
+    self.trace.pop()
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 3]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == [1, 2, 3]
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == [1, 2, 3]
+
+
+def test_darray_pop_rollback2(get_contract):
+    src = """
+trace: DynArray[uint256, 3]
+
+@deploy
+def __init__():
+    self.trace = [1, 2, 3]
+
+@external
+def test(should_fail: bool):
+    self.trace.pop()
+    self.trace.pop()
+    self.trace.pop()
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 3]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == [1, 2, 3]
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == [1, 2, 3]
+
+
+def test_darray_mixed_rollback(get_contract):
+    src = """
+trace: DynArray[uint256, 5]
+
+@deploy
+def __init__():
+    self.trace = [1, 2]
+
+@external
+def test(should_fail: bool):
+    self.trace.append(3)
+    self.trace.pop()
+    self.trace.append(4)
+    self.trace.append(5)
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 5]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == [1, 2]
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == [1, 2]
+
+
+def test_darray_append_rollback_overflow(get_contract):
+    src = """
+x: uint256
+trace: DynArray[uint256, 3]
+
+@external
+def test():
+    for i: uint256 in [self.usesideeffect(), self.usesideeffect(), self.usesideeffect()]:
+        self.x += max_value(uint256)
+        self.trace.append(i)
+
+@view
+def usesideeffect() -> uint256:
+    return self.x
+
+@external
+def get_trace() -> DynArray[uint256, 3]:
+    return self.trace
+
+@external
+def get_x() -> uint256:
+    return self.x
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == []
+    assert c.get_x() == 0
+
+    with pytest.raises(ValueError):
+        c.test()
+
+    assert c.get_trace() == []
+    assert c.get_x() == 0
+
+
+def test_darray_nested_call_rollback(get_contract):
+    src = """
+interface Self:
+    def child_append(): nonpayable
+
+trace: DynArray[uint256, 10]
+
+@external
+def test(should_fail: bool):
+    self.trace.append(1)
+    extcall Self(self).child_append()
+    self.trace.append(4)
+    assert not should_fail
+
+@external
+def child_append():
+    self.trace.append(2)
+    self.trace.append(3)
+
+@external
+def get_trace() -> DynArray[uint256, 10]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == []
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == []
+
+
+def test_darray_nested_call_child_reverts(get_contract):
+    src = """
+interface Self:
+    def child_append(should_fail: bool): nonpayable
+
+trace: DynArray[uint256, 10]
+
+@external
+def test():
+    self.trace.append(1)
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(
+        self,
+        abi_encode(True, method_id=method_id("child_append(bool)")),
+        max_outsize=32,
+        revert_on_failure=False
+    )
+    self.trace.append(4)
+
+@external
+def child_append(should_fail: bool):
+    self.trace.append(2)
+    self.trace.append(3)
+    assert not should_fail
+
+@external
+def get_trace() -> DynArray[uint256, 10]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == []
+
+    c.test()
+
+    assert c.get_trace() == [1, 4]
+
+
+def test_darray_nested_call_pop_rollback(get_contract):
+    src = """
+interface Self:
+    def child_pop(): nonpayable
+
+trace: DynArray[uint256, 10]
+
+@deploy
+def __init__():
+    self.trace = [1, 2, 3, 4, 5]
+
+@external
+def test(should_fail: bool):
+    self.trace.pop()
+    extcall Self(self).child_pop()
+    self.trace.pop()
+    assert not should_fail
+
+@external
+def child_pop():
+    self.trace.pop()
+    self.trace.pop()
+
+@external
+def get_trace() -> DynArray[uint256, 10]:
+    return self.trace
+    """
+
+    c = get_contract(src)
+    assert c.get_trace() == [1, 2, 3, 4, 5]
+
+    with pytest.raises(Assert):
+        c.test(True)
+
+    assert c.get_trace() == [1, 2, 3, 4, 5]

@@ -93,7 +93,7 @@ def foo(fail: bool) -> bool:
     c = get_contract(src)
     success = c.foo(reverts)
     assert success == (not reverts)
-    assert c.c() == (10 if success else 20)
+    assert c.c() == (10 if success else 0)
 
 
 @pytest.mark.parametrize("reverts", [True, False])
