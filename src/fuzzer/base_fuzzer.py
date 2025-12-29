@@ -148,9 +148,7 @@ class BaseFuzzer:
             if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
                 compiler_data = self.get_compiler_data(trace)
 
-                mutated_trace = trace_mutator.mutate_deployment_trace(
-                    trace, compiler_data
-                )
+                trace_mutator.mutate_deployment_trace(trace, compiler_data)
 
                 # Capture compiler settings for runners to use.
                 # TODO: This unconditionally enables decimals because the mutator
@@ -165,12 +163,12 @@ class BaseFuzzer:
                         if v is not None
                     }
                     settings["enable_decimals"] = True
-                    mutated_trace.compiler_settings = settings
+                    trace.compiler_settings = settings
 
-                new_traces.append(mutated_trace)
+                new_traces.append(trace)
 
                 if compiler_data:
-                    deployment_compiler_data[mutated_trace.deployed_address] = (
+                    deployment_compiler_data[trace.deployed_address] = (
                         compiler_data
                     )
 
@@ -180,13 +178,11 @@ class BaseFuzzer:
 
                 mutate_args = rng.random() < self.call_mutate_args_prob
 
-                mutated_trace = trace_mutator.mutate_and_normalize_call_args(
-                    trace, mutate_args, deployment_compiler_data
-                )
-                new_traces.append(mutated_trace)
+                trace_mutator.mutate_call_args(trace, mutate_args, deployment_compiler_data)
+                new_traces.append(trace)
 
                 if rng.random() < self.call_duplicate_prob:
-                    new_traces.append(deepcopy(mutated_trace))
+                    new_traces.append(deepcopy(trace))
 
             else:
                 assert isinstance(trace, (SetBalanceTrace, ClearTransientStorageTrace))

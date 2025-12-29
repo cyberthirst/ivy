@@ -26,6 +26,21 @@ from .base_value_generator import BaseValueGenerator
 class ValueMutator(BaseValueGenerator):
     """Generates and mutates values with focus on boundary cases for ABI fuzzing."""
 
+    def _coerce_hex_bytes(self, value: Any, vyper_type: VyperType) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, str) and value.startswith("0x"):
+            hex_str = value[2:]
+            if len(hex_str) % 2 == 1:
+                hex_str = "0" + hex_str
+            try:
+                return bytes.fromhex(hex_str)
+            except ValueError:
+                return self.generate(vyper_type)
+        return self.generate(vyper_type)
+
     def mutate(self, value: Any, vyper_type: VyperType) -> Any:
         """Mutate a value based on its type."""
         if isinstance(vyper_type, IntegerT):
@@ -41,9 +56,11 @@ class ValueMutator(BaseValueGenerator):
             return self._mutate_string(value, vyper_type.length)
 
         if isinstance(vyper_type, BytesT):
+            value = self._coerce_hex_bytes(value, vyper_type)
             return self._mutate_bytes(value, vyper_type.length)
 
         if isinstance(vyper_type, BytesM_T):
+            value = self._coerce_hex_bytes(value, vyper_type)
             return self._mutate_bytes_m(value, vyper_type.length)
 
         # For complex types, regenerate
