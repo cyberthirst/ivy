@@ -2537,6 +2537,7 @@ def foo(a: bool, b: bool, c: bool) -> bool:
     assert c.foo(False, True, True) == True
 
 
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_array_index_overlap(get_contract):
     code = """
 struct Foo:
@@ -2560,6 +2561,7 @@ def bar() -> uint256:
     assert c.foo() == 4
 
 
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_array_index_overlap2(get_contract, tx_failed):
     code = """
 struct Foo:
@@ -2583,6 +2585,7 @@ def bar() -> uint256:
 
 
 # Nested DynArray pops & appends inside the index expression
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_nested_pop_append(get_contract):
     code = """
 struct Child:
@@ -2627,6 +2630,7 @@ def foo() -> uint256:
 
 
 # Module‑level DynArray changed by a library function used in slice
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_module_array(get_contract, make_input_bundle):
     lib1 = """
 d: public(DynArray[uint256, 5])
@@ -2655,6 +2659,7 @@ def foo() -> uint256:
 
 
 # Entire struct replaced between container & slice evaluation
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_struct_replaced(get_contract):
     code = """
 struct S:
@@ -2675,6 +2680,7 @@ def foo() -> uint256:
 
 
 # Attribute‑subscript chain where parent struct mutates in slice
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_attr_then_subscript(get_contract):
     code = """
 struct Inner:
@@ -2698,6 +2704,7 @@ def foo() -> uint256:
 
 
 # Static array completely replaced before subscript
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_static_array_replaced(get_contract):
     code = """
 a: uint256[3]
@@ -2717,6 +2724,7 @@ def foo() -> uint256:
 
 
 # Module variable, base NOT evaluated in visitor but must refresh
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_module_base_lazy(get_contract, make_input_bundle):
     lib1 = """
 arr: DynArray[uint256, 5]
@@ -2745,6 +2753,7 @@ def foo() -> uint256:
 
 
 # Deep library hierarchy, mutation in grand‑child module
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_grandchild_module(get_contract, make_input_bundle):
     lib2 = """
 val: DynArray[uint256, 5]
@@ -2775,6 +2784,7 @@ def foo() -> uint256:
 
 
 # Pop‑then‑append on outer DynArray while reading inner DynArray
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_pop_append_outer(get_contract):
     code = """
 d: DynArray[DynArray[uint256, 2], 2]
@@ -2795,6 +2805,7 @@ def foo() -> uint256:
 
 
 # Mapping‑of‑struct with inner DynArray mutated in slice
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_mapping_struct_inner(get_contract):
     code = """
 struct S:
@@ -2818,6 +2829,7 @@ def foo() -> uint256:
 # ---------------------------------------------------------------------
 # 12. Two‑level subscript, both indices have side effects
 # ---------------------------------------------------------------------
+@pytest.mark.xfail(reason="vyper.exceptions.CompilerPanic: risky overlap")
 def test_refresh_double_index_side_effect(get_contract):
     code = """
 nested: DynArray[DynArray[uint256, 2], 2]
