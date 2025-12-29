@@ -2330,6 +2330,24 @@ def foo() -> bool:
     assert c.foo() == True
 
 
+# use skip_contract_check with a random address
+def test_extcall_into_random_acc_without_code(get_contract):
+    src = """
+interface Foo:
+    def foo(): nonpayable
+
+@external
+def foo() -> bool:
+    random_addr: address = 0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF
+    extcall Foo(random_addr).foo(skip_contract_check=True)
+    return True
+    """
+
+    c = get_contract(src)
+
+    assert c.foo() == True
+
+
 IDENTITY_ADDRESS = "0x" + 19 * "00" + "04"
 
 
@@ -2906,7 +2924,6 @@ def foo() -> {typ}:
     assert c.foo() == val
 
 
-@pytest.mark.xfail(reason="Compilation failure when accessing flag in pure")
 def test_internal_pure_accessing_flag(get_contract, make_input_bundle):
     """Test flag accesses in internal pure functions"""
     code = """
