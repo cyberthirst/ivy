@@ -6,7 +6,7 @@ rather than hardcoded, allowing users to specify which compiler settings to fuzz
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from vyper.compiler.settings import OptimizationLevel
 
@@ -14,6 +14,7 @@ from .base_scenario_runner import ScenarioResult
 from .scenario import Scenario
 from .ivy_scenario_runner import IvyScenarioRunner
 from .boa_scenario_runner import BoaScenarioRunner
+from ..coverage.collector import ArcCoverageCollector
 
 
 @dataclass
@@ -52,7 +53,12 @@ class MultiRunner:
         self.collect_storage_dumps = collect_storage_dumps
         self.no_solc_json = no_solc_json
 
-    def run(self, scenario: Scenario) -> MultiRunnerResults:
+    def run(
+        self,
+        scenario: Scenario,
+        *,
+        coverage_collector: Optional[ArcCoverageCollector] = None,
+    ) -> MultiRunnerResults:
         """Run scenario on all runners, creating fresh runner instances."""
         # Create fresh Ivy runner
         ivy_runner = IvyScenarioRunner(
@@ -67,6 +73,8 @@ class MultiRunner:
             runner = BoaScenarioRunner(
                 compiler_args=config.compiler_args,
                 collect_storage_dumps=self.collect_storage_dumps,
+                coverage_collector=coverage_collector,
+                config_name=config.name,
             )
             result = runner.run(scenario)
             boa_results[config.name] = (config, result)

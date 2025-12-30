@@ -9,6 +9,7 @@ import boa
 from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from .scenario import Scenario
 from ..trace_types import Env
+from ..coverage.collector import ArcCoverageCollector
 
 
 class BoaScenarioRunner(BaseScenarioRunner):
@@ -18,9 +19,13 @@ class BoaScenarioRunner(BaseScenarioRunner):
         self,
         compiler_args: Optional[Dict[str, Any]] = None,
         collect_storage_dumps: bool = False,
+        coverage_collector: Optional[ArcCoverageCollector] = None,
+        config_name: Optional[str] = None,
     ):
         super().__init__(boa.env, collect_storage_dumps)
         self.compiler_args = compiler_args or {}
+        self.coverage_collector = coverage_collector
+        self.config_name = config_name
 
     def _deploy_from_source(
         self,
@@ -42,8 +47,16 @@ class BoaScenarioRunner(BaseScenarioRunner):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
-            contract = boa.loads(source, *args, compiler_args=merged_args, **kwargs)
-            return contract
+            if self.coverage_collector is None:
+                return boa.loads(source, *args, compiler_args=merged_args, **kwargs)
+
+            # Track coverage of Vyper's codegen/IR/venom passes during compilation.
+            # loads_partial triggers full compilation via VyperDeployer.__init__.
+            with self.coverage_collector.collect_compile(config_name=self.config_name):
+                deployer = boa.loads_partial(
+                    source, compiler_args=merged_args, no_vvm=True
+                )
+            return deployer.deploy(*args, **kwargs)
 
     def _call_method(
         self,
