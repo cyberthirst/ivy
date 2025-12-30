@@ -188,11 +188,19 @@ class VyperContract:
         storage = acc.storage
         gvars = acc.contract_data.global_vars
         res = {}
-        for k, v in storage.items():
-            typ = gvars.variables[k, DataLocation.STORAGE].varinfo.typ
+        # Iterate over known declared variables, not raw storage items.
+        # This avoids KeyError when storage contains slots from delegatecall
+        # (callee writes to caller's storage using callee's slot positions).
+        for (pos, loc), gvar in gvars.variables.items():
+            if loc != DataLocation.STORAGE:
+                continue
+            if pos not in storage:
+                continue
+            v = storage[pos]
+            typ = gvar.varinfo.typ
             if typ_needs_decode(typ):
                 v = decode_ivy_object(v, typ)
-            res[gvars.adrr_to_name[(k, DataLocation.STORAGE)]] = v
+            res[gvars.adrr_to_name[(pos, loc)]] = v
         return res
 
     def marshal_to_python(self, execution_output: ExecutionOutput, vyper_typ):
