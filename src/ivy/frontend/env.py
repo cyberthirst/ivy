@@ -6,6 +6,7 @@ import copy
 from vyper import ast as vy_ast
 
 from ivy.vyper_interpreter import VyperInterpreter
+from ivy.tracer import CoverageTracer
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
 from ivy.evm.evm_structures import Account, Environment
@@ -37,6 +38,8 @@ class Env:
             chain_id=0,
         )
         self.interpreter = VyperInterpreter(env=self._env)
+        self._coverage_tracer = CoverageTracer()
+        self.interpreter.tracers.append(self._coverage_tracer)
         self.state: StateAccess = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
@@ -46,10 +49,19 @@ class Env:
     def clear_state(self):
         # TODO should we just clear the EVM state instead of instantiating the itp?
         self.interpreter = VyperInterpreter(env=self._env)
+        self._coverage_tracer = CoverageTracer()
+        self.interpreter.tracers.append(self._coverage_tracer)
         self.state = self.interpreter.state
         self._aliases = {}
         self.eoa = self.generate_address("eoa")
         self._contracts = {}
+
+    @property
+    def execution_metadata(self):
+        return self._coverage_tracer.metadata
+
+    def reset_execution_metadata(self) -> None:
+        self._coverage_tracer.reset()
 
     @classmethod
     def get_singleton(cls):
@@ -257,6 +269,7 @@ class Env:
         saved_accessed_accounts = copy.deepcopy(
             self.interpreter.state._state.accessed_accounts
         )
+        saved_execution_metadata = copy.deepcopy(self.execution_metadata)
 
         try:
             yield
@@ -271,6 +284,8 @@ class Env:
             self._accounts = saved_accounts
             self.eoa = saved_eoa
             self.interpreter.state._state.accessed_accounts = saved_accessed_accounts
+            self.reset_execution_metadata()
+            self.execution_metadata.merge(saved_execution_metadata)
 
     @contextmanager
     def prank(self, address: _AddressType):

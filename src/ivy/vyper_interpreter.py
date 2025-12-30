@@ -39,6 +39,7 @@ from ivy.exceptions import (
     FunctionNotFound,
     PayabilityViolation,
 )
+from ivy.tracer import Tracer
 from ivy.types import Address, Struct, StaticArray, DynamicArray, Map, Tuple as IvyTuple
 from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
@@ -48,11 +49,34 @@ from ivy.evm.evm_structures import Log, Environment
 from ivy.exceptions import Revert
 
 
+_EDGE_NODE_TYPES = (
+    ast.AnnAssign,
+    ast.Assign,
+    ast.AugAssign,
+    ast.Expr,
+    ast.Log,
+    ast.If,
+    ast.Assert,
+    ast.Raise,
+    ast.For,
+    ast.Return,
+    ast.Break,
+    ast.Continue,
+    ast.Pass,
+)
+
+
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def __init__(self, env: Environment):
         self.evm = EVMCore(callbacks=self, env=env)
         self.state: StateAccess = self.evm.state
         self.builtins = BuiltinRegistry(self.evm, self.state)
+        self.tracers: list[Tracer] = []
+
+        # Edge-lite coverage needs per-message-call state: edges must not span
+        # across separate ABI calls or across nested external calls/contracts.
+        self._edge_stack: list[Optional[int]] = []
+        self._prev_edge_node_id: Optional[int] = None
 
     def execute(self, *args, **kwargs):
         return self.evm.execute_tx(*args, **kwargs)
@@ -177,14 +201,18 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self._pop_fun_ctx()
 
     def execute_init_function(self, func_t):
-        _, calldata_args_t = compute_call_abi_data(func_t, 0)
-        min_size = calldata_args_t.abi_type.static_size()
-        self._min_calldata_size_check(min_size)
-        # msg.data doesn't contain bytecode in ivy's case
-        args = abi_decode(calldata_args_t, self.msg.data, from_calldata=True)
+        self._push_edge_state()
+        try:
+            _, calldata_args_t = compute_call_abi_data(func_t, 0)
+            min_size = calldata_args_t.abi_type.static_size()
+            self._min_calldata_size_check(min_size)
+            # msg.data doesn't contain bytecode in ivy's case
+            args = abi_decode(calldata_args_t, self.msg.data, from_calldata=True)
 
-        self._check_payability(func_t)
-        return self._execute_function(func_t, args)
+            self._check_payability(func_t)
+            return self._execute_function(func_t, args)
+        finally:
+            self._pop_edge_state()
 
     def _min_calldata_size_check(self, min_size):
         if len(self.msg.data) < min_size:
@@ -194,39 +222,102 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         if not func_t.is_payable and self.msg.value != 0:
             raise PayabilityViolation(f"Function {func_t.name} is not payable")
 
+    def _push_edge_state(self) -> None:
+        self._edge_stack.append(self._prev_edge_node_id)
+        self._prev_edge_node_id = None
+
+    def _pop_edge_state(self) -> None:
+        self._prev_edge_node_id = self._edge_stack.pop()
+
+    def _on_node(self, node) -> None:
+        tracers = self.tracers
+        if not tracers:
+            return
+        if not isinstance(node, _EDGE_NODE_TYPES):
+            return
+
+        addr = self.current_address
+        node_id = getattr(node, "node_id", None)
+        if node_id is None:
+            return
+
+        prev_node_id = self._prev_edge_node_id
+        if prev_node_id is not None:
+            for tracer in tracers:
+                tracer.on_edge(addr, prev_node_id, node_id)
+
+        self._prev_edge_node_id = node_id
+
+        for tracer in tracers:
+            tracer.on_node(addr, node)
+
+    def _on_branch(self, node, taken: bool) -> None:
+        tracers = self.tracers
+        if not tracers:
+            return
+        if getattr(node, "node_id", None) is None:
+            return
+        addr = self.current_address
+        for tracer in tracers:
+            tracer.on_branch(addr, node, taken)
+
+    def _on_boolop(self, node, op: str, evaluated_count: int, result: bool) -> None:
+        tracers = self.tracers
+        if not tracers:
+            return
+        if getattr(node, "node_id", None) is None:
+            return
+        addr = self.current_address
+        for tracer in tracers:
+            tracer.on_boolop(addr, node, op, evaluated_count, result)
+
+    def _on_loop(self, node, iteration_count: int) -> None:
+        tracers = self.tracers
+        if not tracers:
+            return
+        if getattr(node, "node_id", None) is None:
+            return
+        addr = self.current_address
+        for tracer in tracers:
+            tracer.on_loop(addr, node, iteration_count)
+
     def dispatch(self):
         assert self.current_context.entry_points is not None
         assert self.current_context.contract is not None
 
+        self._push_edge_state()
         try:
-            if len(self.msg.data) < 4:
-                raise FunctionNotFound()
+            try:
+                if len(self.msg.data) < 4:
+                    raise FunctionNotFound()
 
-            selector = self.msg.data[:4]
+                selector = self.msg.data[:4]
 
-            entry_points = self.current_context.entry_points
+                entry_points = self.current_context.entry_points
 
-            if selector not in entry_points:
-                raise FunctionNotFound()
-            else:
-                entry_point = entry_points[selector]
+                if selector not in entry_points:
+                    raise FunctionNotFound()
+                else:
+                    entry_point = entry_points[selector]
 
-            self._min_calldata_size_check(entry_point.calldata_min_size)
+                self._min_calldata_size_check(entry_point.calldata_min_size)
 
-            func_t = entry_point.function
-            args = abi_decode(
-                entry_point.calldata_args_t, self.msg.data[4:], from_calldata=True
-            )
+                func_t = entry_point.function
+                args = abi_decode(
+                    entry_point.calldata_args_t, self.msg.data[4:], from_calldata=True
+                )
 
-        except FunctionNotFound as e:
-            if self.current_context.contract.fallback:
-                func_t = self.current_context.contract.fallback
-                args = ()
-            else:
-                raise e
+            except FunctionNotFound as e:
+                if self.current_context.contract.fallback:
+                    func_t = self.current_context.contract.fallback
+                    args = ()
+                else:
+                    raise e
 
-        self._check_payability(func_t)
-        self._execute_external_function(func_t, args)
+            self._check_payability(func_t)
+            self._execute_external_function(func_t, args)
+        finally:
+            self._pop_edge_state()
 
     def _execute_external_function(self, func_t, args):
         ret = self._execute_function(func_t, args)

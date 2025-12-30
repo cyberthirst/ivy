@@ -228,19 +228,23 @@ class ExprVisitor(BaseVisitor):
     def visit_BoolOp(self, node: ast.BoolOp):
         if isinstance(node.op, ast.Or):
             short_circuit_value = True
+            op = "or"
         else:
             assert isinstance(node.op, ast.And)
             short_circuit_value = False
+            op = "and"
 
-        evaluated_values = []
+        evaluated_count = 0
         for val in node.values:
             result = self.visit(val)
-            evaluated_values.append(result)
+            evaluated_count += 1
 
             if result == short_circuit_value:
+                self._on_boolop(node, op, evaluated_count, bool(result))
                 return result
 
         assert isinstance(result, bool)
+        self._on_boolop(node, op, evaluated_count, result)
         return result
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
@@ -268,7 +272,9 @@ class ExprVisitor(BaseVisitor):
 
     def visit_IfExp(self, node: ast.IfExp):
         test = self.visit(node.test)
-        if test:
+        taken = bool(test)
+        self._on_branch(node, taken)
+        if taken:
             return self.visit(node.body)
         else:
             return self.visit(node.orelse)

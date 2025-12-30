@@ -48,7 +48,9 @@ class StmtVisitor(BaseVisitor):
 
     def visit_If(self, node: ast.If):
         condition = self.visit(node.test)
-        if condition:
+        taken = bool(condition)
+        self._on_branch(node, taken)
+        if taken:
             return self.visit_body(node.body)
         elif node.orelse:
             return self.visit_body(node.orelse)
@@ -75,6 +77,7 @@ class StmtVisitor(BaseVisitor):
 
     def visit_Assert(self, node: ast.Assert):
         condition = self.visit(node.test)
+        self._on_branch(node, bool(condition))
         if not condition:
             if node.msg:
                 self._revert_with_msg(node.msg, is_assert=True)
@@ -96,22 +99,26 @@ class StmtVisitor(BaseVisitor):
         target_typ = target_name._expr_info.typ
         self._new_local(target_name.id, target_typ)
 
-        for item in iterable:
-            # New scope for each iteration
-            self._push_scope()
-            self._assign_target(target_name, item)
+        iteration_count = 0
+        try:
+            for item in iterable:
+                iteration_count += 1
+                # New scope for each iteration
+                self._push_scope()
+                self._assign_target(target_name, item)
 
-            try:
-                for stmt in node.body:
-                    self.visit(stmt)
-            except ContinueException:
-                continue
-            except BreakException:
-                break
-            finally:
-                self._pop_scope()  # Pop iteration scope
-
-        self._pop_scope()  # Pop iterator variable scope
+                try:
+                    for stmt in node.body:
+                        self.visit(stmt)
+                except ContinueException:
+                    continue
+                except BreakException:
+                    break
+                finally:
+                    self._pop_scope()  # Pop iteration scope
+        finally:
+            self._on_loop(node, iteration_count)
+            self._pop_scope()  # Pop iterator variable scope
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
