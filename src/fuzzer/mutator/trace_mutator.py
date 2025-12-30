@@ -107,9 +107,9 @@ class TraceMutator:
             )
             if mutation_result and mutation_result.source != trace.source_code:
                 trace.source_code = mutation_result.source
-                trace.compilation_xfails = list(
-                    trace.compilation_xfails
-                ) + list(mutation_result.compilation_xfails)
+                trace.compilation_xfails = list(trace.compilation_xfails) + list(
+                    mutation_result.compilation_xfails
+                )
                 trace.runtime_xfails = list(trace.runtime_xfails) + list(
                     mutation_result.runtime_xfails
                 )

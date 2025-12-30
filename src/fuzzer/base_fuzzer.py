@@ -168,9 +168,7 @@ class BaseFuzzer:
                 new_traces.append(trace)
 
                 if compiler_data:
-                    deployment_compiler_data[trace.deployed_address] = (
-                        compiler_data
-                    )
+                    deployment_compiler_data[trace.deployed_address] = compiler_data
 
             elif isinstance(trace, CallTrace):
                 if rng.random() < self.call_drop_prob:
@@ -178,7 +176,9 @@ class BaseFuzzer:
 
                 mutate_args = rng.random() < self.call_mutate_args_prob
 
-                trace_mutator.mutate_call_args(trace, mutate_args, deployment_compiler_data)
+                trace_mutator.mutate_call_args(
+                    trace, mutate_args, deployment_compiler_data
+                )
                 new_traces.append(trace)
 
                 if rng.random() < self.call_duplicate_prob:

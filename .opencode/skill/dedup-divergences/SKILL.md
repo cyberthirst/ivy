@@ -42,7 +42,7 @@ Bugs can be in:
 - **Boa** (`venv/.../boa/`) - Execution framework bug
 
 ### Step 4: Create Summary Report
-Create `MM_DD_divergence_summary.md` with format:
+Create `MM_DD_minute_divergence_summary.md` with format:
 
 ```markdown
 # Divergence Summary - YYYY-MM-DD
