@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional, Union
 
 import pytest
 
@@ -14,6 +14,9 @@ from fuzzer.export_utils import (
 from fuzzer.trace_types import TestExport
 from fuzzer.runner.scenario import Scenario, create_scenario_from_export
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
+from fuzzer.coverage.scenario_codec import scenario_from_json, scenario_to_json
+
+EXPORTS_DIR = Path(__file__).parent / "vyper-exports"
 
 
 class TestReplay:
@@ -86,14 +89,11 @@ class TestReplay:
                     # Note: We don't check output for failed calls as it may be undefined
 
     def execute_item(self, export: TestExport, item_name: str) -> None:
-        """Execute a test item and validate results."""
-        # Create scenario from test item using the shared utility
         scenario = create_scenario_from_export(export, item_name, self.use_python_args)
-
-        # Run scenario
+        # orthogonal to the test, but validates roundtrip on the codec
+        # this test already iterates over all exports so it's a great place to add it
+        scenario = scenario_from_json(scenario_to_json(scenario))
         result = self.runner.run(scenario)
-
-        # Validate results match expectations
         self.validate_result(scenario, result)
 
 
@@ -106,7 +106,7 @@ def replay_test(export_path: Union[str, Path], test_name: str) -> TestReplay:
 
 
 def validate_exports(
-    exports_dir: Union[str, Path] = "tests/vyper-exports",
+    exports_dir: Union[str, Path] = EXPORTS_DIR,
     test_filter: Optional[TestFilter] = None,
     test_modes: Optional[list] = None,
 ) -> Dict[str, bool]:
@@ -170,7 +170,7 @@ def get_replay_test_filter() -> TestFilter:
 
 def get_replay_test_cases():
     test_filter = get_replay_test_filter()
-    exports = load_all_exports("tests/vyper-exports")
+    exports = load_all_exports(EXPORTS_DIR)
     exports = filter_exports(exports, test_filter=test_filter)
 
     cases = []
