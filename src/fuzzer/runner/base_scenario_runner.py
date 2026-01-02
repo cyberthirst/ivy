@@ -256,56 +256,60 @@ class BaseScenarioRunner(ABC):
         results: List[TraceResult] = []
 
         for trace_index, trace in enumerate(traces):
-            if isinstance(trace, DeploymentTrace):
-                deployment_result = self._execute_deployment(
-                    trace=trace,
-                    use_python_args=use_python_args,
-                )
-                results.append(
-                    TraceResult(
-                        trace_type="deployment",
-                        trace_index=trace_index,
-                        result=deployment_result,
-                        compilation_xfails=list(trace.compilation_xfails),
-                        runtime_xfails=list(trace.runtime_xfails),
-                    )
-                )
-
-            elif isinstance(trace, CallTrace):
-                call_result = self._execute_call(
-                    trace=trace,
-                    use_python_args=use_python_args,
-                )
-                results.append(
-                    TraceResult(
-                        trace_type="call",
-                        trace_index=trace_index,
-                        result=call_result,
-                        runtime_xfails=list(trace.runtime_xfails),
-                    )
-                )
-
-            elif isinstance(trace, SetBalanceTrace):
-                self._execute_set_balance(trace)
-                results.append(
-                    TraceResult(
-                        trace_type="set_balance",
-                        trace_index=trace_index,
-                        result=None,
-                    )
-                )
-
-            elif isinstance(trace, ClearTransientStorageTrace):
-                self._execute_clear_transient_storage(trace)
-                results.append(
-                    TraceResult(
-                        trace_type="clear_transient_storage",
-                        trace_index=trace_index,
-                        result=None,
-                    )
-                )
+            result = self.execute_trace(trace, trace_index, use_python_args)
+            results.append(result)
 
         return results
+
+    def execute_trace(
+        self,
+        trace: Trace,
+        trace_index: int,
+        use_python_args: bool,
+    ) -> TraceResult:
+        if isinstance(trace, DeploymentTrace):
+            deployment_result = self._execute_deployment(
+                trace=trace,
+                use_python_args=use_python_args,
+            )
+            return TraceResult(
+                trace_type="deployment",
+                trace_index=trace_index,
+                result=deployment_result,
+                compilation_xfails=list(trace.compilation_xfails),
+                runtime_xfails=list(trace.runtime_xfails),
+            )
+
+        elif isinstance(trace, CallTrace):
+            call_result = self._execute_call(
+                trace=trace,
+                use_python_args=use_python_args,
+            )
+            return TraceResult(
+                trace_type="call",
+                trace_index=trace_index,
+                result=call_result,
+                runtime_xfails=list(trace.runtime_xfails),
+            )
+
+        elif isinstance(trace, SetBalanceTrace):
+            self._execute_set_balance(trace)
+            return TraceResult(
+                trace_type="set_balance",
+                trace_index=trace_index,
+                result=None,
+            )
+
+        elif isinstance(trace, ClearTransientStorageTrace):
+            self._execute_clear_transient_storage(trace)
+            return TraceResult(
+                trace_type="clear_transient_storage",
+                trace_index=trace_index,
+                result=None,
+            )
+
+        else:
+            raise ValueError(f"Unknown trace type: {type(trace)}")
 
     def _execute_deployment(
         self,
