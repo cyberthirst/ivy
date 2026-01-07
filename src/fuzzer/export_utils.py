@@ -258,11 +258,10 @@ class TestFilter:
         return False
 
 
-def apply_unsupported_exclusions(test_filter: TestFilter) -> TestFilter:
+def exclude_unsupported_patterns(test_filter: TestFilter) -> TestFilter:
     """Apply common exclusions for unsupported Vyper features."""
     return (
         test_filter.exclude_source(r"pragma nonreentrancy")
-        .exclude_source(r"import math")
         .exclude_source(r"raw_log")
         .exclude_source(r"selfdestruct")
         .exclude_source(r"gas=")
@@ -279,8 +278,9 @@ def apply_unsupported_exclusions(test_filter: TestFilter) -> TestFilter:
         .exclude_name("test_mana")
         .exclude_name("test_ec")
         .exclude_name("test_blobhash")
-        # not yet supported by the compiler version we use
-        # .exclude_path("test_flag_pure_functions")
+        .exclude_name("test_get_blobhashes")
+        # we don't yet support storage overrides
+        .exclude_name("test_proxy_upgrade_with_access_control")
     )
 
 

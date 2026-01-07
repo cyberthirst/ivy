@@ -9,7 +9,7 @@ from fuzzer.export_utils import (
     load_export,
     load_all_exports,
     filter_exports,
-    apply_unsupported_exclusions,
+    exclude_unsupported_patterns,
 )
 from fuzzer.trace_types import TestExport
 from fuzzer.runner.scenario import Scenario, create_scenario_from_export
@@ -165,7 +165,7 @@ def validate_exports(
 def get_ivy_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=False)
     test_filter.include_path(r"functional")
-    apply_unsupported_exclusions(test_filter)
+    exclude_unsupported_patterns(test_filter)
     return test_filter
 
 
@@ -173,6 +173,8 @@ def get_boa_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=False)
     test_filter.include_path(r"functional")
     test_filter.exclude_name("test_address_code")
+    test_filter.exclude_name("test_get_blobhashes")
+    test_filter.exclude_name("test_proxy_upgrade_with_access_control")
     return test_filter
 
 
