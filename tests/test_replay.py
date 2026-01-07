@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional, Union
 
 import pytest
 
@@ -14,13 +14,14 @@ from fuzzer.export_utils import (
 from fuzzer.trace_types import TestExport
 from fuzzer.runner.scenario import Scenario, create_scenario_from_export
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
+from fuzzer.runner.boa_scenario_runner import BoaScenarioRunner
 
 
 class TestReplay:
     """Executes test traces from Vyper test exports using the scenario runner."""
 
-    def __init__(self, use_python_args: bool = False):
-        self.runner = IvyScenarioRunner()
+    def __init__(self, use_python_args: bool = False, runner_cls=IvyScenarioRunner):
+        self.runner = runner_cls()
         self.use_python_args = use_python_args
 
     def load_export(self, export_path: Union[str, Path]) -> TestExport:
@@ -161,15 +162,21 @@ def validate_exports(
     return results
 
 
-def get_replay_test_filter() -> TestFilter:
+def get_ivy_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=False)
     test_filter.include_path(r"functional")
     apply_unsupported_exclusions(test_filter)
     return test_filter
 
 
-def get_replay_test_cases():
-    test_filter = get_replay_test_filter()
+def get_boa_test_filter() -> TestFilter:
+    test_filter = TestFilter(exclude_multi_module=False)
+    test_filter.include_path(r"functional")
+    test_filter.exclude_name("test_address_code")
+    return test_filter
+
+
+def _generate_cases_for_runner(runner_cls, test_filter: TestFilter, prefix: str):
     exports = load_all_exports("tests/vyper-exports")
     exports = filter_exports(exports, test_filter=test_filter)
 
@@ -178,12 +185,21 @@ def get_replay_test_cases():
         for item_name, item in export.items.items():
             if item.item_type == "fixture":
                 continue
-            test_id = f"{Path(path).stem}::{item_name}"
-            cases.append(pytest.param(export, item_name, id=test_id))
+            test_id = f"{prefix}-{Path(path).stem}::{item_name}"
+            cases.append(pytest.param(export, item_name, runner_cls, id=test_id))
     return cases
 
 
-@pytest.mark.parametrize("export,item_name", get_replay_test_cases())
-def test_replay(export, item_name):
-    replay = TestReplay(use_python_args=True)
+def get_replay_test_cases():
+    return (
+        _generate_cases_for_runner(IvyScenarioRunner, get_ivy_test_filter(), "ivy")
+        + _generate_cases_for_runner(BoaScenarioRunner, get_boa_test_filter(), "boa")
+    )
+
+
+@pytest.mark.parametrize("export,item_name,runner_cls", get_replay_test_cases())
+def test_replay(export, item_name, runner_cls):
+    import boa
+    boa.interpret.disable_cache()
+    replay = TestReplay(use_python_args=True, runner_cls=runner_cls)
     replay.execute_item(export, item_name)

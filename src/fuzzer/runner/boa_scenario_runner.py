@@ -5,11 +5,51 @@ Boa implementation of the scenario runner.
 from typing import Any, Dict, List, Optional
 
 import boa
+from boa.contracts.vyper.vyper_contract import VyperDeployer
+from vyper.cli.vyper_json import (
+    get_inputs,
+    get_output_formats,
+    get_search_paths as get_json_search_paths,
+)
+from vyper.compiler.input_bundle import FileInput, JSONInputBundle
+from vyper.compiler.phases import CompilerData
+from vyper.compiler.settings import Settings
 
 from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from .scenario import Scenario
 from ..trace_types import Env
 from ..coverage.collector import ArcCoverageCollector
+
+
+def _load_from_solc_json(
+    solc_json: Dict[str, Any],
+    *args,
+    compiler_args: Optional[Dict[str, Any]] = None,
+    **kwargs,
+) -> Any:
+    sources = get_inputs(solc_json)
+    output_formats = get_output_formats(solc_json)
+    search_paths = get_json_search_paths(solc_json)
+
+    compilation_targets = list(output_formats.keys())
+    if not compilation_targets:
+        raise ValueError("No compilation targets found in solc_json")
+
+    target = compilation_targets[0]
+    input_bundle = JSONInputBundle(sources, search_paths=search_paths)
+
+    if target in input_bundle.input_json:
+        file = input_bundle._load_from_path(target, target)
+    else:
+        file = input_bundle.load_file(target.name)
+
+    if not isinstance(file, FileInput):
+        raise ValueError(f"Expected FileInput for {target}, got {type(file)}")
+
+    settings = Settings(**(compiler_args or {}))
+    data = CompilerData(file, input_bundle, settings)
+    deployer = VyperDeployer(data, filename=str(target))
+    return deployer.deploy(*args, **kwargs)
 
 
 class BoaScenarioRunner(BaseScenarioRunner):
@@ -39,14 +79,21 @@ class BoaScenarioRunner(BaseScenarioRunner):
         """Deploy a contract from source in Boa."""
         sender = self._get_sender(sender)
 
-        # Merge trace compiler_settings with runner's compiler_args.
-        # Runner args (e.g. experimental_codegen) take precedence.
-        merged_args = {**(compiler_settings or {}), **self.compiler_args}
+        merged_args = {
+            **(compiler_settings or {}),
+            **self.compiler_args,
+        }
 
         with self.env.prank(sender):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
+
+            if solc_json is not None and len(solc_json.get("sources", {})) > 1:
+                return _load_from_solc_json(
+                    solc_json, *args, compiler_args=merged_args, **kwargs
+                )
+
             if self.coverage_collector is None:
                 return boa.loads(source, *args, compiler_args=merged_args, **kwargs)
 
