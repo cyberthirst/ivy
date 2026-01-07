@@ -83,8 +83,7 @@ class BaseFuzzer:
     def load_filtered_exports(
         self, test_filter: Optional[TestFilter] = None
     ) -> Dict[Path, TestExport]:
-        """Load and filter test exports."""
-        exports = load_all_exports(self.exports_dir)
+        exports = load_all_exports(self.exports_dir, include_compiler_settings=False)
         if test_filter:
             exports = filter_exports(exports, test_filter=test_filter)
         return exports
@@ -150,18 +149,10 @@ class BaseFuzzer:
 
                 trace_mutator.mutate_deployment_trace(trace, compiler_data)
 
-                # Capture compiler settings for runners to use.
-                # TODO: This unconditionally enables decimals because the mutator
-                # might generate decimal-using code. Ideally, we'd track whether
-                # decimals were actually used and only enable if needed.
                 if compiler_data and hasattr(compiler_data, "settings"):
-                    # Use dataclasses.asdict to preserve enum types (Settings.as_dict
-                    # converts enums to strings, which Settings() doesn't accept)
-                    settings = {
-                        k: v
-                        for k, v in asdict(compiler_data.settings).items()
-                        if v is not None
-                    }
+                    settings = settings_to_kwargs(compiler_data.settings)
+                    # TODO the ast mutator should return the settings
+                    # this is a temporary fix to avoid compilation failures
                     settings["enable_decimals"] = True
                     trace.compiler_settings = settings
 

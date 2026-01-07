@@ -9,6 +9,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
 
+from vyper.compiler.settings import Settings
+
 from .trace_types import (
     Tx,
     Block,
@@ -20,6 +22,55 @@ from .trace_types import (
     TestItem,
     TestExport,
 )
+
+
+def settings_to_kwargs(settings: Settings) -> Dict[str, Any]:
+    """
+    Extract runner-ready kwargs from a Settings object.
+
+    NOTE: venom_flags is intentionally excluded. This avoids serialization
+    complexity and VenomOptimizationFlags object handling.
+    """
+    result: Dict[str, Any] = {}
+
+    if settings.optimize is not None:
+        result["optimize"] = settings.optimize
+    if settings.evm_version is not None:
+        result["evm_version"] = settings.evm_version
+    if settings.experimental_codegen is not None:
+        result["experimental_codegen"] = settings.experimental_codegen
+    if settings.debug is not None:
+        result["debug"] = settings.debug
+    if settings.enable_decimals is not None:
+        result["enable_decimals"] = settings.enable_decimals
+    if settings.nonreentrancy_by_default is not None:
+        result["nonreentrancy_by_default"] = settings.nonreentrancy_by_default
+
+    return result
+
+
+def normalize_compiler_settings(
+    raw: Dict[str, Any] | None,
+) -> Dict[str, Any] | None:
+    """
+    Normalize export-format compiler settings to runner-ready kwargs.
+
+    Export format uses Settings.as_dict() which stores strings/dicts.
+    This function parses via Settings.from_dict() to get typed values
+    (OptimizationLevel enums, etc.) and returns a dict suitable for
+    Settings(**kwargs).
+
+    NOTE: venom_flags is intentionally excluded. Replay will reproduce
+    high-level settings (optimize, experimental_codegen, evm_version, etc.)
+    but not fine-grained Venom optimization flags. This avoids serialization
+    complexity and VenomOptimizationFlags object handling.
+    """
+    if raw is None:
+        return None
+
+    settings = Settings.from_dict(raw)
+    result = settings_to_kwargs(settings)
+    return result if result else None
 
 
 class TestFilter:
@@ -254,8 +305,10 @@ def _create_env_from_data(env_data: Dict[str, Any]) -> Env:
     return Env(tx=tx, block=block)
 
 
-def load_export(export_path: Union[str, Path]) -> TestExport:
-    """Load test export from JSON file."""
+def load_export(
+    export_path: Union[str, Path],
+    include_compiler_settings: bool = True,
+) -> TestExport:
     path = Path(export_path)
     with open(path, "r") as f:
         data = json.load(f)
@@ -267,6 +320,12 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
         for trace_data in item_data["traces"]:
             if trace_data["trace_type"] == "deployment":
                 env = _create_env_from_data(trace_data["env"])
+
+                compiler_settings = None
+                if include_compiler_settings:
+                    compiler_settings = normalize_compiler_settings(
+                        trace_data.get("compiler_settings")
+                    )
 
                 trace = DeploymentTrace(
                     deployment_type=trace_data["deployment_type"],
@@ -286,6 +345,7 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
                     deployment_succeeded=trace_data["deployment_succeeded"],
                     env=env,
                     python_args=trace_data.get("python_args"),
+                    compiler_settings=compiler_settings,
                 )
             elif trace_data["trace_type"] == "call":
                 # Create Env object from trace data if present
@@ -326,8 +386,8 @@ def load_export(export_path: Union[str, Path]) -> TestExport:
 
 def load_all_exports(
     exports_dir: Union[str, Path] = "tests/vyper-exports",
+    include_compiler_settings: bool = True,
 ) -> Dict[Path, TestExport]:
-    """Load all test exports from a directory."""
     exports_dir = Path(exports_dir)
 
     if not exports_dir.is_absolute():
@@ -337,7 +397,7 @@ def load_all_exports(
 
     for json_file in exports_dir.rglob("*.json"):
         try:
-            export = load_export(json_file)
+            export = load_export(json_file, include_compiler_settings)
             exports[json_file] = export
         except Exception as e:
             print(f"Failed to load {json_file}: {e}")

@@ -34,7 +34,6 @@ class Scenario:
 
 
 def _fixup_dep_path(dep_path_str: str) -> Path:
-    """Fix path prefix from 'tests/export/' to 'tests/vyper-exports/'."""
     if dep_path_str.startswith("tests/export/"):
         dep_path_str = dep_path_str.replace("tests/export/", "tests/vyper-exports/", 1)
     return Path(dep_path_str)
@@ -44,9 +43,9 @@ def _load_dependency_scenario(
     dep_path: Path,
     dep_item_name: str,
     use_python_args: bool,
+    include_compiler_settings: bool,
 ) -> Scenario:
-    """Load a dependency from disk and create a Scenario."""
-    dep_export = load_export(dep_path)
+    dep_export = load_export(dep_path, include_compiler_settings)
 
     if dep_item_name not in dep_export.items:
         raise ValueError(f"Dependency {dep_item_name} not found in {dep_path}")
@@ -56,6 +55,7 @@ def _load_dependency_scenario(
         dep_export.items[dep_item_name],
         use_python_args,
         scenario_id=scenario_id,
+        include_compiler_settings=include_compiler_settings,
     )
 
 
@@ -63,13 +63,15 @@ def create_scenario_from_item(
     item: TestItem,
     use_python_args: bool = True,
     scenario_id: Optional[str] = None,
+    include_compiler_settings: bool = True,
 ) -> Scenario:
-    """Create a Scenario from a test item, recursively loading all dependencies."""
     dependencies = []
     for dep in item.deps:
         dep_path_str, dep_name = dep.rsplit("/", 1)
         dep_path = _fixup_dep_path(dep_path_str)
-        dep_scenario = _load_dependency_scenario(dep_path, dep_name, use_python_args)
+        dep_scenario = _load_dependency_scenario(
+            dep_path, dep_name, use_python_args, include_compiler_settings
+        )
         dependencies.append(dep_scenario)
 
     return Scenario(
@@ -84,15 +86,16 @@ def create_scenario_from_export(
     export: TestExport,
     item_name: str,
     use_python_args: bool = True,
+    include_compiler_settings: bool = True,
 ) -> Scenario:
-    """
-    Create a Scenario from a test export and item name.
-
-    Convenience function that looks up the item and creates a scenario.
-    """
     if item_name not in export.items:
         raise ValueError(f"Test item '{item_name}' not found in export")
 
     item = export.items[item_name]
     scenario_id = f"{export.path}::{item_name}"
-    return create_scenario_from_item(item, use_python_args, scenario_id=scenario_id)
+    return create_scenario_from_item(
+        item,
+        use_python_args,
+        scenario_id=scenario_id,
+        include_compiler_settings=include_compiler_settings,
+    )
