@@ -10,8 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from vyper.compiler.settings import OptimizationLevel
-
+from .export_utils import normalize_compiler_settings
 from .trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
 from .xfail import XFailExpectation
 from .runner.scenario import Scenario
@@ -41,22 +40,14 @@ def _deserialize_xfails(data: List[Dict[str, Any]] | None) -> List[XFailExpectat
     return [XFailExpectation(**x) for x in data]
 
 
-def _deserialize_compiler_settings(
-    data: Dict[str, Any] | None,
-) -> Dict[str, Any] | None:
-    """Deserialize compiler settings, converting string enums back to proper types."""
-    if not data:
-        return None
-    result = dict(data)
-    # Convert 'optimize' string back to OptimizationLevel enum
-    if "optimize" in result and isinstance(result["optimize"], str):
-        opt_str = result["optimize"].upper()
-        result["optimize"] = OptimizationLevel[opt_str]
-    return result
-
-
 def _deserialize_deployment_trace(data: Dict[str, Any]) -> DeploymentTrace:
-    """Deserialize DeploymentTrace from dict."""
+    env_data = data.get("env")
+    if env_data is None:
+        raise ValueError("DeploymentTrace requires env data")
+
+    env = _deserialize_env(env_data)
+    assert env is not None
+
     return DeploymentTrace(
         deployment_type=data["deployment_type"],
         contract_abi=data["contract_abi"],
@@ -71,9 +62,9 @@ def _deserialize_deployment_trace(data: Dict[str, Any]) -> DeploymentTrace:
         deployed_address=data["deployed_address"],
         runtime_bytecode=data["runtime_bytecode"],
         deployment_succeeded=data["deployment_succeeded"],
-        env=_deserialize_env(data.get("env")),
+        env=env,
         python_args=data.get("python_args"),
-        compiler_settings=_deserialize_compiler_settings(data.get("compiler_settings")),
+        compiler_settings=normalize_compiler_settings(data.get("compiler_settings")),
         compilation_xfails=_deserialize_xfails(data.get("compilation_xfails")),
         runtime_xfails=_deserialize_xfails(data.get("runtime_xfails")),
     )
