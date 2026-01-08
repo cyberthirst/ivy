@@ -33,6 +33,9 @@ class Tracer:
     def on_loop(self, addr: Address, node: ast.For, iteration_count: int) -> None:
         pass
 
+    def on_state_modified(self) -> None:
+        pass
+
 
 def iteration_bucket(count: int) -> int:
     if count <= 0:
@@ -73,3 +76,6 @@ class CoverageTracer(Tracer):
 
     def on_loop(self, addr, node, iteration_count) -> None:
         self.metadata.record_loop(addr, node.node_id, iteration_bucket(iteration_count))
+
+    def on_state_modified(self) -> None:
+        self.metadata.state_modified = True

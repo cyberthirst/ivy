@@ -438,8 +438,6 @@ def bar() -> uint256:
 
 
 def _check_state_modified(env: Env) -> bool:
-    journal = Journal()
-    env.execution_metadata.state_modified = journal.state_modified
     return env.execution_metadata.state_modified
 
 
@@ -475,6 +473,7 @@ def foo() -> uint256:
     """
     c = loads(src)
     Journal().reset()
+    env.reset_execution_metadata()
 
     c.foo()
     assert _check_state_modified(env) is False
@@ -722,6 +721,7 @@ def outer():
     """
     c = loads(src)
     Journal().reset()
+    env.reset_execution_metadata()
 
     c.outer()
     assert _check_state_modified(env) is False
@@ -805,6 +805,7 @@ def modify():
     c_a = loads(src_a)
     c_b = loads(src_b)
     Journal().reset()
+    env.reset_execution_metadata()
 
     c_a.foo(c_b.address)
     assert _check_state_modified(env) is False
@@ -894,6 +895,7 @@ def send_and_revert(to: address):
     c = loads(src)
     env.set_balance(c.address, 1000)
     Journal().reset()
+    env.reset_execution_metadata()
 
     try:
         c.send_and_revert(env.eoa)
@@ -981,6 +983,7 @@ def deploy_and_revert() -> address:
     """
     c = loads(src)
     Journal().reset()
+    env.reset_execution_metadata()
 
     try:
         c.deploy_and_revert()
@@ -1066,6 +1069,7 @@ def get_length() -> uint256:
     """
     c = loads(src)
     Journal().reset()
+    env.reset_execution_metadata()
 
     try:
         c.append_and_revert(42)
@@ -1105,6 +1109,7 @@ def outer_create(target: address):
     c_target = loads(src_target)
     c_creator = loads(src_creator)
     Journal().reset()
+    env.reset_execution_metadata()
 
     c_creator.outer_create(c_target.address)
     assert _check_state_modified(env) is False
@@ -1193,6 +1198,7 @@ def read_all() -> (uint256, uint256, uint256):
     c = loads(src)
     c.setup()
     Journal().reset()
+    env.reset_execution_metadata()
 
     result = c.read_all()
     assert result == (42, 1, 2)
@@ -1227,3 +1233,33 @@ def outer():
     c.outer()
     assert _check_state_modified(env) is True
     assert c.received() == 100
+
+
+def test_state_modified_not_contaminated_across_traces():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+
+@external
+def modify_state():
+    self.a = 42
+
+@external
+@view
+def read_only() -> uint256:
+    return 1
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.modify_state()
+    assert _check_state_modified(env) is True
+
+    env.reset_execution_metadata()
+
+    c.read_only()
+
+    assert _check_state_modified(env) is False

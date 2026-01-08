@@ -80,6 +80,9 @@ class EVMCore:
 
         assert not self.journal.is_active
 
+        if self.journal.pop_state_committed():
+            self.callbacks.on_state_committed()
+
         self.state.clear_transient_storage()
 
         if is_deploy:
@@ -133,6 +136,9 @@ class EVMCore:
         # Finalize this message call's journal frame
         # If there was an error, this will rollback all changes
         self.journal.finalize_call(output.is_error)
+
+        if self.journal.pop_state_committed():
+            self.callbacks.on_state_committed()
 
         return output
 
@@ -368,3 +374,6 @@ class EVMCore:
         """
         if self.journal.is_active:
             self.journal.finalize_call(is_error)
+
+        if self.journal.pop_state_committed():
+            self.callbacks.on_state_committed()

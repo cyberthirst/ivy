@@ -81,6 +81,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def execute(self, *args, **kwargs):
         return self.evm.execute_tx(*args, **kwargs)
 
+    def on_state_committed(self) -> None:
+        for tracer in self.tracers:
+            tracer.on_state_modified()
+
     @property
     def deployer(self):
         from ivy.frontend.vyper_contract import VyperDeployer

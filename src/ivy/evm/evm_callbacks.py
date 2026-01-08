@@ -17,3 +17,7 @@ class EVMCallbacks(ABC):
     @abstractmethod
     def dispatch(self):
         pass
+
+    @abstractmethod
+    def on_state_committed(self) -> None:
+        pass

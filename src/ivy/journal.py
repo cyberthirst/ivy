@@ -58,6 +58,7 @@ class Journal:
 
     _instance = None
     _frame_stack: list[JournalFrame] = []
+    _state_was_committed: bool = False
 
     def __new__(cls):
         if cls._instance is None:
@@ -83,11 +84,7 @@ class Journal:
 
     def initialize(self):
         self._frame_stack = []
-        self._state_modified = False
-
-    @property
-    def state_modified(self) -> bool:
-        return self._state_modified
+        self._state_was_committed = False
 
     def record(
         self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any
@@ -131,9 +128,8 @@ class Journal:
         frame = self._frame_stack.pop()
 
         if not self._frame_stack:
-            # Root frame commit - entries here represent persisted state changes
             if frame.entries:
-                self._state_modified = True
+                self._state_was_committed = True
             return
 
         # Not root frame - merge changes upward
@@ -182,6 +178,12 @@ class Journal:
             entry.obj.length = entry.old_value
         else:
             raise ValueError(f"Unknown journal entry type: {entry.entry_type}")
+
+    def pop_state_committed(self) -> bool:
+        """Returns True if state was committed since last call, then resets the flag."""
+        result = self._state_was_committed
+        self._state_was_committed = False
+        return result
 
     def reset(self) -> None:
         self.initialize()
