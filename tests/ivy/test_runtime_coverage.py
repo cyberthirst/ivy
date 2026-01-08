@@ -4,6 +4,7 @@ from vyper.utils import method_id
 from ivy.exceptions import FunctionNotFound
 from ivy.frontend.env import Env
 from ivy.frontend.loader import loads
+from ivy.journal import Journal
 
 
 def _branches_for(env: Env, addr):
@@ -434,3 +435,795 @@ def bar() -> uint256:
     taken_b = {taken for (_nid, taken) in branches_b}
     assert True in taken_a
     assert False in taken_b
+
+
+def _check_state_modified(env: Env) -> bool:
+    journal = Journal()
+    env.execution_metadata.state_modified = journal.state_modified
+    return env.execution_metadata.state_modified
+
+
+def test_state_modified_simple_storage_write():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+
+@external
+def foo():
+    self.a = 42
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.foo()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_no_state_change():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+def foo() -> uint256:
+    x: uint256 = 42
+    return x
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.foo()
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_nested_call_commits():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+
+interface Self:
+    def inner(): nonpayable
+
+@external
+def inner():
+    self.a = 42
+
+@external
+def outer():
+    extcall Self(self).inner()
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.outer()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_nested_call_reverts():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+should_revert: bool
+
+interface Self:
+    def inner(): nonpayable
+
+@external
+def inner():
+    self.a = 42
+    assert not self.should_revert
+
+@external
+def outer():
+    self.should_revert = True
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, method_id("inner()"), max_outsize=32, revert_on_failure=False)
+    self.should_revert = False
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.outer()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_nested_reverts_but_outer_has_changes():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+b: uint256
+should_revert: bool
+
+interface Self:
+    def inner(): nonpayable
+
+@external
+def inner():
+    self.b = 99
+    assert not self.should_revert
+
+@external
+def outer():
+    self.a = 42
+    self.should_revert = True
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, method_id("inner()"), max_outsize=32, revert_on_failure=False)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.outer()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_deep_nesting_all_commit():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+b: uint256
+c: uint256
+
+interface Self:
+    def level1(): nonpayable
+    def level2(): nonpayable
+    def level3(): nonpayable
+
+@external
+def level3():
+    self.c = 3
+
+@external
+def level2():
+    self.b = 2
+    extcall Self(self).level3()
+
+@external
+def level1():
+    self.a = 1
+    extcall Self(self).level2()
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.level1()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_deep_nesting_middle_reverts():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: public(uint256)
+b: public(uint256)
+c: public(uint256)
+
+interface Self:
+    def level1(): nonpayable
+    def level2(): nonpayable
+    def level3(): nonpayable
+
+@external
+def level3():
+    self.c = 3
+
+@external
+def level2():
+    self.b = 2
+    extcall Self(self).level3()
+    raise "revert"
+
+@external
+def level1():
+    self.a = 1
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, method_id("level2()"), max_outsize=32, revert_on_failure=False)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.level1()
+    assert _check_state_modified(env) is True
+    assert c.a() == 1
+    assert c.b() == 0
+    assert c.c() == 0
+
+
+def test_state_modified_deep_nesting_innermost_reverts():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: public(uint256)
+b: public(uint256)
+c: public(uint256)
+
+interface Self:
+    def level1(): nonpayable
+    def level2(): nonpayable
+    def level3(): nonpayable
+
+@external
+def level3():
+    self.c = 3
+    raise "revert"
+
+@external
+def level2():
+    self.b = 2
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, method_id("level3()"), max_outsize=32, revert_on_failure=False)
+
+@external
+def level1():
+    self.a = 1
+    extcall Self(self).level2()
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.level1()
+    assert _check_state_modified(env) is True
+    assert c.a() == 1
+    assert c.b() == 2
+    assert c.c() == 0
+
+
+def test_state_modified_all_nested_revert():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: public(uint256)
+b: public(uint256)
+
+interface Self:
+    def level1(): nonpayable
+    def level2(): nonpayable
+
+@external
+def level2():
+    self.b = 2
+    raise "revert"
+
+@external
+def level1():
+    self.a = 1
+    extcall Self(self).level2()
+
+@external
+def outer():
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, method_id("level1()"), max_outsize=32, revert_on_failure=False)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.outer()
+    assert _check_state_modified(env) is False
+    assert c.a() == 0
+    assert c.b() == 0
+
+
+def test_state_modified_transient_storage():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+t: transient(uint256)
+
+@external
+def foo():
+    self.t = 42
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.foo()
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_cross_contract():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_a = """
+a: uint256
+
+interface Other:
+    def modify(): nonpayable
+
+@external
+def foo(other: address):
+    extcall Other(other).modify()
+    """
+
+    src_b = """
+b: uint256
+
+@external
+def modify():
+    self.b = 99
+    """
+    c_a = loads(src_a)
+    c_b = loads(src_b)
+    Journal().reset()
+
+    c_a.foo(c_b.address)
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_cross_contract_reverts():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_a = """
+a: uint256
+
+@external
+def foo(other: address):
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(other, method_id("modify()"), max_outsize=32, revert_on_failure=False)
+    """
+
+    src_b = """
+b: uint256
+
+@external
+def modify():
+    self.b = 99
+    raise "revert"
+    """
+    c_a = loads(src_a)
+    c_b = loads(src_b)
+    Journal().reset()
+
+    c_a.foo(c_b.address)
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_mixed_cross_contract():
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_a = """
+a: public(uint256)
+
+interface Other:
+    def modify(): nonpayable
+    def modify_and_revert(): nonpayable
+
+@external
+def foo(other: address):
+    self.a = 1
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(other, method_id("modify_and_revert()"), max_outsize=32, revert_on_failure=False)
+    extcall Other(other).modify()
+    """
+
+    src_b = """
+b: public(uint256)
+c: public(uint256)
+
+@external
+def modify():
+    self.b = 99
+
+@external
+def modify_and_revert():
+    self.c = 88
+    raise "revert"
+    """
+    c_a = loads(src_a)
+    c_b = loads(src_b)
+    Journal().reset()
+
+    c_a.foo(c_b.address)
+    assert _check_state_modified(env) is True
+    assert c_a.a() == 1
+    assert c_b.b() == 99
+    assert c_b.c() == 0
+
+
+def test_state_modified_balance_transfer():
+    """Balance transfers should be tracked as state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+@payable
+def receive_eth():
+    pass
+
+@external
+def send_eth(to: address):
+    send(to, self.balance)
+    """
+    c = loads(src)
+    env.set_balance(c.address, 1000)
+    Journal().reset()
+
+    c.send_eth(env.eoa)
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_balance_transfer_reverts():
+    """Reverted balance transfers should not count as state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+def send_and_revert(to: address):
+    send(to, self.balance)
+    raise "revert"
+    """
+    c = loads(src)
+    env.set_balance(c.address, 1000)
+    Journal().reset()
+
+    try:
+        c.send_and_revert(env.eoa)
+    except Exception:
+        pass
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_raw_call_with_value():
+    """raw_call with value should track balance changes."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_sender = """
+@external
+def send_via_raw_call(to: address):
+    raw_call(to, b"", value=100)
+    """
+
+    src_receiver = """
+@external
+@payable
+def __default__():
+    pass
+    """
+    c_sender = loads(src_sender)
+    c_receiver = loads(src_receiver)
+    env.set_balance(c_sender.address, 1000)
+    Journal().reset()
+
+    c_sender.send_via_raw_call(c_receiver.address)
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_create_minimal_proxy():
+    """Creating a new contract should track nonce and account creation."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+def deploy_proxy() -> address:
+    return create_minimal_proxy_to(self)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    new_addr = c.deploy_proxy()
+    assert new_addr != c.address
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_create_copy_of():
+    """create_copy_of should track state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+def deploy_copy() -> address:
+    return create_copy_of(self)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    new_addr = c.deploy_copy()
+    assert new_addr != c.address
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_create_reverts():
+    """Reverted contract creation should not count as state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+@external
+def deploy_and_revert() -> address:
+    addr: address = create_minimal_proxy_to(self)
+    raise "revert"
+    """
+    c = loads(src)
+    Journal().reset()
+
+    try:
+        c.deploy_and_revert()
+    except Exception:
+        pass
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_dynarray_append():
+    """DynArray append should track state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+arr: DynArray[uint256, 10]
+
+@external
+def append_value(v: uint256):
+    self.arr.append(v)
+
+@external
+def get_length() -> uint256:
+    return len(self.arr)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    c.append_value(42)
+    assert _check_state_modified(env) is True
+    assert c.get_length() == 1
+
+
+def test_state_modified_dynarray_pop():
+    """DynArray pop should track state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+arr: DynArray[uint256, 10]
+
+@external
+def setup():
+    self.arr.append(1)
+    self.arr.append(2)
+
+@external
+def pop_value() -> uint256:
+    return self.arr.pop()
+
+@external
+def get_length() -> uint256:
+    return len(self.arr)
+    """
+    c = loads(src)
+    c.setup()
+    Journal().reset()
+
+    val = c.pop_value()
+    assert val == 2
+    assert _check_state_modified(env) is True
+    assert c.get_length() == 1
+
+
+def test_state_modified_dynarray_reverts():
+    """Reverted DynArray operations should not count as state modification."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+arr: DynArray[uint256, 10]
+
+@external
+def append_and_revert(v: uint256):
+    self.arr.append(v)
+    raise "revert"
+
+@external
+def get_length() -> uint256:
+    return len(self.arr)
+    """
+    c = loads(src)
+    Journal().reset()
+
+    try:
+        c.append_and_revert(42)
+    except Exception:
+        pass
+    assert _check_state_modified(env) is False
+    assert c.get_length() == 0
+
+
+def test_state_modified_nested_create_reverts():
+    """Nested contract creation that reverts should not modify state."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_target = """
+@external
+def dummy() -> uint256:
+    return 1
+    """
+
+    src_creator = """
+interface Self:
+    def inner_create(target: address): nonpayable
+
+@external
+def inner_create(target: address):
+    new_addr: address = create_minimal_proxy_to(target)
+    raise "revert"
+
+@external
+def outer_create(target: address):
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(self, abi_encode(target, method_id=method_id("inner_create(address)")), max_outsize=32, revert_on_failure=False)
+    """
+    c_target = loads(src_target)
+    c_creator = loads(src_creator)
+    Journal().reset()
+
+    c_creator.outer_create(c_target.address)
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_nested_balance_partial_revert():
+    """Nested balance transfer with partial revert should track only committed changes."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src_a = """
+interface Other:
+    def receive_and_revert(): payable
+
+@external
+def transfer_partial(other: address, receiver: address):
+    send(receiver, 100)
+    success: bool = False
+    response: Bytes[32] = b""
+    success, response = raw_call(other, method_id("receive_and_revert()"), value=200, max_outsize=32, revert_on_failure=False)
+    """
+
+    src_b = """
+@external
+@payable
+def receive_and_revert():
+    raise "revert"
+    """
+    c_a = loads(src_a)
+    c_b = loads(src_b)
+    env.set_balance(c_a.address, 1000)
+    Journal().reset()
+
+    c_a.transfer_partial(c_b.address, env.eoa)
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_multiple_types():
+    """Multiple types of state changes in one transaction."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: uint256
+arr: DynArray[uint256, 10]
+t: transient(uint256)
+
+@external
+def do_everything(receiver: address):
+    self.a = 42
+    self.arr.append(1)
+    self.t = 99
+    send(receiver, 100)
+    """
+    c = loads(src)
+    env.set_balance(c.address, 1000)
+    Journal().reset()
+
+    c.do_everything(env.eoa)
+    assert _check_state_modified(env) is True
+
+
+def test_state_modified_only_read_operations():
+    """Pure read operations should not modify state."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+a: public(uint256)
+arr: DynArray[uint256, 10]
+
+@external
+def setup():
+    self.a = 42
+    self.arr.append(1)
+    self.arr.append(2)
+
+@external
+@view
+def read_all() -> (uint256, uint256, uint256):
+    return (self.a, self.arr[0], len(self.arr))
+    """
+    c = loads(src)
+    c.setup()
+    Journal().reset()
+
+    result = c.read_all()
+    assert result == (42, 1, 2)
+    assert _check_state_modified(env) is False
+
+
+def test_state_modified_self_call_with_value():
+    """Self-call with value transfer should track state."""
+    env = Env.get_singleton()
+    Journal().reset()
+    env.reset_execution_metadata()
+
+    src = """
+received: public(uint256)
+
+interface Self:
+    def inner(): payable
+
+@external
+@payable
+def inner():
+    self.received = msg.value
+
+@external
+def outer():
+    extcall Self(self).inner(value=100)
+    """
+    c = loads(src)
+    env.set_balance(c.address, 1000)
+    Journal().reset()
+
+    c.outer()
+    assert _check_state_modified(env) is True
+    assert c.received() == 100

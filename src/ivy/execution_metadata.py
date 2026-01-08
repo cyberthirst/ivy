@@ -15,6 +15,7 @@ class ExecutionMetadata:
     branches: set[tuple[Address, int, bool]] = field(default_factory=set)
     boolops: set[tuple[Address, int, BoolOp, int, bool]] = field(default_factory=set)
     loops: set[tuple[Address, int, int]] = field(default_factory=set)
+    state_modified: bool = False
 
     def reset(self) -> None:
         self.coverage.clear()
@@ -22,6 +23,7 @@ class ExecutionMetadata:
         self.branches.clear()
         self.boolops.clear()
         self.loops.clear()
+        self.state_modified = False
 
     def merge(self, other: ExecutionMetadata) -> None:
         for addr, node_ids in other.coverage.items():
@@ -30,6 +32,7 @@ class ExecutionMetadata:
         self.branches |= other.branches
         self.boolops |= other.boolops
         self.loops |= other.loops
+        self.state_modified |= other.state_modified
 
     def coverage_signature(self) -> int:
         coverage_items = frozenset(
@@ -41,6 +44,7 @@ class ExecutionMetadata:
             frozenset(self.branches),
             frozenset(self.boolops),
             frozenset(self.loops),
+            self.state_modified,
         )
         return hash(signature)
 

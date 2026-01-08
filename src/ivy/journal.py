@@ -83,6 +83,11 @@ class Journal:
 
     def initialize(self):
         self._frame_stack = []
+        self._state_modified = False
+
+    @property
+    def state_modified(self) -> bool:
+        return self._state_modified
 
     def record(
         self, entry_type: JournalEntryType, obj: Any, key: Any, old_value: Any
@@ -125,13 +130,18 @@ class Journal:
 
         frame = self._frame_stack.pop()
 
-        # If this isn't the root frame, merge changes upward
+        if not self._frame_stack:
+            # Root frame commit - entries here represent persisted state changes
+            if frame.entries:
+                self._state_modified = True
+            return
+
+        # Not root frame - merge changes upward
         # Only add entries that parent doesn't already have - this preserves
         # the earliest old_value for proper rollback on nested calls
-        if self._frame_stack:
-            for key, entry in frame.entries.items():
-                if key not in self.current_frame.entries:
-                    self.current_frame.entries[key] = entry
+        for key, entry in frame.entries.items():
+            if key not in self.current_frame.entries:
+                self.current_frame.entries[key] = entry
 
     def _rollback(self) -> None:
         """Revert all changes in the current frame."""
