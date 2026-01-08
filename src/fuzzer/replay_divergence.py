@@ -10,12 +10,12 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
-from .export_utils import normalize_compiler_settings
-from .trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
-from .xfail import XFailExpectation
-from .runner.scenario import Scenario
-from .runner.multi_runner import MultiRunner
-from .divergence_detector import DivergenceDetector
+from fuzzer.export_utils import normalize_compiler_settings
+from fuzzer.trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
+from fuzzer.xfail import XFailExpectation
+from fuzzer.runner.scenario import Scenario
+from fuzzer.runner.multi_runner import MultiRunner
+from fuzzer.divergence_detector import DivergenceDetector
 
 
 def _load_divergence(path: Path) -> dict:

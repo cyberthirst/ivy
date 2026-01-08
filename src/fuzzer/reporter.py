@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from datetime import datetime
 
-from src.fuzzer.runner.base_scenario_runner import ScenarioResult
+from fuzzer.runner.base_scenario_runner import ScenarioResult
 
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
