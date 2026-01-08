@@ -60,14 +60,33 @@ class MultiRunner:
         coverage_collector: Optional[ArcCoverageCollector] = None,
     ) -> MultiRunnerResults:
         """Run scenario on all runners, creating fresh runner instances."""
-        # Create fresh Ivy runner
         ivy_runner = IvyScenarioRunner(
             collect_storage_dumps=self.collect_storage_dumps,
             no_solc_json=self.no_solc_json,
         )
         ivy_result = ivy_runner.run(scenario)
+        boa_results = self._run_boa_configs(scenario, coverage_collector)
+        return MultiRunnerResults(ivy_result=ivy_result, boa_results=boa_results)
 
-        # Create fresh Boa runner for each config
+    def run_boa_only(
+        self,
+        scenario: Scenario,
+        ivy_result: ScenarioResult,
+        *,
+        coverage_collector: Optional[ArcCoverageCollector] = None,
+    ) -> MultiRunnerResults:
+        boa_results = self._run_boa_configs(scenario, coverage_collector)
+
+        return MultiRunnerResults(
+            ivy_result=ivy_result,
+            boa_results=boa_results,
+        )
+
+    def _run_boa_configs(
+        self,
+        scenario: Scenario,
+        coverage_collector: Optional[ArcCoverageCollector],
+    ) -> Dict[str, tuple[CompilerConfig, ScenarioResult]]:
         boa_results: Dict[str, tuple[CompilerConfig, ScenarioResult]] = {}
         for config in self.boa_configs:
             runner = BoaScenarioRunner(
@@ -78,11 +97,7 @@ class MultiRunner:
             )
             result = runner.run(scenario)
             boa_results[config.name] = (config, result)
-
-        return MultiRunnerResults(
-            ivy_result=ivy_result,
-            boa_results=boa_results,
-        )
+        return boa_results
 
     def get_config_names(self) -> List[str]:
         """Return list of all Boa config names."""

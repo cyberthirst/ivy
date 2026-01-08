@@ -11,8 +11,9 @@ from typing import Optional
 
 from .base_fuzzer import BaseFuzzer
 from .corpus import FuzzCorpus
-from .export_utils import TestFilter, apply_unsupported_exclusions
+from .export_utils import TestFilter, exclude_unsupported_patterns
 from .issue_filter import IssueFilter, default_issue_filter
+from .harness import HarnessConfig
 from .runner.scenario import create_scenario_from_item
 
 
@@ -31,6 +32,7 @@ class GenerativeFuzzer(BaseFuzzer):
         debug_mode: bool = False,
         seed_selection_prob: float = 0.3,
         generate_prob: float = 1e-4,
+        harness_config: Optional[HarnessConfig] = None,
         issue_filter: Optional[IssueFilter] = None,
     ):
         super().__init__(
@@ -38,6 +40,7 @@ class GenerativeFuzzer(BaseFuzzer):
             seed=seed,
             debug_mode=debug_mode,
             issue_filter=issue_filter,
+            harness_config=harness_config,
         )
 
         self.corpus: FuzzCorpus = FuzzCorpus(
@@ -58,7 +61,9 @@ class GenerativeFuzzer(BaseFuzzer):
                 if item.item_type == "fixture":
                     continue
 
-                scenario = create_scenario_from_item(item, use_python_args=True)
+                scenario = create_scenario_from_item(
+                    item, use_python_args=True, include_compiler_settings=False
+                )
                 self.corpus.add_seed(scenario)
                 count += 1
 
@@ -68,6 +73,7 @@ class GenerativeFuzzer(BaseFuzzer):
     def bootstrap_corpus(self) -> int:
         """Generate aggressive mutations of each seed to bootstrap the corpus."""
         count = 0
+
         for i, seed_scenario in enumerate(self.corpus.seeds):
             scenario_seed = self.derive_scenario_seed("bootstrap", i)
 
@@ -84,7 +90,7 @@ class GenerativeFuzzer(BaseFuzzer):
                 scenario_seed,
             )
 
-            analysis = self.run_scenario(mutated)
+            analysis = self.run_scenario(mutated, seed=scenario_seed)
             self.reporter.report(analysis, debug_mode=self.debug_mode)
 
             if not analysis.compile_failures:
@@ -151,7 +157,7 @@ class GenerativeFuzzer(BaseFuzzer):
                     scenario_seed,
                 )
 
-                analysis = self.run_scenario(mutated_scenario)
+                analysis = self.run_scenario(mutated_scenario, seed=scenario_seed)
 
                 self.reporter.report(analysis, debug_mode=self.debug_mode)
 
@@ -189,7 +195,7 @@ def main():
     boa.interpret.disable_cache()
 
     test_filter = TestFilter(exclude_multi_module=True)
-    apply_unsupported_exclusions(test_filter)
+    exclude_unsupported_patterns(test_filter)
     test_filter.include_path("functional/builtins/codegen/")
     test_filter.exclude_name("zero_length_side_effects")
 
@@ -198,6 +204,7 @@ def main():
     fuzzer = GenerativeFuzzer(
         seed_selection_prob=0.3,
         issue_filter=issue_filter,
+        harness_config=HarnessConfig(),
     )
     fuzzer.fuzz_loop(test_filter=test_filter, max_iterations=None)
 

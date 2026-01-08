@@ -7,16 +7,22 @@ import random
 import hashlib
 import secrets
 import typing
-from dataclasses import asdict
+from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Optional
-from copy import deepcopy
+
+from .harness.runtime_harness import HarnessConfig
 
 from .mutator.ast_mutator import AstMutator
 from .mutator.value_mutator import ValueMutator
 from .mutator.trace_mutator import TraceMutator
 from .mutator.argument_mutator import ArgumentMutator
-from .export_utils import load_all_exports, filter_exports, TestFilter
+from .export_utils import (
+    load_all_exports,
+    filter_exports,
+    TestFilter,
+    settings_to_kwargs,
+)
 from .trace_types import (
     DeploymentTrace,
     CallTrace,
@@ -24,7 +30,7 @@ from .trace_types import (
     ClearTransientStorageTrace,
     TestExport,
 )
-from src.ivy.frontend.loader import loads_from_solc_json
+from ivy.frontend.loader import loads_from_solc_json
 
 from .runner.scenario import Scenario
 from .runner.multi_runner import MultiRunner
@@ -51,13 +57,14 @@ class BaseFuzzer:
         seed: Optional[int] = None,
         debug_mode: bool = True,
         issue_filter: Optional[IssueFilter] = None,
+        harness_config: Optional[HarnessConfig] = None,
     ):
         self.exports_dir = exports_dir
         self.seed = seed if seed is not None else secrets.randbits(64)
         self.debug_mode = debug_mode
         self.rng = random.Random(self.seed)
+        self.harness_config = harness_config
 
-        # Core components
         self.deduper = Deduper()
         self.reporter = FuzzerReporter(seed=self.seed)
         self.issue_filter = issue_filter
@@ -161,6 +168,8 @@ class BaseFuzzer:
                 if compiler_data:
                     deployment_compiler_data[trace.deployed_address] = compiler_data
 
+            # TODO disable mutations when harness is on
+            # maybe we should remove the mutation all together
             elif isinstance(trace, CallTrace):
                 if rng.random() < self.call_drop_prob:
                     continue
@@ -182,12 +191,32 @@ class BaseFuzzer:
         new_scenario.traces = new_traces
         return new_scenario
 
-    def run_scenario(self, scenario: Scenario):
+    def run_scenario(
+        self,
+        scenario: Scenario,
+        *,
+        seed: Optional[int] = None,
+    ):
         """Run a scenario and analyze results."""
-        results = self.multi_runner.run(scenario)
+        if self.harness_config is not None:
+            from .harness.runtime_harness import RuntimeHarness
+
+            harness = RuntimeHarness(self.harness_config, seed)
+            harness_result = harness.run(scenario)
+
+            results = self.multi_runner.run_boa_only(
+                harness_result.finalized_scenario,
+                harness_result.ivy_result,
+            )
+            scenario_for_analysis = harness_result.finalized_scenario
+            ivy_result = harness_result.ivy_result
+        else:
+            results = self.multi_runner.run(scenario)
+            scenario_for_analysis = scenario
+            ivy_result = results.ivy_result
 
         analysis = self.result_analyzer.analyze_run(
-            scenario, results.ivy_result, results.boa_results
+            scenario_for_analysis, ivy_result, results.boa_results
         )
 
         return analysis
@@ -196,4 +225,4 @@ class BaseFuzzer:
         """Stop timer and output final reports."""
         self.reporter.stop_timer()
         self.reporter.print_summary()
-        self.reporter.save_statistics()
+        self.reporter.save_statistics()  #
