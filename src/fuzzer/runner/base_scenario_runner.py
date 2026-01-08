@@ -9,8 +9,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
-from .scenario import Scenario
-from ..trace_types import (
+from fuzzer.runner.scenario import Scenario
+from fuzzer.trace_types import (
     Trace,
     DeploymentTrace,
     CallTrace,
@@ -19,7 +19,7 @@ from ..trace_types import (
     Env,
 )
 from vyper.exceptions import VyperException, VyperInternalException, ParserException
-from ..xfail import XFailExpectation
+from fuzzer.xfail import XFailExpectation
 
 
 @dataclass

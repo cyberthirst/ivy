@@ -10,18 +10,18 @@ from typing import Any, Dict, List, Optional, Set
 import ivy
 from ivy.execution_metadata import ExecutionMetadata
 
-from ..runner.base_scenario_runner import CallResult, ScenarioResult, TraceResult
-from ..runner.scenario import Scenario
-from ..trace_types import (
+from fuzzer.runner.base_scenario_runner import CallResult, ScenarioResult, TraceResult
+from fuzzer.runner.scenario import Scenario
+from fuzzer.trace_types import (
     CallTrace,
     ClearTransientStorageTrace,
     DeploymentTrace,
     SetBalanceTrace,
 )
 
-from .call_generator import CallGenerator
-from .timeout import CallTimeout, call_with_timeout
-from ..runner.ivy_scenario_runner import IvyScenarioRunner
+from fuzzer.harness.call_generator import CallGenerator
+from fuzzer.harness.timeout import CallTimeout, call_with_timeout
+from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
 
 @dataclass

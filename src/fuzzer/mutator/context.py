@@ -7,7 +7,7 @@ from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.semantics.types import VyperType
 from vyper.semantics.types.function import StateMutability
 
-from ..xfail import XFailExpectation
+from fuzzer.xfail import XFailExpectation
 
 
 class ScopeType(Enum):

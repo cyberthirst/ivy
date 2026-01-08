@@ -11,19 +11,19 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Optional
 
-from .harness.runtime_harness import HarnessConfig
+from fuzzer.harness.runtime_harness import HarnessConfig
 
-from .mutator.ast_mutator import AstMutator
-from .mutator.value_mutator import ValueMutator
-from .mutator.trace_mutator import TraceMutator
-from .mutator.argument_mutator import ArgumentMutator
-from .export_utils import (
+from fuzzer.mutator.ast_mutator import AstMutator
+from fuzzer.mutator.value_mutator import ValueMutator
+from fuzzer.mutator.trace_mutator import TraceMutator
+from fuzzer.mutator.argument_mutator import ArgumentMutator
+from fuzzer.export_utils import (
     load_all_exports,
     filter_exports,
     TestFilter,
     settings_to_kwargs,
 )
-from .trace_types import (
+from fuzzer.trace_types import (
     DeploymentTrace,
     CallTrace,
     SetBalanceTrace,
@@ -32,12 +32,12 @@ from .trace_types import (
 )
 from ivy.frontend.loader import loads_from_solc_json
 
-from .runner.scenario import Scenario
-from .runner.multi_runner import MultiRunner
-from .deduper import Deduper
-from .result_analyzer import ResultAnalyzer
-from .reporter import FuzzerReporter
-from .issue_filter import IssueFilter
+from fuzzer.runner.scenario import Scenario
+from fuzzer.runner.multi_runner import MultiRunner
+from fuzzer.deduper import Deduper
+from fuzzer.result_analyzer import ResultAnalyzer
+from fuzzer.reporter import FuzzerReporter
+from fuzzer.issue_filter import IssueFilter
 
 from vyper.compiler.phases import CompilerData
 from vyper.exceptions import CompilerPanic, VyperException
@@ -199,7 +199,7 @@ class BaseFuzzer:
     ):
         """Run a scenario and analyze results."""
         if self.harness_config is not None:
-            from .harness.runtime_harness import RuntimeHarness
+            from fuzzer.harness.runtime_harness import RuntimeHarness
 
             harness = RuntimeHarness(self.harness_config, seed)
             harness_result = harness.run(scenario)

@@ -3,8 +3,8 @@ from __future__ import annotations
 from vyper.ast import nodes as ast
 from vyper.semantics.types import TupleT
 
-from ..strategy import Strategy, StrategyRegistry
-from .base import MutationCtx
+from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.mutations.base import MutationCtx
 
 
 def register(registry: StrategyRegistry) -> None:

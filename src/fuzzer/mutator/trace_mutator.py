@@ -9,10 +9,10 @@ This module provides functions to mutate:
 import random
 from typing import Optional, Dict, Any
 
-from ..trace_types import CallTrace, DeploymentTrace
-from .value_mutator import ValueMutator
-from .argument_mutator import ArgumentMutator
-from .ast_mutator import AstMutator
+from fuzzer.trace_types import CallTrace, DeploymentTrace
+from fuzzer.mutator.value_mutator import ValueMutator
+from fuzzer.mutator.argument_mutator import ArgumentMutator
+from fuzzer.mutator.ast_mutator import AstMutator
 
 
 class TraceMutator:

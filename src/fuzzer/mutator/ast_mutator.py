@@ -8,21 +8,21 @@ from vyper.semantics.types import VyperType, ContractFunctionT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
-from .literal_generator import LiteralGenerator
-from .value_mutator import ValueMutator
-from .candidate_selector import CandidateSelector
-from src.fuzzer.mutator.function_registry import FunctionRegistry
-from .interface_registry import InterfaceRegistry
-from .context import Context, ScopeType, state_to_expr_mutability
-from .expr_generator import ExprGenerator
-from .stmt_generator import StatementGenerator
-from .strategy import StrategyRegistry
-from .mutation_engine import MutationEngine
-from .mutations import register_all as register_all_mutations
-from .mutations.base import MutationCtx
-from src.unparser.unparser import unparse
-from src.fuzzer.type_generator import TypeGenerator
-from src.fuzzer.xfail import XFailExpectation
+from fuzzer.mutator.literal_generator import LiteralGenerator
+from fuzzer.mutator.value_mutator import ValueMutator
+from fuzzer.mutator.candidate_selector import CandidateSelector
+from fuzzer.mutator.function_registry import FunctionRegistry
+from fuzzer.mutator.interface_registry import InterfaceRegistry
+from fuzzer.mutator.context import Context, ScopeType, state_to_expr_mutability
+from fuzzer.mutator.expr_generator import ExprGenerator
+from fuzzer.mutator.stmt_generator import StatementGenerator
+from fuzzer.mutator.strategy import StrategyRegistry
+from fuzzer.mutator.mutation_engine import MutationEngine
+from fuzzer.mutator.mutations import register_all as register_all_mutations
+from fuzzer.mutator.mutations.base import MutationCtx
+from unparser.unparser import unparse
+from fuzzer.type_generator import TypeGenerator
+from fuzzer.xfail import XFailExpectation
 
 
 @dataclass

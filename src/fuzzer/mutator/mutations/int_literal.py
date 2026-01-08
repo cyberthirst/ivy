@@ -3,9 +3,9 @@ from __future__ import annotations
 from vyper.ast import nodes as ast
 from vyper.semantics.types import IntegerT
 
-from ..strategy import Strategy, StrategyRegistry
-from .base import MutationCtx
-from src.fuzzer.xfail import XFailExpectation
+from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.mutations.base import MutationCtx
+from fuzzer.xfail import XFailExpectation
 
 
 def _check_bounds_and_xfail(ctx: MutationCtx, new_value: int) -> None:

@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Callable, Optional
 
-from .reporter import _make_json_serializable
+from fuzzer.reporter import _make_json_serializable
 
 
 class IssueType(StrEnum):

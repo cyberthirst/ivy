@@ -22,8 +22,8 @@ from vyper.semantics.types import (
     VyperType,
 )
 
-from .base_value_generator import BaseValueGenerator
-from .value_mutator import ValueMutator
+from fuzzer.mutator.base_value_generator import BaseValueGenerator
+from fuzzer.mutator.value_mutator import ValueMutator
 
 
 class LiteralGenerator(BaseValueGenerator):

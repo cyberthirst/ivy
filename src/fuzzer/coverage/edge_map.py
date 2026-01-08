@@ -7,7 +7,7 @@ from __future__ import annotations
 import hashlib
 from typing import Dict, Optional, Set, Tuple
 
-from .collector import Arc
+from fuzzer.coverage.collector import Arc
 
 
 def _canonical_vyper_filename(filename: str) -> str:

@@ -10,11 +10,11 @@ from typing import Any, Dict, List, Optional
 
 from vyper.compiler.settings import OptimizationLevel
 
-from .base_scenario_runner import ScenarioResult
-from .scenario import Scenario
-from .ivy_scenario_runner import IvyScenarioRunner
-from .boa_scenario_runner import BoaScenarioRunner
-from ..coverage.collector import ArcCoverageCollector
+from fuzzer.runner.base_scenario_runner import ScenarioResult
+from fuzzer.runner.scenario import Scenario
+from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
+from fuzzer.runner.boa_scenario_runner import BoaScenarioRunner
+from fuzzer.coverage.collector import ArcCoverageCollector
 
 
 @dataclass

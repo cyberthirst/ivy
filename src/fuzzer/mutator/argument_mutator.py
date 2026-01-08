@@ -8,7 +8,7 @@ deployment (constructor) and regular function calls.
 import random
 from typing import List, Any, Optional, Tuple
 
-from .value_mutator import ValueMutator
+from fuzzer.mutator.value_mutator import ValueMutator
 from vyper.semantics.types.function import ContractFunctionT
 
 

@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Union, Callable
 
 from vyper.compiler.settings import Settings
 
-from .trace_types import (
+from fuzzer.trace_types import (
     Tx,
     Block,
     Env,

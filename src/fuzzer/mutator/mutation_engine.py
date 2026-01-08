@@ -4,8 +4,8 @@ import random
 
 from vyper.ast import nodes as ast
 
-from .strategy import StrategyRegistry, StrategySelector, StrategyExecutor
-from .mutations.base import MutationCtx
+from fuzzer.mutator.strategy import StrategyRegistry, StrategySelector, StrategyExecutor
+from fuzzer.mutator.mutations.base import MutationCtx
 
 
 class MutationEngine:

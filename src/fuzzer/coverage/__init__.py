@@ -2,11 +2,11 @@
 Coverage-guided fuzzing utilities.
 """
 
-from .collector import ArcCoverageCollector
-from .corpus import Corpus, CorpusEntry
-from .edge_map import EdgeMap
-from .gatekeeper import Gatekeeper, GatekeeperDecision
-from .tracker import GlobalEdgeTracker
+from fuzzer.coverage.collector import ArcCoverageCollector
+from fuzzer.coverage.corpus import Corpus, CorpusEntry
+from fuzzer.coverage.edge_map import EdgeMap
+from fuzzer.coverage.gatekeeper import Gatekeeper, GatekeeperDecision
+from fuzzer.coverage.tracker import GlobalEdgeTracker
 
 __all__ = [
     "ArcCoverageCollector",

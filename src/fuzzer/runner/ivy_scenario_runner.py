@@ -8,9 +8,9 @@ import ivy
 from ivy.frontend.loader import loads_from_solc_json, loads
 from ivy.types import Address
 
-from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
-from .scenario import Scenario
-from ..trace_types import Env
+from fuzzer.runner.base_scenario_runner import BaseScenarioRunner, ScenarioResult
+from fuzzer.runner.scenario import Scenario
+from fuzzer.trace_types import Env
 
 
 class IvyScenarioRunner(BaseScenarioRunner):

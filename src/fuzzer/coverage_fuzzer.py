@@ -8,15 +8,15 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .base_fuzzer import BaseFuzzer
-from .coverage.collector import ArcCoverageCollector
-from .coverage.corpus import Corpus, CorpusEntry, scenario_source_size
-from .coverage.edge_map import EdgeMap
-from .coverage.gatekeeper import Gatekeeper, all_boa_configs_failed_to_compile
-from .coverage.tracker import GlobalEdgeTracker
-from .export_utils import TestFilter
-from .issue_filter import IssueFilter
-from .runner.scenario import create_scenario_from_item
+from fuzzer.base_fuzzer import BaseFuzzer
+from fuzzer.coverage.collector import ArcCoverageCollector
+from fuzzer.coverage.corpus import Corpus, CorpusEntry, scenario_source_size
+from fuzzer.coverage.edge_map import EdgeMap
+from fuzzer.coverage.gatekeeper import Gatekeeper, all_boa_configs_failed_to_compile
+from fuzzer.coverage.tracker import GlobalEdgeTracker
+from fuzzer.export_utils import TestFilter
+from fuzzer.issue_filter import IssueFilter
+from fuzzer.runner.scenario import create_scenario_from_item
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
@@ -118,7 +118,7 @@ class CoverageGuidedFuzzer(BaseFuzzer):
 
     def gatekeeper_decision_fp(self, edge_ids: set[int]) -> str:
         # Avoid importing fingerprint helper at module import time.
-        from .coverage.gatekeeper import coverage_fingerprint
+        from fuzzer.coverage.gatekeeper import coverage_fingerprint
 
         return coverage_fingerprint(edge_ids)
 
@@ -222,8 +222,8 @@ class CoverageGuidedFuzzer(BaseFuzzer):
 
 
 def main():
-    from .export_utils import apply_unsupported_exclusions
-    from .issue_filter import default_issue_filter
+    from fuzzer.export_utils import apply_unsupported_exclusions
+    from fuzzer.issue_filter import default_issue_filter
 
     test_filter = TestFilter(exclude_multi_module=True)
     apply_unsupported_exclusions(test_filter)

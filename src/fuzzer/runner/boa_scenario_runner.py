@@ -15,10 +15,10 @@ from vyper.compiler.input_bundle import FileInput, JSONInputBundle
 from vyper.compiler.phases import CompilerData
 from vyper.compiler.settings import Settings
 
-from .base_scenario_runner import BaseScenarioRunner, ScenarioResult
-from .scenario import Scenario
-from ..trace_types import Env
-from ..coverage.collector import ArcCoverageCollector
+from fuzzer.runner.base_scenario_runner import BaseScenarioRunner, ScenarioResult
+from fuzzer.runner.scenario import Scenario
+from fuzzer.trace_types import Env
+from fuzzer.coverage.collector import ArcCoverageCollector
 
 
 def _load_from_solc_json(

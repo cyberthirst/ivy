@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from vyper.ast import nodes as ast
 
-from ..strategy import Strategy, StrategyRegistry
-from .base import MutationCtx
+from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.mutations.base import MutationCtx
 
 
 OP_SWAPS = {

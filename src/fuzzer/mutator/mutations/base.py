@@ -7,10 +7,10 @@ import random
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType
 
-from ..context import Context
-from ..expr_generator import ExprGenerator
-from ..stmt_generator import StatementGenerator
-from ..function_registry import FunctionRegistry
+from fuzzer.mutator.context import Context
+from fuzzer.mutator.expr_generator import ExprGenerator
+from fuzzer.mutator.stmt_generator import StatementGenerator
+from fuzzer.mutator.function_registry import FunctionRegistry
 
 if TYPE_CHECKING:
     from ..value_mutator import ValueMutator

@@ -10,14 +10,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
-from .runner.scenario import Scenario
-from .runner.base_scenario_runner import ScenarioResult, DeploymentResult
-from .divergence_detector import DivergenceDetector, Divergence
-from .deduper import Deduper, KeepDecision
-from .issue_filter import IssueFilter, IssueType as IT
+from fuzzer.runner.scenario import Scenario
+from fuzzer.runner.base_scenario_runner import ScenarioResult, DeploymentResult
+from fuzzer.divergence_detector import DivergenceDetector, Divergence
+from fuzzer.deduper import Deduper, KeepDecision
+from fuzzer.issue_filter import IssueFilter, IssueType as IT
 
 if TYPE_CHECKING:
-    from .runner.multi_runner import CompilerConfig
+    from fuzzer.runner.multi_runner import CompilerConfig
 
 
 @dataclass

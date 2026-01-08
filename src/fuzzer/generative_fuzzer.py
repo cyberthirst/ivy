@@ -9,12 +9,12 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from .base_fuzzer import BaseFuzzer
-from .corpus import FuzzCorpus
-from .export_utils import TestFilter, exclude_unsupported_patterns
-from .issue_filter import IssueFilter, default_issue_filter
-from .harness import HarnessConfig
-from .runner.scenario import create_scenario_from_item
+from fuzzer.base_fuzzer import BaseFuzzer
+from fuzzer.corpus import FuzzCorpus
+from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
+from fuzzer.issue_filter import IssueFilter, default_issue_filter
+from fuzzer.harness import HarnessConfig
+from fuzzer.runner.scenario import create_scenario_from_item
 
 
 class GenerativeFuzzer(BaseFuzzer):

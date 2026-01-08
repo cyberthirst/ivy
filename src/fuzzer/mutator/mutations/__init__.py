@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ..strategy import StrategyRegistry
-from . import (
+from fuzzer.mutator.strategy import StrategyRegistry
+from fuzzer.mutator.mutations import (
     module,
     int_literal,
     function_def,

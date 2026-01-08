@@ -2,9 +2,9 @@
 Runtime harness for coverage-guided ABI fuzzing.
 """
 
-from .runtime_harness import RuntimeHarness, HarnessConfig, HarnessResult
-from .timeout import CallTimeout, call_with_timeout
-from .call_generator import CallGenerator
+from fuzzer.harness.runtime_harness import RuntimeHarness, HarnessConfig, HarnessResult
+from fuzzer.harness.timeout import CallTimeout, call_with_timeout
+from fuzzer.harness.call_generator import CallGenerator
 
 __all__ = [
     "RuntimeHarness",

@@ -8,9 +8,9 @@ from dataclasses import dataclass
 import random
 from typing import Dict, List, Optional, Set
 
-from ..runner.scenario import Scenario
-from ..trace_types import DeploymentTrace
-from .tracker import GlobalEdgeTracker
+from fuzzer.runner.scenario import Scenario
+from fuzzer.trace_types import DeploymentTrace
+from fuzzer.coverage.tracker import GlobalEdgeTracker
 
 
 def scenario_source_size(scenario: Scenario) -> int:

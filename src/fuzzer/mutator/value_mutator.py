@@ -20,7 +20,7 @@ from vyper.semantics.types import (
     VyperType,
 )
 
-from .base_value_generator import BaseValueGenerator
+from fuzzer.mutator.base_value_generator import BaseValueGenerator
 
 
 class ValueMutator(BaseValueGenerator):

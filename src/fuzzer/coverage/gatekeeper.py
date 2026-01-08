@@ -8,9 +8,9 @@ import hashlib
 from dataclasses import dataclass
 from typing import Dict, Optional, Set, Tuple
 
-from ..runner.base_scenario_runner import ScenarioResult, DeploymentResult
-from ..result_analyzer import AnalysisResult
-from .tracker import GlobalEdgeTracker
+from fuzzer.runner.base_scenario_runner import ScenarioResult, DeploymentResult
+from fuzzer.result_analyzer import AnalysisResult
+from fuzzer.coverage.tracker import GlobalEdgeTracker
 
 
 def coverage_fingerprint(edge_ids: Set[int]) -> str:

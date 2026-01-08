@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TypeAlias, Union
 
-from .xfail import XFailExpectation
+from fuzzer.xfail import XFailExpectation
 
 
 @dataclass

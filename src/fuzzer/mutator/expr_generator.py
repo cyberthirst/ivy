@@ -20,16 +20,21 @@ from vyper.semantics.types import (
     TYPE_T,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
-from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
+from vyper.semantics.analysis.base import DataLocation, VarInfo
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
-from .literal_generator import LiteralGenerator
-from .context import Context, ExprMutability
-from .function_registry import FunctionRegistry
-from .interface_registry import InterfaceRegistry
-from .strategy import Strategy, StrategyRegistry, StrategySelector, StrategyExecutor
-from src.fuzzer.xfail import XFailExpectation
-from src.fuzzer.type_generator import TypeGenerator
+from fuzzer.mutator.literal_generator import LiteralGenerator
+from fuzzer.mutator.context import Context, ExprMutability
+from fuzzer.mutator.function_registry import FunctionRegistry
+from fuzzer.mutator.interface_registry import InterfaceRegistry
+from fuzzer.mutator.strategy import (
+    Strategy,
+    StrategyRegistry,
+    StrategySelector,
+    StrategyExecutor,
+)
+from fuzzer.xfail import XFailExpectation
+from fuzzer.type_generator import TypeGenerator
 
 
 class ExprGenerator:

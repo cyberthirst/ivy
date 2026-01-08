@@ -26,7 +26,7 @@ import traceback
 from dataclasses import dataclass
 from typing import Dict, Optional, Set, Tuple
 
-from .divergence_detector import Divergence, DivergenceType
+from fuzzer.divergence_detector import Divergence, DivergenceType
 
 
 def extract_stack_frames(error: Optional[Exception], n: int = 3) -> Tuple[str, ...]:

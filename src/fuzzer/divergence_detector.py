@@ -9,13 +9,17 @@ from functools import cached_property
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
-from .runner.scenario import Scenario
-from .runner.base_scenario_runner import ScenarioResult, DeploymentResult, CallResult
-from .storage_normalizer import normalize_storage_dump
-from .xfail import XFailExpectation
+from fuzzer.runner.scenario import Scenario
+from fuzzer.runner.base_scenario_runner import (
+    ScenarioResult,
+    DeploymentResult,
+    CallResult,
+)
+from fuzzer.storage_normalizer import normalize_storage_dump
+from fuzzer.xfail import XFailExpectation
 
 if TYPE_CHECKING:
-    from .runner.multi_runner import CompilerConfig
+    from fuzzer.runner.multi_runner import CompilerConfig
 
 
 class DivergenceType(StrEnum):

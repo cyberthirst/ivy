@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 from pathlib import Path
 
-from ..trace_types import Trace, TestItem, TestExport
-from ..export_utils import load_export
+from fuzzer.trace_types import Trace, TestItem, TestExport
+from fuzzer.export_utils import load_export
 
 
 @dataclass
