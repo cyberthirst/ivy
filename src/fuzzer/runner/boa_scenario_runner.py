@@ -57,13 +57,12 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
     def __init__(
         self,
-        compiler_args: Optional[Dict[str, Any]] = None,
         collect_storage_dumps: bool = False,
+        compiler_settings: Optional[Dict[str, Any]] = None,
         coverage_collector: Optional[ArcCoverageCollector] = None,
         config_name: Optional[str] = None,
     ):
-        super().__init__(boa.env, collect_storage_dumps)
-        self.compiler_args = compiler_args or {}
+        super().__init__(boa.env, collect_storage_dumps, compiler_settings)
         self.coverage_collector = coverage_collector
         self.config_name = config_name
 
@@ -79,11 +78,6 @@ class BoaScenarioRunner(BaseScenarioRunner):
         """Deploy a contract from source in Boa."""
         sender = self._get_sender(sender)
 
-        merged_args = {
-            **(compiler_settings or {}),
-            **self.compiler_args,
-        }
-
         with self.env.prank(sender):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
@@ -91,17 +85,19 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
             if solc_json is not None and len(solc_json.get("sources", {})) > 1:
                 return _load_from_solc_json(
-                    solc_json, *args, compiler_args=merged_args, **kwargs
+                    solc_json, *args, compiler_args=compiler_settings, **kwargs
                 )
 
             if self.coverage_collector is None:
-                return boa.loads(source, *args, compiler_args=merged_args, **kwargs)
+                return boa.loads(
+                    source, *args, compiler_args=compiler_settings, **kwargs
+                )
 
             # Track coverage of Vyper's codegen/IR/venom passes during compilation.
             # loads_partial triggers full compilation via VyperDeployer.__init__.
             with self.coverage_collector.collect_compile(config_name=self.config_name):
                 deployer = boa.loads_partial(
-                    source, compiler_args=merged_args, no_vvm=True
+                    source, compiler_args=compiler_settings, no_vvm=True
                 )
             return deployer.deploy(*args, **kwargs)
 

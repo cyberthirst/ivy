@@ -161,11 +161,18 @@ class ScenarioResult:
 class BaseScenarioRunner(ABC):
     """Base class for scenario runners that handle all trace types and dependencies."""
 
-    def __init__(self, env: Any, collect_storage_dumps: bool = False):
+    def __init__(
+        self,
+        env: Any,
+        collect_storage_dumps: bool = False,
+        compiler_settings: Optional[Dict[str, Any]] = None,
+    ):
         self.env = env
         self.deployed_contracts: Dict[str, Any] = {}
         self.executed_dependencies: Set[str] = set()
         self.collect_storage_dumps = collect_storage_dumps
+        # Runner-level compiler settings (takes precedence over trace settings)
+        self.compiler_settings = compiler_settings or {"enable_decimals": True}
 
     @abstractmethod
     def _deploy_from_source(
@@ -354,14 +361,18 @@ class BaseScenarioRunner(ABC):
                     else {"value": trace.value}
                 )
 
-            # Deploy the contract
+            merged_settings = {
+                **(trace.compiler_settings or {}),
+                **self.compiler_settings,
+            }
+
             contract = self._deploy_from_source(
                 source=source_to_deploy,
                 solc_json=trace.solc_json,
                 args=args,
                 kwargs=kwargs,
                 sender=trace.env.tx.origin if trace.env else None,
-                compiler_settings=trace.compiler_settings,
+                compiler_settings=merged_settings,
             )
 
             # Store the deployed contract by its address

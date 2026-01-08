@@ -90,7 +90,7 @@ class MultiRunner:
         boa_results: Dict[str, tuple[CompilerConfig, ScenarioResult]] = {}
         for config in self.boa_configs:
             runner = BoaScenarioRunner(
-                compiler_args=config.compiler_args,
+                compiler_settings=config.compiler_args,
                 collect_storage_dumps=self.collect_storage_dumps,
                 coverage_collector=coverage_collector,
                 config_name=config.name,

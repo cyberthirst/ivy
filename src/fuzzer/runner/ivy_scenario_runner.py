@@ -16,8 +16,13 @@ from ..trace_types import Env
 class IvyScenarioRunner(BaseScenarioRunner):
     """Runner for executing scenarios in Ivy."""
 
-    def __init__(self, collect_storage_dumps: bool = False, no_solc_json: bool = False):
-        super().__init__(ivy.env, collect_storage_dumps)
+    def __init__(
+        self,
+        collect_storage_dumps: bool = False,
+        no_solc_json: bool = False,
+        compiler_settings: Optional[Dict[str, Any]] = None,
+    ):
+        super().__init__(ivy.env, collect_storage_dumps, compiler_settings)
         self._original_eoa = None
         self.no_solc_json = no_solc_json
 
