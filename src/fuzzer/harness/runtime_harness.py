@@ -10,20 +10,30 @@ from typing import Any, Dict, List, Optional, Set
 import ivy
 from ivy.execution_metadata import ExecutionMetadata
 
+from ..runner.base_scenario_runner import CallResult, ScenarioResult, TraceResult
 from ..runner.scenario import Scenario
-from ..runner.ivy_scenario_runner import IvyScenarioRunner
-from ..trace_types import CallTrace, DeploymentTrace
+from ..trace_types import (
+    CallTrace,
+    ClearTransientStorageTrace,
+    DeploymentTrace,
+    SetBalanceTrace,
+)
 
 from .call_generator import CallGenerator
 from .timeout import CallTimeout, call_with_timeout
+from ..runner.ivy_scenario_runner import IvyScenarioRunner
 
 
 @dataclass
 class HarnessConfig:
+    # Harness behavior
     max_fuzz_calls: int = 100
     plateau_calls: int = 20
     call_timeout_s: float = 5.0
     map_size: int = 1 << 16
+    # Runner behavior
+    collect_storage_dumps: bool = True
+    no_solc_json: bool = True
 
 
 @dataclass
@@ -37,9 +47,14 @@ class HarnessStats:
 
 @dataclass
 class HarnessResult:
-    finalized_traces: List[Any]
+    finalized_scenario: Scenario
+    ivy_result: ScenarioResult
     stats: HarnessStats
     runtime_edge_ids: Set[int]
+
+    @property
+    def finalized_traces(self) -> List[Any]:
+        return self.finalized_scenario.traces
 
 
 class RuntimeEdgeMap:
@@ -88,73 +103,117 @@ class RuntimeCoverageTracker:
 class RuntimeHarness:
     def __init__(
         self,
-        config: Optional[HarnessConfig] = None,
-        rng: Optional[random.Random] = None,
+        config: HarnessConfig | None = None,
+        seed: int | None = None,
     ):
         self.config = config or HarnessConfig()
-        self.rng = rng or random.Random()
+        self.rng = random.Random(seed)
+        self.runner = IvyScenarioRunner(
+            collect_storage_dumps=self.config.collect_storage_dumps,
+            no_solc_json=self.config.no_solc_json,
+        )
         self.edge_map = RuntimeEdgeMap(self.config.map_size)
         self.call_generator = CallGenerator(self.rng)
 
     def run(self, scenario: Scenario) -> HarnessResult:
-        stats = HarnessStats()
-        tracker = RuntimeCoverageTracker(self.config.map_size)
-        finalized_traces: List[Any] = []
+        with self.runner.env.anchor():
+            self.runner.deployed_contracts = {}
+            self.runner.executed_dependencies = set()
 
-        runner = IvyScenarioRunner(collect_storage_dumps=False, no_solc_json=True)
+            stats = HarnessStats()
+            tracker = RuntimeCoverageTracker(self.config.map_size)
+            finalized_traces: List[Any] = []
+            trace_results: List[TraceResult] = []
 
-        deployed_contracts: Dict[str, Any] = {}
-        for trace in scenario.traces:
-            if isinstance(trace, DeploymentTrace):
-                finalized_traces.append(trace)
+            deployed_contracts: Dict[str, Any] = {}
+            trace_index = 0
 
-        with ivy.env.anchor():
             for dep_scenario in scenario.dependencies:
-                runner._execute_dependency_scenario(dep_scenario)
+                self.runner._execute_dependency_scenario(dep_scenario)
 
             for trace in scenario.traces:
                 if isinstance(trace, DeploymentTrace):
-                    result = runner._execute_deployment(
-                        trace, use_python_args=scenario.use_python_args
+                    finalized_traces.append(trace)
+                    trace_result = self.runner.execute_trace(
+                        trace, trace_index, scenario.use_python_args
                     )
-                    if result.success and result.contract:
-                        addr = trace.deployed_address
-                        deployed_contracts[addr] = result.contract
+                    trace_results.append(trace_result)
+                    if trace_result.result and trace_result.result.success:
+                        if (
+                            hasattr(trace_result.result, "contract")
+                            and trace_result.result.contract
+                        ):
+                            deployed_contracts[trace.deployed_address] = (
+                                trace_result.result.contract
+                            )
+                    trace_index += 1
+
+                elif isinstance(trace, (SetBalanceTrace, ClearTransientStorageTrace)):
+                    finalized_traces.append(trace)
+                    trace_result = self.runner.execute_trace(
+                        trace, trace_index, scenario.use_python_args
+                    )
+                    trace_results.append(trace_result)
+                    trace_index += 1
 
             ivy.env.reset_execution_metadata()
 
             self._seed_enumerate_externals(
-                deployed_contracts, runner, tracker, finalized_traces, stats
+                deployed_contracts,
+                self.runner,
+                tracker,
+                finalized_traces,
+                trace_results,
+                stats,
             )
 
             self._seed_replay_parent_traces(
-                scenario, runner, tracker, finalized_traces, stats
+                scenario,
+                self.runner,
+                tracker,
+                finalized_traces,
+                trace_results,
+                stats,
             )
 
             self._fuzz_calls(
-                deployed_contracts, runner, tracker, finalized_traces, stats
+                deployed_contracts,
+                self.runner,
+                tracker,
+                finalized_traces,
+                trace_results,
+                stats,
             )
 
-        return HarnessResult(
-            finalized_traces=finalized_traces,
-            stats=stats,
-            runtime_edge_ids=tracker._seen,
-        )
+            ivy_result = ScenarioResult(results=trace_results)
+            finalized_scenario = Scenario(
+                traces=finalized_traces,
+                dependencies=scenario.dependencies,
+                use_python_args=True,
+            )
 
-    def _execute_call_with_timeout(
+            return HarnessResult(
+                finalized_scenario=finalized_scenario,
+                ivy_result=ivy_result,
+                stats=stats,
+                runtime_edge_ids=tracker._seen,
+            )
+
+    def _execute_trace_with_timeout(
         self,
         runner: IvyScenarioRunner,
         trace: CallTrace,
+        trace_index: int,
         use_python_args: bool,
-    ) -> bool:
-        try:
-            with call_with_timeout(self.config.call_timeout_s):
-                runner._execute_call(trace, use_python_args=use_python_args)
-            return True
-        except CallTimeout:
-            return False
-        except Exception:
-            return True
+    ) -> Optional[TraceResult]:
+        with call_with_timeout(self.config.call_timeout_s):
+            trace_result = runner.execute_trace(trace, trace_index, use_python_args)
+
+        if isinstance(trace_result.result, CallResult):
+            if isinstance(trace_result.result.error, CallTimeout):
+                return None
+
+        return trace_result
 
     def _get_coverage_delta(self, tracker: RuntimeCoverageTracker) -> int:
         metadata = ivy.env.execution_metadata
@@ -168,6 +227,7 @@ class RuntimeHarness:
         runner: IvyScenarioRunner,
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
+        trace_results: List[TraceResult],
         stats: HarnessStats,
     ) -> None:
         for addr, contract in deployed_contracts.items():
@@ -178,11 +238,14 @@ class RuntimeHarness:
                 )
                 trace = self.call_generator.call_trace_from_generated(generated, addr)
 
-                success = self._execute_call_with_timeout(runner, trace, True)
+                trace_result = self._execute_trace_with_timeout(
+                    runner, trace, len(finalized_traces), True
+                )
                 stats.enumeration_calls += 1
 
-                if success:
+                if trace_result is not None:
                     finalized_traces.append(trace)
+                    trace_results.append(trace_result)
                     new_cov = self._get_coverage_delta(tracker)
                     if new_cov > 0:
                         stats.new_coverage_calls += 1
@@ -195,6 +258,7 @@ class RuntimeHarness:
         runner: IvyScenarioRunner,
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
+        trace_results: List[TraceResult],
         stats: HarnessStats,
     ) -> None:
         for trace in scenario.traces:
@@ -202,13 +266,14 @@ class RuntimeHarness:
                 continue
 
             trace_copy = deepcopy(trace)
-            success = self._execute_call_with_timeout(
-                runner, trace_copy, scenario.use_python_args
+            trace_result = self._execute_trace_with_timeout(
+                runner, trace_copy, len(finalized_traces), scenario.use_python_args
             )
             stats.replay_calls += 1
 
-            if success:
+            if trace_result is not None:
                 finalized_traces.append(trace_copy)
+                trace_results.append(trace_result)
                 new_cov = self._get_coverage_delta(tracker)
                 if new_cov > 0:
                     stats.new_coverage_calls += 1
@@ -221,6 +286,7 @@ class RuntimeHarness:
         runner: IvyScenarioRunner,
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
+        trace_results: List[TraceResult],
         stats: HarnessStats,
     ) -> None:
         if not deployed_contracts:
@@ -247,11 +313,14 @@ class RuntimeHarness:
             generated = self.call_generator.mutate_call(generated)
             trace = self.call_generator.call_trace_from_generated(generated, addr)
 
-            success = self._execute_call_with_timeout(runner, trace, True)
+            trace_result = self._execute_trace_with_timeout(
+                runner, trace, len(finalized_traces), True
+            )
             stats.fuzz_calls += 1
 
-            if success:
+            if trace_result is not None:
                 finalized_traces.append(trace)
+                trace_results.append(trace_result)
                 new_cov = self._get_coverage_delta(tracker)
                 if new_cov > 0:
                     stats.new_coverage_calls += 1
