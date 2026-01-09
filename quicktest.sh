@@ -6,4 +6,4 @@
 
 # run pytest but bail out on first error
 # useful for dev workflow
-pytest -q -s --instafail -x --disable-warnings "$@"
+uv run pytest -q -s --instafail -x --disable-warnings "$@"

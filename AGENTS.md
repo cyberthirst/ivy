@@ -8,33 +8,37 @@ against Ivy's source-level interpretation.
 ## Build & Test Commands
 
 ### Environment Setup
-**IMPORTANT**: All commands must run in the `venv` located in the project root.
+This project uses `uv` for dependency management.
 ```bash
-source venv/bin/activate                  # Always activate first!
-pip install -e ".[dev]"                   # Dev dependencies (ruff, pyright, pytest, hypothesis) - you can assume this is already installed
+uv sync --all-extras                      # Install all dependencies (creates .venv/ automatically)
+```
+To run commands, use `uv run` (no manual activation needed):
+```bash
+uv run pytest tests/ivy/ -v -s
+uv run python -m src.fuzzer.generative_fuzzer
 ```
 
 ### Critical Tests (MUST PASS after any interpreter change)
 ```bash
 # 1. AST interpretation & EVM semantics test
-pytest tests/ivy/ -v -s
+uv run pytest tests/ivy/ -v -s
 
 # 2. Vyper export replay - thousands of tests from Vyper's test suite
-pytest tests/test_replay.py -v -s -n auto
+uv run pytest tests/test_replay.py -v -s -n auto
 ```
 
 ### Linting & Type Checking
 ```bash
-ruff check src/                           # Lint
-ruff format src/                          # Format
-ruff check src/ --fix                     # Auto-fix lint issues
-pyright src/                              # Type check
+uv run ruff check src/                    # Lint
+uv run ruff format src/                   # Format
+uv run ruff check src/ --fix              # Auto-fix lint issues
+uv run pyright src/                       # Type check
 ./check.sh                                # Run all checks (ruff + pyright)
 ```
 
 ### Running the Fuzzer
 ```bash
-python -m src.fuzzer.generative_fuzzer
+uv run python -m src.fuzzer.generative_fuzzer
 ```
 
 ## Code Style Guidelines
@@ -158,7 +162,7 @@ with env.anchor():
 3. **Comments**: Only for non-obvious logic.
 4. **Focus**: Compiler correctness bugs only, not lexer/parser bugs.
 5. **Testing**: Use `pytest -n1` when debugging. Run `./check.sh` before commits.
-6. **PYTHONPATH**: Already configured in `pytest.ini`. For scripts: `export PYTHONPATH=src`
+6. **PYTHONPATH**: Already configured in `pytest.ini`. For scripts, use `uv run` which handles this automatically.
 
 ## Available Skills
 
@@ -166,7 +170,7 @@ Skills are located in `.opencode/skill/<name>/SKILL.md`:
 
 | Skill | Purpose |
 |-------|---------|
-| **boa** | Titanoboa testing framework - source in venv, writing tests, debugging |
+| **boa** | Titanoboa testing framework - source in .venv, writing tests, debugging |
 | **vyper** | Vyper compiler internals - AST, types, compilation pipeline |
 | **replay** | Replaying divergences, finding root cause, debugging workflow |
 | **dedup-divergences** | Batch analysis of fuzzer divergences, parallel subagent workflow |

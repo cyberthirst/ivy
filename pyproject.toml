@@ -3,7 +3,7 @@ name = "ivy"
 version = "0.1.0"
 description = "An AST interpreter for Vyper with a custom EVM backend"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "vyper @ git+https://github.com/vyperlang/vyper.git@79d076225105d6416ba71e23c8ac896d15104c5a",
     "eth-utils>=5.3.1",
