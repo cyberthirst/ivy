@@ -1,10 +1,6 @@
 ---
 name: boa
-description: Titanoboa testing framework for Vyper - read source in venv, write tests, debug execution differences against Ivy interpreter
-compatibility: opencode
-metadata:
-  domain: ethereum
-  language: vyper
+description: Titanoboa testing framework for Vyper - read source in .venv, write tests, debug execution differences against Ivy interpreter
 ---
 
 # Titanoboa (boa) Skill
@@ -12,19 +8,13 @@ metadata:
 ## Overview
 Titanoboa is a Vyper interpreter/testing framework. It compiles Vyper source to bytecode and executes it in a Python-based EVM (py-evm). In Ivy's differential fuzzing, Boa serves as the reference implementation against which Ivy's AST interpreter is compared.
 
-## Installation
-Titanoboa is already installed in the project's `venv/`. Always activate before use:
-```bash
-source venv/bin/activate
-```
-
 ## Reading Boa Source Code
-The boa source is installed in the venv. To inspect it:
+Boa is installed in the project's `.venv/`. To find the source:
 ```bash
 # Find boa installation path
-python -c "import boa; print(boa.__file__)"
+uv run python -c "import boa; print(boa.__file__)"
 
-# Typically at: venv/lib/python3.x/site-packages/boa/
+# Typically at: .venv/lib/python3.x/site-packages/boa/
 ```
 
 Key modules to understand:
@@ -64,7 +54,10 @@ with boa.reverts("error message"):
 import boa
 
 # Set block timestamp
-boa.env.vm.patch.timestamp = 1234567890
+boa.env.evm.patch.timestamp = 1234567890
+
+# Time travel (advance by seconds)
+boa.env.time_travel(seconds=100)
 
 # Set msg.sender
 with boa.env.prank(some_address):
@@ -74,9 +67,8 @@ with boa.env.prank(some_address):
 contract.payable_func(value=1000)
 
 # Snapshot and revert state
-snapshot = boa.env.snapshot()
-# ... do stuff ...
-boa.env.revert(snapshot)
+with boa.env.anchor():
+    # Changes in this block are rolled back after
 ```
 
 ## Debugging Tips

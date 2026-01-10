@@ -1,10 +1,6 @@
 ---
 name: replay
 description: Replay fuzzer divergences to reproduce bugs, find root cause by comparing Ivy AST interpreter vs Boa bytecode execution
-compatibility: opencode
-metadata:
-  domain: fuzzing
-  workflow: debugging
 ---
 
 # Replay Divergence Skill
@@ -19,8 +15,7 @@ A **divergence** occurs when Ivy's AST interpreter produces a different result t
 Use `src/fuzzer/replay_divergence.py` to reproduce a divergence:
 
 ```bash
-source venv/bin/activate
-PYTHONPATH=src python -m fuzzer.replay_divergence path/to/divergence.json
+uv run python -m src.fuzzer.replay_divergence path/to/divergence.json
 ```
 
 Exit codes:
@@ -45,7 +40,7 @@ See `trace-format.json` for full schema. Key fields:
 
 ### Step 1: Reproduce
 ```bash
-PYTHONPATH=src python -m fuzzer.replay_divergence path/to/divergence.json
+uv run python -m src.fuzzer.replay_divergence path/to/divergence.json
 ```
 
 ### Step 2: Extract Source Code
@@ -89,7 +84,7 @@ print(f"Ivy: {ivy_result}, Boa: {boa_result}")
 ## Related Skills
 - Use **boa** skill to understand Boa's execution model
 - Use **vyper** skill to inspect compiler internals
-- Both boa and vyper source are in `venv/` for inspection
+- Both boa and vyper source are in `.venv/` for inspection
 
 ## Debugging Tips
 1. Add debug prints in Ivy's visitor methods (`src/ivy/stmt.py`, `src/ivy/expr/expr.py`)

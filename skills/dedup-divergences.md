@@ -1,10 +1,6 @@
 ---
 name: dedup-divergences
 description: Batch analysis of hundreds of fuzzer divergences using parallel subagents - categorize, deduplicate, identify unique bugs, create summary reports
-compatibility: opencode
-metadata:
-  domain: fuzzing
-  workflow: batch-analysis
 ---
 
 # Dedup Divergences Skill
@@ -13,9 +9,7 @@ metadata:
 Analyze hundreds of fuzzer divergences, identify unique root causes, and create a summary report. Divergences are stored in `reports/YYYY-MM-DD/` directories.
 
 ## Prerequisites
-```bash
-source venv/bin/activate
-```
+This project uses `uv` for dependency management. Commands use `uv run` to execute in the venv.
 
 ## Divergence Structure
 See `src/fuzzer/divergence_detector.py` for divergence types:
@@ -32,14 +26,14 @@ ls reports/2025-12-28/*.json | wc -l  # Count divergences
 
 ### Step 2: Replay to Confirm
 ```bash
-PYTHONPATH=src python -m fuzzer.replay_divergence reports/2025-12-28/divergence_001.json
+uv run python -m src.fuzzer.replay_divergence reports/2025-12-28/divergence_001.json
 ```
 
 ### Step 3: Categorize by Root Cause
 Bugs can be in:
 - **Ivy** (`src/ivy/`) - AST interpreter bug
-- **Vyper** (`venv/.../vyper/`) - Compiler codegen bug
-- **Boa** (`venv/.../boa/`) - Execution framework bug
+- **Vyper** (`.venv/.../vyper/`) - Compiler codegen bug
+- **Boa** (`.venv/.../boa/`) - Execution framework bug
 
 ### Step 4: Create Summary Report
 Create `MM_DD_minute_divergence_summary.md` with format:
