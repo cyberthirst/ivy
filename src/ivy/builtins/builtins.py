@@ -15,7 +15,10 @@ from vyper.semantics.types import (
     StringT,
 )
 from vyper.semantics.types.shortcuts import UINT256_T, BYTES32_T
-from vyper.codegen.core import calculate_type_for_external_return
+from vyper.codegen.core import (
+    calculate_type_for_external_return,
+    needs_external_call_wrap,
+)
 from vyper.utils import method_id
 
 
@@ -95,11 +98,10 @@ def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
     if unwrap_tuple is True:
         wrapped_typ = calculate_type_for_external_return(typ)
         result = abi_decode(wrapped_typ, data)
-        # If original type was already a tuple, return the whole decoded tuple
-        # If it was a single type (wrapped into 1-tuple), unwrap by taking [0]
-        if isinstance(typ, TupleT):
-            return result
-        return result[0]
+        # Unwrap if the type was wrapped (non-tuples and single-element tuples get wrapped)
+        if needs_external_call_wrap(typ):
+            return result[0]
+        return result
     else:
         return abi_decode(typ, data)
 
