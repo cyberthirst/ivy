@@ -13,7 +13,7 @@ from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.corpus import FuzzCorpus
 from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
 from fuzzer.issue_filter import IssueFilter, default_issue_filter
-from fuzzer.harness import HarnessConfig
+from fuzzer.runtime_engine import HarnessConfig
 from fuzzer.runner.scenario import create_scenario_from_item
 
 

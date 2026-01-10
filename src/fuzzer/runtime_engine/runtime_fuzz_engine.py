@@ -19,8 +19,8 @@ from fuzzer.trace_types import (
     SetBalanceTrace,
 )
 
-from fuzzer.harness.call_generator import CallGenerator
-from fuzzer.harness.timeout import CallTimeout, call_with_timeout
+from fuzzer.runtime_engine.call_generator import CallGenerator
+from fuzzer.runtime_engine.timeout import CallTimeout, call_with_timeout
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
 
@@ -100,7 +100,7 @@ class RuntimeCoverageTracker:
         return new_count
 
 
-class RuntimeHarness:
+class RuntimeFuzzEngine:
     def __init__(
         self,
         config: HarnessConfig | None = None,

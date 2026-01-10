@@ -11,7 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Optional
 
-from fuzzer.harness.runtime_harness import HarnessConfig
+from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig
 
 from fuzzer.mutator.ast_mutator import AstMutator
 from fuzzer.mutator.value_mutator import ValueMutator
@@ -199,9 +199,9 @@ class BaseFuzzer:
     ):
         """Run a scenario and analyze results."""
         if self.harness_config is not None:
-            from fuzzer.harness.runtime_harness import RuntimeHarness
+            from fuzzer.runtime_engine.runtime_fuzz_engine import RuntimeFuzzEngine
 
-            harness = RuntimeHarness(self.harness_config, seed)
+            harness = RuntimeFuzzEngine(self.harness_config, seed)
             harness_result = harness.run(scenario)
 
             results = self.multi_runner.run_boa_only(
