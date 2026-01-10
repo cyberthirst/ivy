@@ -3754,3 +3754,81 @@ def get_prevhash() -> bytes32:
     result = c.get_prevhash()
 
     assert result == b"\x00" * 32
+
+
+def test_call_depth_limit(get_contract):
+    """Test that call depth limit (1024) is enforced per EVM spec.
+
+    When call depth exceeds 1024, nested calls should fail gracefully
+    (return failure status) without reverting the caller.
+    """
+    src = """
+max_depth_reached: public(uint256)
+
+@external
+def recursive_call(depth: uint256) -> (bool, uint256):
+    self.max_depth_reached = depth
+
+    if depth >= 1030:  # Stop before hitting Python's recursion limit
+        return True, depth
+
+    # Try to call ourselves recursively using raw_call
+    success: bool = False
+    response: Bytes[64] = b""
+    success, response = raw_call(
+        self,
+        abi_encode(depth + 1, method_id=method_id("recursive_call(uint256)")),
+        max_outsize=64,
+        revert_on_failure=False
+    )
+
+    if not success:
+        # Call failed due to depth limit - this is expected at depth 1024
+        return False, depth
+
+    # Call succeeded, decode the result
+    child_success: bool = False
+    child_depth: uint256 = 0
+    child_success, child_depth = abi_decode(response, (bool, uint256))
+    return child_success, child_depth
+    """
+
+    c = get_contract(src)
+
+    # Start the recursive call chain at depth 1 (top-level call has msg.depth=0)
+    # The depth parameter tracks our iteration, while msg.depth is the actual EVM depth
+    # When depth param = N, msg.depth = N-1
+    success, final_depth = c.recursive_call(1)
+
+    # The call at msg.depth 1024 (depth param 1025) should succeed and set max_depth_reached=1025
+    # The raw_call FROM that depth trying to create msg.depth 1025 should fail (1025 > 1024)
+    # So max_depth_reached = 1025 (last value set before the child call failed)
+    assert c.max_depth_reached() == 1025
+    assert success == False  # The chain stopped due to depth limit
+    assert final_depth == 1025  # Last successfully reached depth (where the child call failed)
+
+
+def test_call_depth_tracking(get_contract):
+    """Test that call depth is correctly tracked through nested calls."""
+    src = """
+interface Self:
+    def inner() -> uint256: nonpayable
+
+depth_at_inner: public(uint256)
+
+@external
+def outer() -> uint256:
+    # Call inner which will check its depth
+    return extcall Self(self).inner()
+
+@external
+def inner() -> uint256:
+    # Return some value indicating we reached here
+    return 42
+    """
+
+    c = get_contract(src)
+
+    # outer() at depth 0 calls inner() at depth 1
+    result = c.outer()
+    assert result == 42

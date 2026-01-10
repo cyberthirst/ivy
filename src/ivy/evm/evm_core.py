@@ -17,6 +17,9 @@ from ivy.utils import compute_contract_address
 from ivy.context import ExecutionContext, ExecutionOutput
 from ivy.evm.precompiles import PRECOMPILE_REGISTRY
 
+# Maximum call depth limit as per EVM specification
+STACK_DEPTH_LIMIT = 1024
+
 
 class EVMCore:
     def __init__(self, callbacks: EVMCallbacks, env: Environment):
@@ -237,6 +240,15 @@ class EVMCore:
         is_static: bool = False,
         is_delegate: bool = False,
     ) -> ExecutionOutput:
+        # Check call depth limit before creating child message
+        # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
+        new_depth = self.state.current_context.msg.depth + 1
+        if new_depth > STACK_DEPTH_LIMIT:
+            output = ExecutionOutput()
+            output.error = EVMException("Stack depth limit exceeded")
+            self.state.current_context.returndata = b""
+            return output
+
         code_address = target
         code = self.state.get_code(code_address)
 
@@ -284,6 +296,16 @@ class EVMCore:
         salt: Optional[bytes] = None,
         is_runtime_copy: Optional[bool] = False,
     ) -> tuple[ExecutionOutput, Address]:
+        # Check call depth limit before creating child message
+        # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
+        # Note: nonce is NOT incremented if depth limit is exceeded
+        new_depth = self.state.current_context.msg.depth + 1
+        if new_depth > STACK_DEPTH_LIMIT:
+            output = ExecutionOutput()
+            output.error = EVMException("Stack depth limit exceeded")
+            self.state.current_context.returndata = b""
+            return output, Address(0)
+
         if salt is not None:
             raise NotImplementedError(
                 "Create2 depends on bytecode which isn't currently supported"
