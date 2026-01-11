@@ -559,14 +559,14 @@ class ExprGenerator:
         depth: int,
     ) -> ast.VyperNode:
         """Generate an index expression for arrays with three modes:
-        - Guarded by len(base) (preferred)
+        - Guarded by length (preferred) - uses len(base) for DynArray, constant for SArray
         - Random expression (unconstrained)
         - OOB literal that forces compilation xfail (rare)
 
         Notes:
         - Use uint256-only indices (no signedness for now).
         - Bias DynArray towards small literals because runtime len tends to be small.
-        - For SArray, guarding is still fine and semantically interesting.
+        - For SArray, use the known compile-time length (Vyper doesn't support len() on static arrays).
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
 
@@ -590,7 +590,7 @@ class ExprGenerator:
         def _random_uint_index():
             return self.generate(idx_t, context, max(0, depth))
 
-        # Helper: guarded index using len(base)
+        # Helper: guarded index using len(base) or known length
         def _guarded_index():
             # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
             i_expr = (
@@ -599,21 +599,28 @@ class ExprGenerator:
                 else _random_uint_index()
             )
 
-            len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
-            len_call._metadata = getattr(len_call, "_metadata", {})
-            len_call._metadata["type"] = IntegerT(False, 256)
+            # For static arrays, use the known compile-time length
+            # For dynamic arrays, use len() to get runtime length
+            # (Vyper doesn't support len() on static arrays)
+            if isinstance(seq_t, SArrayT):
+                len_expr = self._generate_uint256_literal(seq_t.length)
+            else:
+                len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
+                len_call._metadata = getattr(len_call, "_metadata", {})
+                len_call._metadata["type"] = IntegerT(False, 256)
+                len_expr = len_call
 
             zero = self._generate_uint256_literal(0)
             one = self._generate_uint256_literal(1)
 
             len_gt_zero = ast.Compare(
-                left=len_call,
+                left=len_expr,
                 ops=[ast.Gt()],
                 comparators=[zero],
             )
             len_gt_zero._metadata = {"type": BoolT()}
 
-            len_minus_one = ast.BinOp(left=len_call, op=ast.Sub(), right=one)
+            len_minus_one = ast.BinOp(left=len_expr, op=ast.Sub(), right=one)
             len_minus_one._metadata = {"type": idx_t}
 
             safe_fallback = ast.IfExp(
@@ -623,7 +630,7 @@ class ExprGenerator:
             )
             safe_fallback._metadata = {"type": idx_t}
 
-            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_call])
+            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_expr])
             cond._metadata = {"type": BoolT()}
 
             guarded = ast.IfExp(test=cond, body=i_expr, orelse=safe_fallback)
