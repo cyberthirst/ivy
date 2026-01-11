@@ -2,8 +2,6 @@ import copy
 from typing import Optional
 
 from vyper.compiler import CompilerData
-from vyper.semantics.types.module import ModuleT
-from vyper.ast import nodes as ast
 
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
@@ -64,20 +62,16 @@ def __init__(_implementation: address):
 def __default__() -> Bytes[2**32]:
     return raw_call(implementation, msg.data, is_delegate_call=True, max_outsize=2**32)
 
-    
+
     """
-    _ast: ast.Module = None
+    _compiler_data: CompilerData = None
 
     @classmethod
     def get_proxy_contract_data(cls):
-        if cls._ast is None:
-            compiler_data = CompilerData(file_input=cls._SOURCE)
-            cls._ast = compiler_data.annotated_vyper_module
+        if cls._compiler_data is None:
+            cls._compiler_data = CompilerData(file_input=cls._SOURCE)
+            cls._compiler_data.annotated_vyper_module._metadata["is_minimal_proxy"] = (
+                True
+            )
 
-        ast = cls._ast
-        ast._metadata["is_minimal_proxy"] = True
-
-        module_t = ast._metadata["type"]
-        assert isinstance(module_t, ModuleT)
-
-        return ContractData(module_t)
+        return ContractData(cls._compiler_data)

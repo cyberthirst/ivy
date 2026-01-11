@@ -3859,3 +3859,269 @@ def inner() -> uint256:
     # outer() at depth 0 calls inner() at depth 1
     result = c.outer()
     assert result == 42
+
+
+def test_codesize(get_contract, env):
+    """Test codesize returns the bytecode size for various address types."""
+    src = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-zero codesize
+    self_codesize = c.get_self_codesize()
+    assert self_codesize > 0
+
+    # Querying own address should match self.codesize
+    assert c.get_codesize(c.address) == self_codesize
+
+    # EOA address should have zero codesize
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+    # Empty/unused address should have zero codesize
+    empty_addr = "0x" + "00" * 20
+    assert c.get_codesize(empty_addr) == 0
+
+    # Arbitrary unused address should have zero codesize
+    arbitrary = "0x" + "de" * 20
+    assert c.get_codesize(arbitrary) == 0
+
+
+def test_codesize_another_contract(get_contract, env):
+    """Test codesize works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's codesize
+    c1_codesize = c2.get_codesize(c1.address)
+    assert c1_codesize > 0
+
+
+def test_codehash(get_contract, env, keccak):
+    """Test codehash returns the keccak256 hash of the bytecode."""
+    src = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+
+@external
+def get_self_codehash() -> bytes32:
+    return self.codehash
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-empty codehash
+    self_codehash = c.get_self_codehash()
+    assert self_codehash != b"\x00" * 32
+
+    # Querying own address should match self.codehash
+    assert c.get_codehash(c.address) == self_codehash
+
+    # EOA address should return keccak256 of empty bytes
+    # (EOA is an account that exists - has been used - but has no code)
+    eoa = env.eoa
+    eoa_codehash = c.get_codehash(eoa)
+    assert eoa_codehash == keccak(b"")
+
+    # Non-existent account (never touched, no balance/nonce/code) returns 0
+    # per EIP-1052
+    empty_addr = "0x" + "00" * 20
+    assert c.get_codehash(empty_addr) == b"\x00" * 32
+
+    # Another arbitrary unused address should also return 0
+    arbitrary = "0x" + "de" * 20
+    assert c.get_codehash(arbitrary) == b"\x00" * 32
+
+
+def test_codehash_another_contract(get_contract, env):
+    """Test codehash works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's codehash
+    c1_codehash = c2.get_codehash(c1.address)
+    assert c1_codehash != b"\x00" * 32
+
+    # Two different contracts should have different codehashes
+    c2_self_codehash = c2.get_codehash(c2.address)
+    assert c1_codehash != c2_self_codehash
+
+
+def test_address_code(get_contract, env):
+    """Test address.code returns the runtime bytecode (via slice)."""
+    src = """
+@external
+def get_code_16(addr: address) -> Bytes[16]:
+    return slice(addr.code, 0, 16)
+
+@external
+def get_self_code_16() -> Bytes[16]:
+    return slice(self.code, 0, 16)
+
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-empty code
+    self_code = c.get_self_code_16()
+    assert len(self_code) == 16
+
+    # Querying own address should return same code
+    assert c.get_code_16(c.address) == self_code
+
+    # EOA address has zero codesize (can't slice from it)
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+
+def test_address_code_slice(get_contract, env):
+    """Test address.code via slice with specific lengths."""
+    src = """
+@external
+def get_code_slice(addr: address) -> Bytes[32]:
+    return slice(addr.code, 0, 32)
+
+@external
+def get_self_code_slice() -> Bytes[32]:
+    return slice(self.code, 0, 32)
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have at least 32 bytes of code
+    self_code = c.get_self_code_slice()
+    assert len(self_code) == 32
+
+    # Querying own address should match self.code
+    assert c.get_code_slice(c.address) == self_code
+
+
+def test_address_code_another_contract(get_contract, env):
+    """Test address.code works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_code_slice(addr: address) -> Bytes[16]:
+    return slice(addr.code, 0, 16)
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's code (first 16 bytes)
+    c1_code = c2.get_code_slice(c1.address)
+    assert len(c1_code) == 16
+
+    # Two different contracts should have different code
+    c2_self_code = c2.get_code_slice(c2.address)
+    assert c1_code != c2_self_code
+
+
+def test_code_codesize_consistency(get_contract, env):
+    """Test that codesize works correctly."""
+    src = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+
+@external
+def get_code_slice(addr: address) -> Bytes[100]:
+    return slice(addr.code, 0, 100)
+
+@external
+def get_self_code_slice() -> Bytes[100]:
+    return slice(self.code, 0, 100)
+    """
+
+    c = get_contract(src)
+
+    # Self codesize should be > 0 for deployed contract
+    self_codesize = c.get_self_codesize()
+    assert self_codesize > 0
+
+    # Contract address codesize should match
+    assert c.get_codesize(c.address) == self_codesize
+
+    # EOA codesize should be 0
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+
+def test_codehash_consistency(get_contract, env, keccak):
+    """Test that codehash returns correct values."""
+    src = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+
+@external
+def get_self_codehash() -> bytes32:
+    return self.codehash
+    """
+
+    c = get_contract(src)
+
+    # Self codehash should not be zero for deployed contract
+    self_codehash = c.get_self_codehash()
+    assert self_codehash != b"\x00" * 32
+
+    # Contract address codehash should match
+    assert c.get_codehash(c.address) == self_codehash
+
+    # EOA codehash should be keccak of empty bytes (exists but no code)
+    eoa = env.eoa
+    eoa_codehash = c.get_codehash(eoa)
+    assert eoa_codehash == keccak(b"")
+
+    # Non-existent account should return 0 per EIP-1052
+    empty_addr = "0x" + "ab" * 20
+    assert c.get_codehash(empty_addr) == b"\x00" * 32

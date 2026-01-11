@@ -54,9 +54,17 @@ class EVMState:
             #    self.accessed_accounts.remove(account)
             del self.state[key]
 
-    def has_account(self, address) -> bool:
-        # TODO add detection for an empty account (+ maybe rename to smth like non-empty)
-        return False
+    def has_account(self, address: Address) -> bool:
+        # An account "exists" if it has non-zero balance, nonce, or code
+        # Per EIP-161: empty accounts are those with no code, zero nonce, zero balance
+        if address not in self.state:
+            return False
+        account = self.state[address]
+        return (
+            account.balance != 0
+            or account.nonce != 0
+            or account.contract_data is not None
+        )
 
     def get_nonce(self, address: Address) -> int:
         if address not in self.state:

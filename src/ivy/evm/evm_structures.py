@@ -1,6 +1,7 @@
 from typing import Any, Optional
 from dataclasses import dataclass
 
+from vyper.compiler import CompilerData
 from vyper.semantics.types.function import ContractFunctionT
 from vyper.semantics.types.module import ModuleT
 from vyper.semantics.types.subscriptable import TupleT
@@ -31,6 +32,7 @@ class AssignOnceDict(dict):
 
 class ContractData:
     module_t: ModuleT
+    compiler_data: CompilerData
     ext_funs: dict[str, ContractFunctionT]
     internal_funs: dict[str, ContractFunctionT]
     immutables: dict[str, Any]
@@ -39,14 +41,15 @@ class ContractData:
     global_vars: GlobalVariables
     fallback: Optional[ContractFunctionT]
 
-    def __init__(self, module: ModuleT):
-        self.module_t = module
+    def __init__(self, compiler_data: CompilerData):
+        self.compiler_data = compiler_data
+        self.module_t = compiler_data.global_ctx
 
         self.ext_funs: dict[str, ContractFunctionT] = {
-            f.name: f for f in module.exposed_functions
+            f.name: f for f in self.module_t.exposed_functions
         }
         self.internal_funs: dict[str, ContractFunctionT] = {
-            f: f for f in module.functions if f not in self.ext_funs.values()
+            f: f for f in self.module_t.functions if f not in self.ext_funs.values()
         }
         self.immutables = {}
         self.constants = AssignOnceDict()
@@ -54,7 +57,7 @@ class ContractData:
         self._generate_entry_points()
         self.global_vars = GlobalVariables()
         self.fallback = next(
-            (f for f in module.exposed_functions if f.is_fallback), None
+            (f for f in self.module_t.exposed_functions if f.is_fallback), None
         )
 
     def _generate_entry_points(self):

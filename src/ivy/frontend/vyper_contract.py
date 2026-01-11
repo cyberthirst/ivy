@@ -242,13 +242,11 @@ class VyperContract:
             encoded_args = self._ctor.prepare_calldata(*args)
             self.ctor_encoded_args = encoded_args.hex()
 
-        module = self.compiler_data.annotated_vyper_module
-
         # touch bytecode to ensure the contract compiles (not all semantic checks are done in the frontend)
         _ = self.compiler_data.bytecode
 
         address, execution_output = self.env.deploy(
-            module=module,
+            compiler_data=self.compiler_data,
             raw_args=encoded_args,
             value=value,
         )

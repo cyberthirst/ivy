@@ -3,7 +3,7 @@ from typing import Any, Optional, TypeAlias, Union
 from contextlib import contextmanager
 import copy
 
-from vyper import ast as vy_ast
+from vyper.compiler import CompilerData
 
 from ivy.vyper_interpreter import VyperInterpreter
 from ivy.tracer import CoverageTracer
@@ -199,7 +199,7 @@ class Env:
 
     def deploy(
         self,
-        module: vy_ast.Module,
+        compiler_data: CompilerData,
         raw_args: bytes = None,
         sender: Optional[_AddressType] = None,
         value: int = 0,
@@ -209,7 +209,7 @@ class Env:
         contract_address, execution_output = self.interpreter.execute(
             sender=sender,
             to=b"",
-            module=module,
+            compiler_data=compiler_data,
             value=value,
             calldata=raw_args,
         )

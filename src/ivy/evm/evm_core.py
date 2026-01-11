@@ -1,7 +1,6 @@
 from typing import Optional, Union
 
-import vyper.ast.nodes as ast
-from vyper.semantics.types.module import ModuleT
+from vyper.compiler import CompilerData
 
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_structures import (
@@ -40,19 +39,17 @@ class EVMCore:
         value: int,
         calldata: bytes = b"",
         is_static: bool = False,
-        module: Optional[ast.Module] = None,
+        compiler_data: Optional[CompilerData] = None,
     ):
         is_deploy = to == b""
         create_address, code = None, None
 
         # TODO merge this with do_create_message_call and do_message_call
         if is_deploy:
-            assert module is not None
-            module_t = module._metadata["type"]
-            assert isinstance(module_t, ModuleT)
+            assert compiler_data is not None
             # Compute address with current nonce (before incrementing)
             create_address = self.generate_create_address(sender)
-            code = ContractData(module_t)
+            code = ContractData(compiler_data)
         else:
             assert isinstance(to, Address)
             code = self.state.get_code(to)

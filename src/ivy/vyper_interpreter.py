@@ -465,16 +465,32 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # x.codesize: codesize of address x
         elif node.attr == "codesize" or node.attr == "is_contract":
             addr = self.visit(node.value)
+            contract_data = self.state.get_code(addr)
             if node.attr == "codesize":
-                raise NotImplementedError("codesize")
+                if contract_data is None:
+                    return 0
+                return len(contract_data.compiler_data.bytecode_runtime)
             else:
-                return self.state.get_code(addr) is not None
+                return contract_data is not None
         # x.codehash: keccak of address x
         elif node.attr == "codehash":
-            raise NotImplementedError("codehash")
+            addr = self.visit(node.value)
+            contract_data = self.state.get_code(addr)
+            if contract_data is None:
+                # Check if account exists (has balance, nonce, or was touched)
+                if not self.state.has_account(addr):
+                    # Non-existent account returns 0 per EIP-1052
+                    return b"\x00" * 32
+                # EOA (existing account with no code) returns keccak of empty bytes
+                return keccak256(b"")
+            return keccak256(contract_data.compiler_data.bytecode_runtime)
         # x.code: codecopy/extcodecopy of address x
         elif node.attr == "code":
-            raise NotImplementedError("code")
+            addr = self.visit(node.value)
+            contract_data = self.state.get_code(addr)
+            if contract_data is None:
+                return b""
+            return contract_data.compiler_data.bytecode_runtime
         else:
             assert False, "unreachable"
 
