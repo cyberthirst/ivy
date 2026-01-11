@@ -5,6 +5,7 @@ from vyper.semantics.types import (
     VyperType,
     BoolT,
     HashMapT,
+    TupleT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
@@ -431,6 +432,10 @@ class StatementGenerator:
                 )
                 target_node = cur_node
                 target_type = cur_t
+
+        # Skip TupleT - Vyper doesn't support tuple RHS assignment
+        if isinstance(target_type, TupleT):
+            return None
 
         value = self.expr_generator.generate(target_type, context, depth=3)
 
