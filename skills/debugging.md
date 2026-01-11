@@ -59,13 +59,15 @@ def foo() -> uint256:
 ### 4. Write Bug Report
 Create `BUGS/<descriptive-name>.md` with your findings.
 
-**Important**: A fix agent will pick up this bug report. Include all context needed to implement a fix without additional investigation.
+**Important**:
+- A fix agent will pick up this bug report. Include all context needed to implement a fix without additional investigation.
+- **One bug per file** - each bug must have its own unique file. Never batch multiple bugs into a single file, even if they're related or found together.
 
 ### 5. Report Back
 ```
 Worktree: debug-<bug-name>
 TLDR: <1-2 sentence summary>
-Bug report: BUGS/<name>.md
+Bug report(s): BUGS/<name>.md (list each file if multiple bugs found)
 ```
 
 ## Bug Report Template

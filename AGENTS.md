@@ -157,6 +157,8 @@ with env.anchor():
 
 ## Worktree Workflow
 
+> **MANDATORY**: All code changes require a worktree. Do not skip this step.
+
 All work (fixes, new features, debugging, profiling, refactoring, cleanups...) **must** be done in a separate worktree to isolate changes and enable parallel agent workflows.
 
 ### Starting Work
@@ -193,6 +195,7 @@ TLDR: Fixed off-by-one error in slice bounds checking by adjusting the upper bou
 5. **Testing**: Always use `./ivytest.sh` (not raw pytest). Run `./check.sh` before commits.
 6. **Commits**: Add `Co-Authored-By: Claude <noreply@anthropic.com>` to commit messages.
 7. **PYTHONPATH**: Already configured in `pytest.ini`. For scripts, use `uv run` which handles this automatically.
+8. **Worktree**: ALWAYS create a worktree with `./wt-start.sh <task-name>` before making any code changes. No exceptions.
 
 ## Skills
 
