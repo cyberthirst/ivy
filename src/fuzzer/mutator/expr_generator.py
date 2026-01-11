@@ -376,9 +376,11 @@ class ExprGenerator:
         node._metadata["type"] = typ
         return node
 
-    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.HexBytes:
-        # HexBytes expects bytes value
-        node = ast.HexBytes(value=value)
+    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.Hex:
+        # BytesM (e.g., bytes4, bytes32) uses 0x... syntax, not x"..." syntax
+        # ast.Hex expects a string value with 0x prefix
+        hex_str = f"0x{value.hex()}"
+        node = ast.Hex(value=hex_str)
         node._metadata["type"] = typ
         return node
 
