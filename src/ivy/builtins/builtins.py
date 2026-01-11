@@ -173,7 +173,14 @@ def builtin_method_id(method: str, output_type: Optional[VyperType] = None):
 def builtin_send(evm: EVMCore, to, value, gas: int = 0) -> None:
     if gas != 0:
         raise GasReference()
-    builtin_raw_call(evm, to, b"", value=value)
+    # Vyper's send() compiles to assert(call(...)), which discards returndata
+    # and reverts with empty data on failure. We must NOT propagate the callee's
+    # revert data.
+    success = builtin_raw_call(evm, to, b"", value=value, revert_on_failure=False)
+    if not success:
+        from ivy.exceptions import Assert
+
+        raise Assert(data=b"")
 
 
 def builtin_raw_call(
