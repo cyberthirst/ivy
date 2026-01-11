@@ -162,16 +162,16 @@ with env.anchor():
 All work (fixes, new features, debugging, profiling, refactoring, cleanups...) **must** be done in a separate worktree to isolate changes and enable parallel agent workflows.
 
 ### Starting Work
-Use the `wt-start.sh` script to create a worktree. It automatically ports any uncommitted changes from the current directory (critical when the bug is in uncommitted code):
+Use the `wt-start.sh` script to create a worktree. The worktree is created from the **currently checked out branch**, and automatically ports any uncommitted changes from the current directory (critical when the bug is in uncommitted code):
 
 ```bash
-./wt-start.sh <task-name>            # Creates worktree and applies uncommitted changes
+./wt-start.sh <task-name>            # Creates worktree from current branch, applies uncommitted changes
 cd <worktree-path>                # Switch to the new worktree (path printed by script)
 ```
 
 The script:
 1. Saves uncommitted changes (staged + unstaged) as a patch
-2. Creates a new worktree with `wt switch --create`
+2. Creates a new worktree from the current branch with `wt switch --create`
 3. Applies the patch to the new worktree
 4. Lists any untracked files that need manual copying
 

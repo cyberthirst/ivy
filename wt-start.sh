@@ -6,7 +6,7 @@
 #
 # This script:
 # 1. Saves any uncommitted changes (staged + unstaged) from current directory
-# 2. Creates a new worktree with `wt switch --create <task-name>`
+# 2. Creates a new worktree from the current branch with `wt switch --create <task-name> --base=@`
 # 3. Applies the saved changes to the new worktree
 # 4. Prints the worktree path for the agent to cd into
 #
@@ -78,7 +78,7 @@ UNTRACKED_FILES=$(git ls-files --others --exclude-standard)
 echo "Creating worktree '$TASK_NAME'..."
 
 # Capture output and exit status separately
-WT_OUTPUT=$(wt switch --create "$TASK_NAME" 2>&1) || true
+WT_OUTPUT=$(wt switch --create "$TASK_NAME" --base=@ 2>&1) || true
 WT_EXIT=$?
 
 # Check if worktree was actually created by looking for it
