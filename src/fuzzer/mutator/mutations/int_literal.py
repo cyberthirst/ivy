@@ -22,6 +22,61 @@ def _check_bounds_and_xfail(ctx: MutationCtx, new_value: int) -> None:
         )
 
 
+def _check_subscript_context(ctx: MutationCtx) -> None:
+    """If this Int is a subscript slice, validate using our semantic rules.
+
+    Applies our rules:
+    1. Negative indices are invalid in Vyper
+    2. Out of bounds indices are invalid for static arrays
+    3. Array/bytes sizes must be > 0 in type annotations
+
+    Note: We use the node's .value directly, not .reduced(), because
+    reduced() returns a cached folded value from original analysis
+    that doesn't reflect our mutations.
+    """
+    parent = ctx.node.get_ancestor()
+    if not isinstance(parent, ast.Subscript) or parent.slice is not ctx.node:
+        return
+
+    value = ctx.node.value
+
+    # Check if this is a type annotation subscript (e.g., Bytes[N], String[N], uint256[N])
+    # In type annotations, the subscript value must be > 0
+    grandparent = parent.get_ancestor() if hasattr(parent, "get_ancestor") else None
+    is_type_annotation = isinstance(parent.value, ast.Name) and parent.value.id in (
+        "Bytes", "String", "DynArray"
+    ) or (
+        isinstance(grandparent, (ast.AnnAssign, ast.VariableDecl, ast.arg))
+    )
+
+    if is_type_annotation:
+        # Array/bytes sizes must be > 0
+        if value <= 0:
+            ctx.context.compilation_xfails.append(
+                XFailExpectation(kind="compilation", reason="array size must be > 0")
+            )
+        return
+
+    # Rule 1: Negative indices are invalid
+    if value < 0:
+        ctx.context.compilation_xfails.append(
+            XFailExpectation(kind="compilation", reason="negative index")
+        )
+        return
+
+    # Rule 2: Out of bounds for static arrays
+    base_type = (
+        parent.value._metadata.get("type")
+        if hasattr(parent.value, "_metadata")
+        else None
+    )
+    if base_type and hasattr(base_type, "length"):
+        if value >= base_type.length:
+            ctx.context.compilation_xfails.append(
+                XFailExpectation(kind="compilation", reason="index out of bounds")
+            )
+
+
 def register(registry: StrategyRegistry) -> None:
     registry.register(
         Strategy(
@@ -73,6 +128,7 @@ def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = ctx.node.value + 1
     _check_bounds_and_xfail(ctx, new_value)
     ctx.node.value = new_value
+    _check_subscript_context(ctx)
     return ctx.node
 
 
@@ -80,14 +136,17 @@ def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = ctx.node.value - 1
     _check_bounds_and_xfail(ctx, new_value)
     ctx.node.value = new_value
+    _check_subscript_context(ctx)
     return ctx.node
 
 
 def _set_zero(*, ctx: MutationCtx, **_) -> ast.Int:
     ctx.node.value = 0
+    _check_subscript_context(ctx)
     return ctx.node
 
 
 def _type_aware_mutate(*, ctx: MutationCtx, **_) -> ast.Int:
     ctx.node.value = ctx.value_mutator.mutate(ctx.node.value, ctx.inferred_type)
+    _check_subscript_context(ctx)
     return ctx.node
