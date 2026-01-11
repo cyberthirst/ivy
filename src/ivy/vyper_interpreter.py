@@ -38,6 +38,7 @@ from ivy.exceptions import (
     GasReference,
     FunctionNotFound,
     PayabilityViolation,
+    StaticCallViolation,
 )
 from ivy.tracer import Tracer
 from ivy.types import Address, Struct, StaticArray, DynamicArray, Map, Tuple as IvyTuple
@@ -564,6 +565,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         encoded_data = abi_encode(data_typs, data_values)
 
         assert len(topics) <= 4, "too many topics"  # sanity check
+
+        if self.msg.is_static:
+            raise StaticCallViolation("LOG in static context")
 
         address = self.current_address
         self.state.current_output.logs.append(
