@@ -586,6 +586,13 @@ class ExprGenerator:
             val = self.rng.randint(0, 2)
             return self._int_to_ast(val, idx_t)
 
+        # Helper: bounded literal for SArray (always valid)
+        def _bounded_literal_for_sarray():
+            # Generate index in valid range [0, length-1]
+            max_idx = max(0, seq_t.length - 1)
+            val = self.rng.randint(0, max_idx)
+            return self._int_to_ast(val, idx_t)
+
         # Helper: generate random uint256 index expression
         def _random_uint_index():
             return self.generate(idx_t, context, max(0, depth))
@@ -657,6 +664,9 @@ class ExprGenerator:
         if roll < p_guard:
             return _guarded_index()
         elif roll < p_guard + p_rand:
+            # For SArray, use bounded literal to avoid compile-time OOB errors
+            if isinstance(seq_t, SArrayT):
+                return _bounded_literal_for_sarray()
             # Bias for DynArray to small literal sometimes
             if isinstance(seq_t, DArrayT) and self.rng.random() < 0.6:
                 return _small_literal_for_dynarray()
