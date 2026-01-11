@@ -99,10 +99,31 @@ class Unparser(VyperNodeVisitorBase):
 
     # Top-level nodes -------------------------------------------------------
     def visit_Module(self, node):
+        # Emit pragmas first
+        pragmas = self._get_pragmas(node)
+        for pragma in pragmas:
+            self.w(pragma)
+
         for i, item in enumerate(node.body):
-            if i > 0:
+            if i > 0 or pragmas:
                 self.w()  # blank line between top-level items
             self.visit(item)
+
+    def _get_pragmas(self, module):
+        """Generate pragma lines from module settings."""
+        pragmas = []
+        settings = getattr(module, "settings", None)
+        if settings is None:
+            return pragmas
+
+        # nonreentrancy pragma
+        nonreentrancy = getattr(settings, "nonreentrancy_by_default", None)
+        if nonreentrancy is True:
+            pragmas.append("# pragma nonreentrancy on")
+        elif nonreentrancy is False:
+            pragmas.append("# pragma nonreentrancy off")
+
+        return pragmas
 
     def visit_StructDef(self, node):
         self.w(f"struct {node.name}:")
@@ -152,10 +173,26 @@ class Unparser(VyperNodeVisitorBase):
         if node.returns:
             signature += f" -> {self._expr(node.returns)}"
 
-        self.w(signature + ":")
+        # Check if this is an interface function (single Expr with Name for mutability)
+        if self._is_interface_function(node):
+            mutability = node.body[0].value.id
+            self.w(f"{signature}: {mutability}")
+        else:
+            self.w(signature + ":")
+            with self.block():
+                self._process_body(node.body)
 
-        with self.block():
-            self._process_body(node.body)
+    def _is_interface_function(self, node):
+        """Check if this is an interface function definition (has mutability, no real body)."""
+        if len(node.body) != 1:
+            return False
+        body_item = node.body[0]
+        if not isinstance(body_item, ast.Expr):
+            return False
+        if not isinstance(body_item.value, ast.Name):
+            return False
+        # Check if it's a mutability keyword
+        return body_item.value.id in ("pure", "view", "nonpayable", "payable")
 
     def _process_body(self, body):
         prev_was_def = False

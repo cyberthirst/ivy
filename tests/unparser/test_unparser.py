@@ -25,7 +25,6 @@ _IGNORE = {
     "variable_writes",
     "type",
     "doc_string",
-    "settings",  # compiler pragmas
     "folded_value",  # constant folding cache
 }
 
@@ -48,9 +47,6 @@ def _as_clean_dict(code: str) -> dict:
 def get_unparser_test_filter() -> TestFilter:
     test_filter = TestFilter(exclude_multi_module=True)
     test_filter.exclude_source(r"#\s*@version")  # Skip version pragmas
-    test_filter.exclude_source(r"@nonreentrant")  # Skip nonreentrant for now
-    test_filter.exclude_source(r"@reentrant")  # Skip @reentrant decorator (requires pragma)
-    test_filter.exclude_source(r"reentrant\(")  # Skip reentrant() flag (requires pragma)
     return test_filter
 
 
