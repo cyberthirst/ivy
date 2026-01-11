@@ -28,15 +28,10 @@ class EVMState:
         return account
 
     def __getitem__(self, key):
-        # Check if this is a new account creation
-        is_new = key not in self.state
-        account = self.state[key]
-        if is_new and self._journal.is_active:
-            # Record the account creation
-            self._journal.record(
-                JournalEntryType.ACCOUNT_CREATION, self.state, key, None
-            )
-        return account
+        # Reading a non-existent account returns an empty account but doesn't
+        # modify state - account creation is only journaled when actually
+        # modifying the account (balance transfer, code set, etc.)
+        return self.state[key]
 
     def __delitem__(self, key: Address):
         if key in self.state:

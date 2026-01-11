@@ -267,7 +267,6 @@ def exclude_unsupported_patterns(test_filter: TestFilter) -> TestFilter:
         .exclude_source(r"gas=")
         .exclude_source("salt=")
         .exclude_source("sha256")
-        .exclude_source("ecrecover")
         .exclude_source("raw_create")
         .exclude_name("test_tx_gasprice")
         .exclude_name("test_blockhash")

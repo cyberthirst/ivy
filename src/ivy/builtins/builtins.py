@@ -24,6 +24,7 @@ from vyper.utils import method_id
 
 from ivy.abi import abi_decode, abi_encode
 import ivy.builtins.create_utils as create_utils
+from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
 from ivy.exceptions import GasReference, Revert
@@ -552,3 +553,24 @@ def builtin_extract32(
         return value
     else:
         raise TypeError(f"extract32: unsupported output_type {output_type}")
+
+
+def builtin_ecrecover(
+    h: bytes, v: int, r: Union[int, bytes], s: Union[int, bytes]
+) -> Address:
+    # Normalize r and s to ints if they're bytes
+    if isinstance(r, bytes):
+        r = int.from_bytes(r, "big")
+    if isinstance(s, bytes):
+        s = int.from_bytes(s, "big")
+
+    # Build precompile calldata: hash(32) + v(32) + r(32) + s(32)
+    calldata = h + v.to_bytes(32, "big") + r.to_bytes(32, "big") + s.to_bytes(32, "big")
+
+    # Call precompile
+    result = precompile_ecrecover(calldata)
+
+    # Return Address(0) on failure (empty result), else recovered address
+    if len(result) != 32:
+        return Address(0)
+    return Address(result[-20:])
