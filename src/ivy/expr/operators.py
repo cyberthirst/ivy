@@ -1,5 +1,5 @@
 # ivy/evaluator/operators.py
-from typing import Any, Callable, Optional, Type
+from typing import Any, Callable, Type
 from vyper.ast import nodes as ast
 from vyper.utils import unsigned_to_signed
 from ivy.types import VyperDecimal, Flag

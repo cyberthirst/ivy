@@ -5,7 +5,7 @@ Stable arc hashing to a fixed-size edge counter map (AFL-style).
 from __future__ import annotations
 
 import hashlib
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Set
 
 from fuzzer.coverage.collector import Arc
 
