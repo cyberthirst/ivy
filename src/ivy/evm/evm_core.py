@@ -260,9 +260,14 @@ class EVMCore:
         code_address = target
         code = self.state.get_code(code_address)
 
-        caller = self.state.current_context.msg.to
+        # Get current_target: use create_address if in constructor (msg.to == b"")
+        current_target = self.state.current_context.msg.to
+        if current_target == b"":
+            current_target = self.state.current_context.msg.create_address
+
+        caller = current_target
         if is_delegate:
-            target = self.state.current_context.msg.to
+            target = current_target
             assert value == 0
             value = self.state.current_context.msg.value
             caller = self.state.current_context.msg.caller
