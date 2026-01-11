@@ -146,6 +146,7 @@ class Message:  # msg from execution specs
     code: Optional[ContractData]
     depth: Any  # Uint
     is_static: bool
+    should_transfer_value: bool = True  # False for DELEGATECALL
 
 
 @dataclass

@@ -259,6 +259,7 @@ class EVMCore:
             code=code,
             depth=self.state.current_context.msg.depth + 1,
             is_static=is_static,
+            should_transfer_value=not is_delegate,  # DELEGATECALL should not transfer value
         )
 
         child_output = self.process_message(msg)
@@ -333,7 +334,8 @@ class EVMCore:
         return child_output, return_address
 
     def _handle_value_transfer(self, message: Message) -> None:
-        if message.value > 0:
+        # DELEGATECALL should not transfer value, only inherit msg.value for context
+        if message.should_transfer_value and message.value > 0:
             if self.state[message.caller].balance < message.value:
                 raise EVMException("Insufficient balance for transfer")
             self.state[message.caller].balance -= message.value
