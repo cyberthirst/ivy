@@ -919,6 +919,33 @@ def bar(a: uint256) -> uint256:
         c.foo(c2)
 
 
+def test_log_in_static_context():
+    """LOG operations should fail in static context per EVM spec."""
+    src = """
+event MyEvent:
+    value: uint256
+
+@external
+def emit_event(val: uint256) -> uint256:
+    log MyEvent(value=val)
+    return val
+    """
+
+    src2 = """
+interface Emitter:
+    def emit_event(val: uint256) -> uint256: view
+
+@external
+def foo(target: address) -> uint256:
+    return staticcall Emitter(target).emit_event(42)
+    """
+
+    emitter = loads(src)
+    caller = loads(src2)
+    with pytest.raises(StaticCallViolation):
+        caller.foo(emitter)
+
+
 def test_abi_encode_builtin():
     src = """
 @external
