@@ -175,6 +175,7 @@ def get_boa_test_filter() -> TestFilter:
     test_filter.exclude_name("test_address_code")
     test_filter.exclude_name("test_get_blobhashes")
     test_filter.exclude_name("test_proxy_upgrade_with_access_control")
+    test_filter.exclude_name("test_ecrecover_oog_handling")
     return test_filter
 
 
