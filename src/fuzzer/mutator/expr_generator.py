@@ -1216,13 +1216,19 @@ class ExprGenerator:
             make_valid = self.rng.random() < 0.7
 
             if make_valid:
-                # Start: if len == 0 -> 0 else rand % len
+                # Start: rand % max(1, len) to avoid modulo-by-zero
+                # Note: We use max(1, len) instead of a ternary guard because
+                # Vyper's constant folding evaluates both branches of ternaries,
+                # causing modulo-by-zero even when guarded.
                 one = self._generate_uint256_literal(1)
                 zero = self._generate_uint256_literal(0)
 
+                # Safe divisor: max(1, len_call) ensures no divide-by-zero
+                safe_len = _builtin_call("max", [one, len_call], len_ret_t)
+                start_mod = _uint_binop(rand_u, ast.Mod(), safe_len)
+                # If len is 0, start should be 0; otherwise use the modulo result
                 len_is_zero = _uint_cmp(len_call, ast.Eq(), zero)
-                start_else = _uint_binop(rand_u, ast.Mod(), len_call)
-                a1 = _ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+                a1 = _ifexp(len_is_zero, zero, start_mod, IntegerT(False, 256))
 
                 # remaining = len - start
                 remaining = _uint_binop(len_call, ast.Sub(), a1)
@@ -1233,8 +1239,8 @@ class ExprGenerator:
                 if ret_len > 0:
                     bound = self._generate_uint256_literal(ret_len)
                 else:
-                    bound = remaining
-                # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
+                    # Use max(1, remaining) to avoid modulo-by-zero during constant folding
+                    bound = _builtin_call("max", [one, remaining], len_ret_t)
                 rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
                 plus_one = _uint_binop(rand_mod, ast.Add(), one)
                 len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)
