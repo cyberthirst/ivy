@@ -59,6 +59,8 @@ class EVMState:
         return False
 
     def get_nonce(self, address: Address) -> int:
+        if address not in self.state:
+            return 0
         return self.state[address].nonce
 
     def increment_nonce(self, address: Address):
@@ -70,12 +72,16 @@ class EVMState:
         account.nonce += 1
 
     def get_balance(self, address: Address) -> int:
+        if address not in self.state:
+            return 0
         return self.state[address].balance
 
     def set_balance(self, address: Address, value: int):
         self.state[address].balance = value
 
     def get_code(self, address: Address) -> Optional[ContractData]:
+        if address not in self.state:
+            return None
         return self.state[address].contract_data
 
     def set_code(self, address: Address, code: ContractData):
