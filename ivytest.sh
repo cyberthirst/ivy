@@ -8,7 +8,7 @@ set -euo pipefail
 #   ivytest --refresh tests/                   # Refresh vyper exports first
 #   ivytest --loud tests/                       # Run without suppressing output
 
-VYPER_REPO="../vyper"
+VYPER_REPO="/workspace/vyper"
 VYPER_EXPORTS="$VYPER_REPO/tests/export"
 
 # Find ivy repo root from current directory
@@ -38,7 +38,12 @@ done
 
 ensure_exports() {
     # Check if exports directory exists (either as symlink or real directory)
+    # Use -L to detect broken symlinks (which -e misses)
     if [[ ! -e "$IVY_EXPORTS_LINK" ]]; then
+        # Remove broken symlink if it exists
+        if [[ -L "$IVY_EXPORTS_LINK" ]]; then
+            rm "$IVY_EXPORTS_LINK"
+        fi
         # Try to create symlink if vyper exports exist
         if [[ -d "$VYPER_EXPORTS" ]]; then
             echo "Creating symlink: $IVY_EXPORTS_LINK -> $VYPER_EXPORTS"

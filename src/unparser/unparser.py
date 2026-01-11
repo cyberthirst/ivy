@@ -42,6 +42,7 @@ class Unparser(VyperNodeVisitorBase):
         ast.IfExp: -1,
         ast.Or: 0,
         ast.And: 1,
+        ast.Not: 1,  # 'not' has lower precedence than comparisons
         ast.Compare: 2,
         ast.BitOr: 3,
         ast.BitXor: 4,
@@ -60,6 +61,11 @@ class Unparser(VyperNodeVisitorBase):
     }
 
     def p(self, node):
+        if isinstance(node, ast.BinOp):
+            return self.PRECEDENCE.get(type(node.op), 11)
+        # 'not' has lower precedence than other unary ops
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            return self.PRECEDENCE.get(ast.Not, 11)
         return self.PRECEDENCE.get(type(node), 11)
 
     def maybe_paren(self, expr, parent_prec):
@@ -70,9 +76,12 @@ class Unparser(VyperNodeVisitorBase):
         if isinstance(expr, (ast.Compare, ast.BoolOp)) and parent_prec >= expr_prec:
             return f"({expr_text})"
 
-        # Special case: Pow is right-associative
+        # Special case: Pow is right-associative, so 2**3**4 = 2**(3**4)
+        # Only skip parens when child is also Pow (for right-associativity)
         if (
-            isinstance(expr.parent, ast.BinOp)
+            isinstance(expr, ast.BinOp)
+            and isinstance(expr.op, ast.Pow)
+            and isinstance(expr.parent, ast.BinOp)
             and isinstance(expr.parent.op, ast.Pow)
             and expr is expr.parent.right
         ):
@@ -186,6 +195,8 @@ class Unparser(VyperNodeVisitorBase):
         result = f"{self._expr(node.target)}: "
 
         flags = []
+        if getattr(node, "is_reentrant", False):
+            flags.append("reentrant")
         if node.is_public:
             flags.append("public")
         if node.is_constant:
@@ -251,19 +262,25 @@ class Unparser(VyperNodeVisitorBase):
         self.w(f"log {self._expr(node.value)}")
 
     def visit_Import(self, node):
-        result = f"import {node.name}"
-        if node.alias:
-            result += f" as {node.alias}"
-        self.w(result)
+        for alias in node.names:
+            result = f"import {alias.name}"
+            if alias.asname:
+                result += f" as {alias.asname}"
+            self.w(result)
 
     def visit_ImportFrom(self, node):
         level_dots = "." * node.level
         module_path = f"{level_dots}{node.module}" if node.module else level_dots
-        alias_part = f" as {node.alias}" if node.alias else ""
-        self.w(f"from {module_path} import {node.name}{alias_part}")
+        names = []
+        for alias in node.names:
+            if alias.asname:
+                names.append(f"{alias.name} as {alias.asname}")
+            else:
+                names.append(alias.name)
+        self.w(f"from {module_path} import {', '.join(names)}")
 
     def visit_ImplementsDecl(self, node):
-        self.w(f"implements: {self._expr(node.annotation)}")
+        self.w(f"implements: {self._expr(node.children[0])}")
 
     def visit_UsesDecl(self, node):
         self.w(f"uses: {self._expr(node.annotation)}")
@@ -288,7 +305,11 @@ class Unparser(VyperNodeVisitorBase):
         return str(node.value)
 
     def visit_Decimal(self, node):
-        return str(node.value)
+        # Preserve original source format if available (e.g., .33 vs 0.33)
+        if hasattr(node, "node_source_code") and node.node_source_code:
+            return node.node_source_code
+        # Fallback: avoid scientific notation
+        return f"{node.value:f}"
 
     def visit_Hex(self, node):
         if isinstance(node.value, str):
@@ -296,19 +317,14 @@ class Unparser(VyperNodeVisitorBase):
         return f"0x{node.value:x}"
 
     def visit_HexBytes(self, node):
-        return f"0x{node.value.hex()}"
+        return f'x"{node.value.hex()}"'
 
     def visit_Bytes(self, node):
         # Bytes (dynamic) uses b'...' format, not hex
         return repr(node.value)
 
     def visit_Str(self, node):
-        if "\n" in node.value:
-            return f'"""{node.value}"""'
-        escaped = (
-            node.value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        )
-        return f'"{escaped}"'
+        return repr(node.value)
 
     def visit_List(self, node):
         elements = [self._expr(e) for e in node.elements]
@@ -333,8 +349,16 @@ class Unparser(VyperNodeVisitorBase):
 
     def visit_BinOp(self, node):
         op_token = self._get_op_token(node.op)
-        left = self.maybe_paren(node.left, self.p(node))
-        right = self.maybe_paren(node.right, self.p(node))
+        op_prec = self.p(node.op)
+        left = self.maybe_paren(node.left, op_prec)
+        # Negative integer literals need parentheses as base of power
+        if (
+            isinstance(node.op, ast.Pow)
+            and isinstance(node.left, ast.Int)
+            and node.left.value < 0
+        ):
+            left = f"({left})"
+        right = self.maybe_paren(node.right, op_prec)
         return f"{left} {op_token} {right}"
 
     def visit_BoolOp(self, node):
@@ -391,7 +415,12 @@ class Unparser(VyperNodeVisitorBase):
         # staticcall/extcall must be parenthesized before subscript access
         if isinstance(node.value, (ast.StaticCall, ast.ExtCall)):
             value = f"({value})"
-        slice_expr = self._expr(node.slice)
+        # For Tuple slices, don't add parentheses (e.g., HashMap[address, uint256])
+        if isinstance(node.slice, ast.Tuple):
+            elements = [self._expr(e) for e in node.slice.elements]
+            slice_expr = ", ".join(elements)
+        else:
+            slice_expr = self._expr(node.slice)
         return f"{value}[{slice_expr}]"
 
     def visit_NamedExpr(self, node):
