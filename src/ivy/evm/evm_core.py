@@ -11,7 +11,7 @@ from ivy.evm.evm_structures import (
 from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
-from ivy.exceptions import EVMException, Revert
+from ivy.exceptions import EVMException, Revert, StaticCallViolation
 from ivy.utils import compute_contract_address
 from ivy.context import ExecutionContext, ExecutionOutput
 from ivy.evm.precompiles import PRECOMPILE_REGISTRY
@@ -383,6 +383,8 @@ class EVMCore:
         return child_output, return_address
 
     def _handle_value_transfer(self, message: Message) -> None:
+        if message.is_static and message.value != 0:
+            raise StaticCallViolation("Cannot transfer value in static context")
         # DELEGATECALL should not transfer value, only inherit msg.value for context
         if message.should_transfer_value and message.value > 0:
             if self.state[message.caller].balance < message.value:

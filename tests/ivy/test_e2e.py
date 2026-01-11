@@ -4125,3 +4125,54 @@ def get_self_codehash() -> bytes32:
     # Non-existent account should return 0 per EIP-1052
     empty_addr = "0x" + "ab" * 20
     assert c.get_codehash(empty_addr) == b"\x00" * 32
+
+
+def test_static_call_with_value_raises_before_balance_check(get_contract, env):
+    """Test that call with value in static context raises StaticCallViolation.
+
+    Per EVM specs, the check for value != 0 in static context must happen
+    BEFORE balance checks. This test verifies we get StaticCallViolation
+    rather than 'Insufficient balance for transfer' even when balance is zero.
+
+    Setup: ContractA calls ContractB via staticcall, ContractB then tries
+    to call ContractC with value - this should raise StaticCallViolation.
+    """
+    # Contract C - just receives ether
+    target_src = """
+@external
+@payable
+def receive():
+    pass
+    """
+
+    # Contract B - called via staticcall, tries to forward with value
+    middle_src = """
+@external
+def forward_with_value(target: address) -> bool:
+    # This runs in static context when called via staticcall
+    # Trying to send value should raise StaticCallViolation
+    raw_call(target, b"", value=1)
+    return True
+    """
+
+    # Contract A - initiates the static call chain
+    outer_src = """
+interface Middle:
+    def forward_with_value(target: address) -> bool: view
+
+@external
+def test_static_value(middle: address, target: address) -> bool:
+    # staticcall to middle, which then tries raw_call with value
+    return staticcall Middle(middle).forward_with_value(target)
+    """
+
+    target = get_contract(target_src)
+    middle = get_contract(middle_src)
+    outer = get_contract(outer_src)
+
+    # Set the middle contract's balance to 0 to ensure we test
+    # that static check happens BEFORE balance check
+    env.set_balance(middle.address, 0)
+
+    with pytest.raises(StaticCallViolation):
+        outer.test_static_value(middle, target)
