@@ -34,7 +34,7 @@ class Env:
             coinbase=Address(b""),
             block_number=1,
             time=1750080732,
-            prev_randao=b"",
+            prev_randao=b"\x00" * 32,
             chain_id=0,
         )
         self.interpreter = VyperInterpreter(env=self._env)
@@ -188,6 +188,14 @@ class Env:
     @block_number.setter
     def block_number(self, value: int):
         self._env.block_number = value
+
+    @property
+    def prev_randao(self):
+        return self._env.prev_randao
+
+    @prev_randao.setter
+    def prev_randao(self, value: bytes):
+        self._env.prev_randao = value
 
     def deploy(
         self,

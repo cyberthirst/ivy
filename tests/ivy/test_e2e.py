@@ -3610,3 +3610,147 @@ def get_trace() -> DynArray[uint256, 10]:
         c.test(True)
 
     assert c.get_trace() == [1, 2, 3, 4, 5]
+
+
+def test_is_contract(get_contract, env):
+    """Test is_contract behavior for various address types."""
+    src = """
+@external
+def check_is_contract(addr: address) -> bool:
+    return addr.is_contract
+
+@external
+def check_self_is_contract() -> bool:
+    return self.is_contract
+    """
+
+    c = get_contract(src)
+
+    # After deployment, self.is_contract should be True
+    assert c.check_self_is_contract() is True
+
+    # Deployed contract address should return True
+    assert c.check_is_contract(c.address) is True
+
+    # EOA address (the caller) should return False
+    caller = env.eoa
+    assert c.check_is_contract(caller) is False
+
+    # Empty/unused address should return False
+    empty_addr = "0x" + "00" * 20
+    assert c.check_is_contract(empty_addr) is False
+
+    # Arbitrary unused address should return False
+    arbitrary = "0x" + "de" * 20
+    assert c.check_is_contract(arbitrary) is False
+
+
+def test_block_prevrandao(get_contract, env):
+    src = """
+@external
+def get_prevrandao() -> bytes32:
+    return block.prevrandao
+    """
+
+    c = get_contract(src)
+
+    # Test with default value (all zeros)
+    default_result = c.get_prevrandao()
+    assert default_result == b"\x00" * 32
+
+    # Test with a specific value
+    test_value = b"\x42" + b"\x00" * 31
+    env.prev_randao = test_value
+    result = c.get_prevrandao()
+    assert result == test_value
+
+    # Test with another specific value
+    test_value2 = bytes.fromhex(
+        "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+    )
+    env.prev_randao = test_value2
+    result2 = c.get_prevrandao()
+    assert result2 == test_value2
+
+
+def test_block_difficulty(get_contract, env):
+    src = """
+@external
+def get_difficulty() -> uint256:
+    return block.difficulty
+    """
+
+    c = get_contract(src)
+
+    # Reset to all zeros first
+    env.prev_randao = b"\x00" * 32
+
+    # Test with zero value
+    default_result = c.get_difficulty()
+    assert default_result == 0
+
+    # Test with a specific value - bytes32 interpreted as big-endian uint256
+    # 0x42 followed by 31 zeros = 0x4200...00 as big-endian = very large number
+    test_value = b"\x42" + b"\x00" * 31
+    env.prev_randao = test_value
+    result = c.get_difficulty()
+    expected = int.from_bytes(test_value, "big")
+    assert result == expected
+
+    # Test with a small value at the end - should result in small uint256
+    test_value2 = b"\x00" * 31 + b"\x42"
+    env.prev_randao = test_value2
+    result2 = c.get_difficulty()
+    assert result2 == 0x42
+
+
+def test_block_prevhash(get_contract, env):
+    """Test that block.prevhash returns the hash of the previous block."""
+    src = """
+@external
+def get_prevhash() -> bytes32:
+    return block.prevhash
+    """
+    # Set up block_hashes with a known value
+    prev_hash = b"\xab" * 32  # 32-byte hash for the previous block
+    env._env.block_hashes = [prev_hash]
+    env._env.block_number = 1
+
+    c = get_contract(src)
+    result = c.get_prevhash()
+
+    assert result == prev_hash
+
+
+def test_block_prevhash_empty(get_contract, env):
+    """Test that block.prevhash returns zero when block_hashes is empty."""
+    src = """
+@external
+def get_prevhash() -> bytes32:
+    return block.prevhash
+    """
+    # Empty block_hashes
+    env._env.block_hashes = []
+    env._env.block_number = 1
+
+    c = get_contract(src)
+    result = c.get_prevhash()
+
+    assert result == b"\x00" * 32
+
+
+def test_block_prevhash_block_zero(get_contract, env):
+    """Test that block.prevhash returns zero when block_number is 0."""
+    src = """
+@external
+def get_prevhash() -> bytes32:
+    return block.prevhash
+    """
+    # Block 0 has no previous block
+    env._env.block_hashes = [b"\xab" * 32]
+    env._env.block_number = 0
+
+    c = get_contract(src)
+    result = c.get_prevhash()
+
+    assert result == b"\x00" * 32

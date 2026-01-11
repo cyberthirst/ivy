@@ -490,9 +490,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         elif key in ("msg.gas", "msg.mana"):
             raise GasReference()
         elif key == "block.prevrandao":
-            raise NotImplementedError("block.prevrandao")
+            return self.env.prev_randao
         elif key == "block.difficulty":
-            raise NotImplementedError("block.prevrandao")
+            return int.from_bytes(self.env.prev_randao, "big")
         elif key == "block.timestamp":
             return self.env.time
         elif key == "block.coinbase":
@@ -504,9 +504,13 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         elif key == "block.basefee":
             raise GasReference()
         elif key == "block.blobbasefee":
-            raise NotImplementedError("block.blobbasefee")
+            raise GasReference()
         elif key == "block.prevhash":
-            raise NotImplementedError("block.prevhash")
+            # Return the hash of the previous block (block_hashes[-1])
+            # If no previous block exists (block_number == 0 or empty block_hashes), return 0
+            if self.env.block_number == 0 or len(self.env.block_hashes) == 0:
+                return b"\x00" * 32
+            return self.env.block_hashes[-1]
         elif key == "tx.origin":
             return self.env.origin
         elif key == "tx.gasprice":
