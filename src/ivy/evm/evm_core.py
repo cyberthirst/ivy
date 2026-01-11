@@ -20,6 +20,9 @@ from ivy.evm.precompiles import PRECOMPILE_REGISTRY
 # Maximum call depth limit as per EVM specification
 STACK_DEPTH_LIMIT = 1024
 
+# Maximum nonce value (uint64 max) - CREATE fails gracefully at this value
+MAX_NONCE = 2**64 - 1
+
 
 class EVMCore:
     def __init__(self, callbacks: EVMCallbacks, env: Environment):
@@ -155,6 +158,11 @@ class EVMCore:
 
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
+
+        # EIP-161: newly created contracts start with nonce=1, not nonce=0
+        # This must happen before init code runs, so any CREATE inside __init__
+        # uses the correct nonce for address computation
+        self.state.increment_nonce(message.create_address)
 
         exec_ctx = ExecutionContext(new_account, message)
         self.state.push_context(exec_ctx)
@@ -316,10 +324,27 @@ class EVMCore:
         if current_address == b"":
             current_address = self.state.current_context.msg.create_address
 
+        # Per Execution Spec: check balance and nonce BEFORE incrementing nonce
+        # If any check fails, return early without modifying state
+        sender_balance = self.state[current_address].balance
+        sender_nonce = self.state.get_nonce(current_address)
+
+        if sender_balance < value:
+            # Insufficient balance - fail gracefully without incrementing nonce
+            empty_output = ExecutionOutput()
+            empty_output.error = EVMException("Insufficient balance for transfer")
+            return empty_output, Address(0)
+
+        if sender_nonce >= MAX_NONCE:
+            # Nonce overflow - fail gracefully without incrementing nonce
+            empty_output = ExecutionOutput()
+            empty_output.error = EVMException("Nonce overflow")
+            return empty_output, Address(0)
+
         # First compute address with current nonce
         create_address = self.generate_create_address(current_address)
 
-        # Then increment nonce
+        # Then increment nonce (only after all checks pass)
         self.state.increment_nonce(current_address)
 
         if self.account_has_code_or_nonce(create_address):
