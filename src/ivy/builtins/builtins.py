@@ -328,6 +328,10 @@ def builtin_create_copy_of(
     salt: Optional[bytes] = None,
 ) -> Address:
     code = create_utils.deepcopy_code(evm.state, target)
+    if code is None:
+        # Target has no code to copy - this is an extcodesize check failure
+        # which always reverts regardless of revert_on_failure flag
+        raise Revert(data=b"")
     return create_utils.create_builtin_shared(
         evm,
         code,
@@ -353,6 +357,10 @@ def builtin_create_from_blueprint(
     # reset_global_vars=True because blueprint creation runs the constructor
     # which will allocate fresh variables
     code = create_utils.deepcopy_code(evm.state, target, reset_global_vars=True)
+    if code is None:
+        # Blueprint target has no code - this is an extcodesize check failure
+        # which always reverts regardless of revert_on_failure flag
+        raise Revert(data=b"")
 
     # typs[0] is the target address type, typs[1:] are constructor arg types
     constructor_arg_typs = typs[1:]

@@ -2099,6 +2099,32 @@ def a() -> uint256:
     assert c.foo(target) == 0
 
 
+def test_create_copy_of_empty_target(get_contract, tx_failed, env):
+    from ivy.types import Address
+    from ivy.exceptions import Revert
+
+    src = """
+@external
+def copy_with_revert(target: address) -> address:
+    return create_copy_of(target, revert_on_failure=True)
+
+@external
+def copy_no_revert(target: address) -> address:
+    return create_copy_of(target, revert_on_failure=False)
+    """
+
+    c = get_contract(src)
+    empty_address = Address(0)
+
+    # Empty target always reverts - extcodesize check fails before CREATE
+    # regardless of revert_on_failure flag
+    with tx_failed(Revert):
+        c.copy_with_revert(empty_address)
+
+    with tx_failed(Revert):
+        c.copy_no_revert(empty_address)
+
+
 def test_log(get_contract):
     src = """
 event Foo:

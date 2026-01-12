@@ -10,8 +10,9 @@ from ivy.types import Address
 
 
 def deepcopy_code(state: StateAccess, target: Address, reset_global_vars: bool = False):
-    # TODO what about the case when the target is empty?
     code = state.get_code(target)
+    if code is None:
+        return None
 
     # Create a new ContractData that shares the compiler_data and module_t
     # but has fresh mutable state (global_vars, immutables, constants).
