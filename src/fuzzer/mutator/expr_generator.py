@@ -878,15 +878,6 @@ class ExprGenerator:
 
         node = ast.BinOp(left=left, op=op_class(), right=right)
 
-        if isinstance(node.op, (ast.FloorDiv, ast.Mod, ast.Div)):
-            if isinstance(right, ast.Int) and getattr(right, "value", None) == 0:
-                context.compilation_xfails.append(
-                    XFailExpectation(
-                        kind="compilation",
-                        reason="division or modulo by zero should fail compilation",
-                    )
-                )
-
         node._metadata["type"] = target_type
         return node
 
