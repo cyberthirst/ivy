@@ -534,6 +534,18 @@ class ExprGenerator:
         body = self.generate(target_type, context, depth)
         orelse = self.generate(target_type, context, depth)
 
+        if isinstance(target_type, DArrayT):
+            if isinstance(body, ast.List) and not body.elements:
+                body = self._array_to_ast(
+                    [self.generate(target_type.value_type, context, depth)],
+                    target_type,
+                )
+            if isinstance(orelse, ast.List) and not orelse.elements:
+                orelse = self._array_to_ast(
+                    [self.generate(target_type.value_type, context, depth)],
+                    target_type,
+                )
+
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = target_type
         return node
