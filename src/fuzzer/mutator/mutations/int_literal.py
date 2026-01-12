@@ -38,6 +38,20 @@ def _clamp_pow_exponent(ctx: MutationCtx, value: int) -> int:
     return value
 
 
+def _clamp_pow_base(ctx: MutationCtx, value: int) -> int:
+    parent = ctx.node.get_ancestor() if hasattr(ctx.node, "get_ancestor") else None
+    if (
+        not isinstance(parent, ast.BinOp)
+        or not isinstance(parent.op, ast.Pow)
+        or parent.left is not ctx.node
+    ):
+        return value
+
+    if value < 2:
+        return 2
+    return value
+
+
 def _clamp_subscript_index(ctx: MutationCtx, value: int, original: int) -> int:
     parent = ctx.node.get_ancestor() if hasattr(ctx.node, "get_ancestor") else None
     if not isinstance(parent, ast.Subscript) or parent.slice is not ctx.node:
@@ -54,6 +68,33 @@ def _clamp_subscript_index(ctx: MutationCtx, value: int, original: int) -> int:
         return value % cap
 
     return value
+
+
+def _clamp_slice_length(ctx: MutationCtx, value: int, original: int) -> int:
+    parent = ctx.node.get_ancestor() if hasattr(ctx.node, "get_ancestor") else None
+    if not isinstance(parent, ast.Call) or not hasattr(parent, "args"):
+        return value
+    if not isinstance(parent.func, ast.Name) or parent.func.id != "slice":
+        return value
+
+    try:
+        arg_index = parent.args.index(ctx.node)
+    except ValueError:
+        return value
+
+    if arg_index != 2:
+        return value
+
+    ret_type = getattr(parent, "_metadata", {}).get("type")
+    if not isinstance(ret_type, (BytesT, StringT)):
+        return value
+
+    cap = ret_type.length
+    if cap <= 0:
+        return 0
+
+    value = abs(value)
+    return value % (cap + 1)
 
 
 def _clamp_int_bounds(ctx: MutationCtx, value: int, original: int) -> int:
@@ -124,7 +165,9 @@ def _has_integer_type(*, ctx: MutationCtx, **_) -> bool:
 def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
     original = ctx.node.value
     new_value = _clamp_pow_exponent(ctx, original + 1)
+    new_value = _clamp_pow_base(ctx, new_value)
     new_value = _clamp_subscript_index(ctx, new_value, original)
+    new_value = _clamp_slice_length(ctx, new_value, original)
     new_value = _clamp_int_bounds(ctx, new_value, original)
     if new_value == original:
         return None
@@ -135,7 +178,9 @@ def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
 def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
     original = ctx.node.value
     new_value = _clamp_pow_exponent(ctx, original - 1)
+    new_value = _clamp_pow_base(ctx, new_value)
     new_value = _clamp_subscript_index(ctx, new_value, original)
+    new_value = _clamp_slice_length(ctx, new_value, original)
     new_value = _clamp_int_bounds(ctx, new_value, original)
     if new_value == original:
         return None
@@ -146,7 +191,9 @@ def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
 def _set_zero(*, ctx: MutationCtx, **_) -> ast.Int:
     original = ctx.node.value
     new_value = _clamp_pow_exponent(ctx, 0)
+    new_value = _clamp_pow_base(ctx, new_value)
     new_value = _clamp_subscript_index(ctx, new_value, original)
+    new_value = _clamp_slice_length(ctx, new_value, original)
     new_value = _clamp_int_bounds(ctx, new_value, original)
     if new_value == original:
         return None
@@ -158,7 +205,9 @@ def _type_aware_mutate(*, ctx: MutationCtx, **_) -> ast.Int:
     original = ctx.node.value
     mutated = ctx.value_mutator.mutate(ctx.node.value, ctx.inferred_type)
     mutated = _clamp_pow_exponent(ctx, mutated)
+    mutated = _clamp_pow_base(ctx, mutated)
     mutated = _clamp_subscript_index(ctx, mutated, original)
+    mutated = _clamp_slice_length(ctx, mutated, original)
     mutated = _clamp_int_bounds(ctx, mutated, original)
     if mutated == original:
         return None
