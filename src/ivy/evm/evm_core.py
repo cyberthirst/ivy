@@ -205,9 +205,9 @@ class EVMCore:
         return ret
 
     def _execute_precompile(self, message: Message):
-        to = message.to
+        code_address = message.code_address
         data = message.data
-        self.state.current_output.output = PRECOMPILE_REGISTRY[to](data)
+        self.state.current_output.output = PRECOMPILE_REGISTRY[code_address](data)
 
     def process_message(
         self, message: Message, manage_journal: bool = True
@@ -222,7 +222,7 @@ class EVMCore:
         try:
             self._handle_value_transfer(message)
 
-            if message.to in PRECOMPILE_REGISTRY:
+            if message.code_address in PRECOMPILE_REGISTRY:
                 self._execute_precompile(message)
 
             elif message.code:
