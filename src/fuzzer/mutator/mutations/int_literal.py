@@ -126,6 +126,8 @@ def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = _clamp_pow_exponent(ctx, original + 1)
     new_value = _clamp_subscript_index(ctx, new_value, original)
     new_value = _clamp_int_bounds(ctx, new_value, original)
+    if new_value == original:
+        return None
     ctx.node.value = new_value
     return ctx.node
 
@@ -135,6 +137,8 @@ def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = _clamp_pow_exponent(ctx, original - 1)
     new_value = _clamp_subscript_index(ctx, new_value, original)
     new_value = _clamp_int_bounds(ctx, new_value, original)
+    if new_value == original:
+        return None
     ctx.node.value = new_value
     return ctx.node
 
@@ -143,7 +147,10 @@ def _set_zero(*, ctx: MutationCtx, **_) -> ast.Int:
     original = ctx.node.value
     new_value = _clamp_pow_exponent(ctx, 0)
     new_value = _clamp_subscript_index(ctx, new_value, original)
-    ctx.node.value = _clamp_int_bounds(ctx, new_value, original)
+    new_value = _clamp_int_bounds(ctx, new_value, original)
+    if new_value == original:
+        return None
+    ctx.node.value = new_value
     return ctx.node
 
 
@@ -152,5 +159,8 @@ def _type_aware_mutate(*, ctx: MutationCtx, **_) -> ast.Int:
     mutated = ctx.value_mutator.mutate(ctx.node.value, ctx.inferred_type)
     mutated = _clamp_pow_exponent(ctx, mutated)
     mutated = _clamp_subscript_index(ctx, mutated, original)
-    ctx.node.value = _clamp_int_bounds(ctx, mutated, original)
+    mutated = _clamp_int_bounds(ctx, mutated, original)
+    if mutated == original:
+        return None
+    ctx.node.value = mutated
     return ctx.node
