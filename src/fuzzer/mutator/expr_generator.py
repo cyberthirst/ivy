@@ -546,6 +546,23 @@ class ExprGenerator:
                     target_type,
                 )
 
+        if isinstance(target_type, TupleT):
+            def _replace_tuple_literal(expr: ast.VyperNode) -> ast.VyperNode:
+                if not isinstance(expr, ast.Tuple):
+                    return expr
+                var_ref = self.random_var_ref(target_type, context)
+                if var_ref is not None:
+                    return var_ref
+                call_expr = self._generate_func_call(target_type, context, depth)
+                if call_expr is not None:
+                    return call_expr
+                return expr
+
+            body = _replace_tuple_literal(body)
+            orelse = _replace_tuple_literal(orelse)
+            if isinstance(body, ast.Tuple) or isinstance(orelse, ast.Tuple):
+                return body
+
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = target_type
         return node
@@ -681,7 +698,12 @@ class ExprGenerator:
                 return _small_literal_for_dynarray()
             return _random_uint_index()
         else:
-            # Only makes sense for SArray where cap is static; still set xfail
+            if isinstance(seq_t, DArrayT):
+                return (
+                    _small_literal_for_dynarray()
+                    if self.rng.random() < 0.6
+                    else _random_uint_index()
+                )
             return _oob_literal()
 
     def can_reach_via_subscript(
