@@ -37,6 +37,7 @@ from ivy.builtins.builtins import (
     builtin_uint256_mulmod,
     builtin_shift,
     builtin_ecrecover,
+    builtin_selfdestruct,
 )
 
 
@@ -115,6 +116,7 @@ class BuiltinRegistry:
             "uint256_mulmod": BuiltinWrapper(builtin_uint256_mulmod),
             "shift": BuiltinWrapper(builtin_shift),
             "ecrecover": BuiltinWrapper(builtin_ecrecover),
+            "selfdestruct": BuiltinWrapper(builtin_selfdestruct, context=self.evm),
         }
 
     def get(self, name):

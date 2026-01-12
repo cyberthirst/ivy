@@ -574,3 +574,47 @@ def builtin_ecrecover(
     if len(result) != 32:
         return Address(0)
     return Address(result[-20:])
+
+
+def builtin_selfdestruct(evm: EVMCore, beneficiary: Address) -> None:
+    """
+    Halt execution and register account for later deletion (EIP-6780 semantics).
+
+    Post-Cancun behavior:
+    - Always transfers full balance to beneficiary
+    - Only deletes account if it was created in the same transaction
+    - If beneficiary == originator and account is deleted, ether is burnt
+    """
+    from ivy.exceptions import SelfDestruct
+
+    # Determine the current contract address (originator)
+    # In a constructor, msg.to is b"" and create_address holds the address
+    current_target = evm.state.current_context.msg.to
+    if current_target == b"":
+        current_target = evm.state.current_context.msg.create_address
+
+    originator = current_target
+    originator_balance = evm.state.get_balance(originator)
+
+    # Transfer ALL ether from originator to beneficiary (move_ether semantics)
+    # This happens unconditionally. When beneficiary == originator, it's a no-op.
+    if originator_balance > 0 and beneficiary != originator:
+        evm.state.set_balance(originator, 0)
+        beneficiary_balance = evm.state.get_balance(beneficiary)
+        evm.state.set_balance(beneficiary, beneficiary_balance + originator_balance)
+
+    # EIP-6780: Only actually delete the account if it was created in the same transaction
+    if originator in evm._state.created_accounts:
+        # Mark for deletion tracking (for output merging)
+        evm.state.current_output.accounts_to_delete.add(originator)
+
+        # If beneficiary is the same as originator, the ether is burnt
+        # (set balance to 0 before deletion)
+        evm.state.set_balance(originator, 0)
+
+        # Actually delete the account (journaled for potential rollback)
+        del evm.state[originator]
+
+    # Halt execution by raising SelfDestruct
+    # This is caught by process_message() and treated as successful completion
+    raise SelfDestruct()

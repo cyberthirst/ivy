@@ -11,7 +11,7 @@ from ivy.evm.evm_structures import (
 from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
-from ivy.exceptions import EVMException, Revert, StaticCallViolation
+from ivy.exceptions import EVMException, Revert, SelfDestruct, StaticCallViolation
 from ivy.utils import compute_contract_address
 from ivy.context import ExecutionContext, ExecutionOutput
 from ivy.evm.precompiles import PRECOMPILE_REGISTRY
@@ -188,6 +188,12 @@ class EVMCore:
 
             self.state.set_code(message.create_address, new_contract_code)
 
+        except SelfDestruct:
+            # SelfDestruct in constructor - clean halt
+            # The contract destroys itself during deployment
+            # Account deletion already handled by builtin_selfdestruct
+            pass
+
         # TODO can we merge the exception handler from
         # process_message and process_create_message?
         except Exception as e:
@@ -227,6 +233,12 @@ class EVMCore:
 
             elif message.code:
                 self.callbacks.dispatch()
+
+        except SelfDestruct:
+            # SelfDestruct is a clean halt, NOT an error
+            # State changes (balance transfer, account deletion) are already done
+            # Don't set error - execution was successful
+            pass
 
         except Exception as e:
             self.state.current_output.error = e

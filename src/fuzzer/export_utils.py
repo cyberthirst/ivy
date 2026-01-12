@@ -263,7 +263,6 @@ def exclude_unsupported_patterns(test_filter: TestFilter) -> TestFilter:
     return (
         test_filter.exclude_source(r"pragma nonreentrancy")
         .exclude_source(r"raw_log")
-        .exclude_source(r"selfdestruct")
         .exclude_source(r"gas=")
         .exclude_source("salt=")
         .exclude_source("sha256")

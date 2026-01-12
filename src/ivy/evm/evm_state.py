@@ -14,6 +14,7 @@ class EVMState:
         self.accessed_accounts = set()
         self._env = None
         self._journal = Journal()
+        self.created_accounts: set[Address] = set()  # EIP-6780 tracking
 
     def _create_account(self, address):
         """Create a new account and journal it if we're in an active transaction."""
@@ -25,6 +26,7 @@ class EVMState:
                 address,  # key is the address
                 None,  # old value is None for new accounts
             )
+            self.created_accounts.add(address)  # Track for EIP-6780
         return account
 
     def __getitem__(self, key):
@@ -80,7 +82,12 @@ class EVMState:
         return self.state[address].balance
 
     def set_balance(self, address: Address, value: int):
-        self.state[address].balance = value
+        account = self.state[address]
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.BALANCE, account, "balance", account.balance
+            )
+        account.balance = value
 
     def get_code(self, address: Address) -> Optional[ContractData]:
         if address not in self.state:
@@ -130,6 +137,7 @@ class EVMState:
         for account in self.accessed_accounts:
             account.transient.clear()
         self.accessed_accounts.clear()
+        self.created_accounts.clear()  # Clear at transaction end
 
     def get_account(self, address: Address) -> Account:
         account = self.state[address]
