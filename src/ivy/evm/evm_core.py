@@ -186,7 +186,7 @@ class EVMCore:
                         module_t.init_function
                     )
 
-            new_account.contract_data = new_contract_code
+            self.state.set_code(message.create_address, new_contract_code)
 
         # TODO can we merge the exception handler from
         # process_message and process_create_message?

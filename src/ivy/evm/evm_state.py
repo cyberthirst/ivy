@@ -87,7 +87,7 @@ class EVMState:
             return None
         return self.state[address].contract_data
 
-    def set_code(self, address: Address, code: ContractData):
+    def set_code(self, address: Address, code: Optional[ContractData]):
         account = self.state[address]
         if self._journal.is_active:
             self._journal.record(
@@ -172,6 +172,8 @@ class StateAccess(Protocol):
 
     def get_code(self, address: Address) -> Optional[ContractData]: ...
 
+    def set_code(self, address: Address, code: Optional[ContractData]): ...
+
     def get_storage(self, address: Address) -> int: ...
 
     def destroy_storage(self, address: Address) -> None: ...
@@ -220,6 +222,9 @@ class StateAccessor(StateAccess):
 
     def get_code(self, address):
         return self._state.get_code(address)
+
+    def set_code(self, address: Address, code: Optional[ContractData]):
+        self._state.set_code(address, code)
 
     def get_storage(self, address: Address) -> dict:
         return self._state.get_storage(address)
