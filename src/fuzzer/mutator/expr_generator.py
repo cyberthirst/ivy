@@ -1225,7 +1225,7 @@ class ExprGenerator:
                 # remaining = len - start
                 remaining = _uint_binop(len_call, ast.Sub(), a1)
 
-                # length: if remaining == 0 -> 1 (will be invalid but rare)
+                # length: if remaining == 0 -> 0 (valid empty slice)
                 # else min((rand_v % bound)+1, remaining) where bound = ret_len (if >0) else remaining
                 rem_is_zero = _uint_cmp(remaining, ast.Eq(), zero)
                 if ret_len > 0:
@@ -1236,7 +1236,7 @@ class ExprGenerator:
                 rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
                 plus_one = _uint_binop(rand_mod, ast.Add(), one)
                 len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)
-                a2 = _ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
+                a2 = _ifexp(rem_is_zero, zero, len_else, IntegerT(False, 256))
             else:
                 # Intentionally produce out-of-bounds in a dynamic way
                 one = self._generate_uint256_literal(1)
