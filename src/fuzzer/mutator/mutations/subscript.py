@@ -49,5 +49,13 @@ def _mutate_index(*, ctx: MutationCtx, **_) -> ast.Subscript:
         else:
             mutated = mutated % cap
 
+    if mutated == current:
+        if isinstance(base_type, (SArrayT, DArrayT, BytesT, StringT)):
+            cap = base_type.length
+            if cap > 1:
+                mutated = (current + 1) % cap
+        else:
+            mutated = current + 1
+
     ctx.node.slice.value = mutated
     return ctx.node
