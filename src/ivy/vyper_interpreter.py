@@ -140,21 +140,21 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
     def allocate_variables(self, module_t: ModuleT):
         allocator = Allocator()
-        # separeate address allocation from variable creation
-        # the allocator rewrites the varinfo.position
-        nonreentrant, globals = allocator.allocate_addresses(module_t)
+        # separate address allocation from variable creation
+        nonreentrant, globals, positions = allocator.allocate_addresses(module_t)
 
         for var in globals:
             get_location = self.storage_getter_from_varinfo(var)
             name = var.decl_node.target.id
+            position = positions[var]
             if var.is_constant:
                 value = self.visit(var.decl_node.value)  # the value of the constant
                 self.globals.new_variable(
-                    var, get_location, initial_value=value, name=name
+                    var, get_location, position, initial_value=value, name=name
                 )
                 continue
 
-            self.globals.new_variable(var, get_location, name=name)
+            self.globals.new_variable(var, get_location, position, name=name)
 
         self.globals.allocate_reentrant_key(
             nonreentrant, lambda: self.current_context.transient

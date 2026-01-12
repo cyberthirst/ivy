@@ -10,15 +10,33 @@ from ivy.types import Address
 
 
 def deepcopy_code(state: StateAccess, target: Address, reset_global_vars: bool = False):
-    from ivy.variable import GlobalVariables
-
     # TODO what about the case when the target is empty?
     code = state.get_code(target)
-    code_copy = copy.deepcopy(code)
-    if reset_global_vars:
-        # For blueprint creation, we need fresh global_vars since the new contract
-        # will run its constructor and allocate variables
-        code_copy.global_vars = GlobalVariables()
+
+    # Create a new ContractData that shares the compiler_data and module_t
+    # but has fresh mutable state (global_vars, immutables, constants).
+    # We can't use deepcopy because it breaks VarInfo object identity -
+    # the same variable ends up with different VarInfo objects in declarations
+    # vs references, causing lookups to fail.
+    code_copy = ContractData(code.compiler_data)
+
+    if not reset_global_vars:
+        # Copy the existing global_vars for runtime copies.
+        # We must preserve VarInfo key identity (they must match the shared AST),
+        # so we can't use deepcopy on the whole GlobalVariables.
+        # Instead, copy the positions dict directly (same keys) and deepcopy
+        # the variables dict (new GlobalVariable instances with same values).
+        code_copy.global_vars.positions = code.global_vars.positions.copy()
+        code_copy.global_vars.variables = copy.deepcopy(code.global_vars.variables)
+        code_copy.global_vars.reentrant_key_address = code.global_vars.reentrant_key_address
+        code_copy.global_vars.adrr_to_name = code.global_vars.adrr_to_name.copy()
+
+        # Also copy immutables and constants for runtime copies
+        code_copy.immutables = code.immutables.copy()
+        code_copy.constants = code.constants.copy()
+    # else: reset_global_vars=True means we want fresh GlobalVariables(),
+    # which ContractData.__init__ already creates
+
     return code_copy
 
 
@@ -65,7 +83,6 @@ def __default__() -> Bytes[2**32]:
 
     """
     _compiler_data: CompilerData = None
-    _bytecode: bytes = None
 
     @classmethod
     def get_proxy_contract_data(cls):
@@ -74,8 +91,5 @@ def __default__() -> Bytes[2**32]:
             cls._compiler_data.annotated_vyper_module._metadata["is_minimal_proxy"] = (
                 True
             )
-            # Pre-compute and cache bytecode to avoid Vyper compiler state issues
-            # when bytecode is accessed after initial use
-            cls._bytecode = cls._compiler_data.bytecode
 
         return ContractData(cls._compiler_data)
