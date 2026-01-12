@@ -8,8 +8,8 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
-from src.fuzzer.mutator.strategy import (
+from fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.strategy import (
     Strategy,
     StrategyRegistry,
     StrategySelector,
