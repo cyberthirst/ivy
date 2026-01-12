@@ -10,7 +10,7 @@ against Ivy's source-level interpretation.
 ### Environment Setup
 This project uses `uv` for dependency management.
 ```bash
-uv sync --frozen                          # Install all dependencies (creates .venv/ automatically)
+uv sync --frozen --extra dev              # Install all dependencies (creates .venv/ automatically)
 ```
 
 ### Running Tests (use `./ivytest.sh`)
