@@ -4,7 +4,7 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT
+from vyper.semantics.types import VyperType, ContractFunctionT, InterfaceT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -185,6 +185,7 @@ class AstMutator(VyperNodeTransformer):
         self.stmt_generator.name_generator.counter = 0
         self.function_registry.reset()
         self.interface_registry.reset()
+        self.expr_generator.interface_aliases = {}
 
     def add_variable(self, name: str, var_info: VarInfo):
         self.context.add_variable(name, var_info)
@@ -240,6 +241,14 @@ class AstMutator(VyperNodeTransformer):
                 func_type = item._metadata.get("func_type")
                 if func_type and isinstance(func_type, ContractFunctionT):
                     self.function_registry.register_function(func_type)
+
+            elif isinstance(item, ast.ImportFrom):
+                for info in item._metadata.get("import_infos", []):
+                    iface_type = getattr(info, "_typ", None)
+                    if isinstance(iface_type, InterfaceT):
+                        self.expr_generator.register_interface_alias(
+                            iface_type, info.alias
+                        )
 
             elif isinstance(item, ast.VariableDecl):
                 # Register module-level variable

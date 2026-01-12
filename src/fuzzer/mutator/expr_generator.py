@@ -18,6 +18,7 @@ from vyper.semantics.types import (
     HashMapT,
     DecimalT,
     TYPE_T,
+    InterfaceT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.analysis.base import DataLocation, VarInfo
@@ -51,12 +52,14 @@ class ExprGenerator:
         self.function_registry = function_registry
         self.interface_registry = interface_registry
         self.type_generator = type_generator
+        self.interface_aliases: dict[str, str] = {}
 
         # Build dispatch table for efficient type-to-AST conversion
         self._ast_builders = {
             IntegerT: self._int_to_ast,
             BoolT: self._bool_to_ast,
             AddressT: self._address_to_ast,
+            InterfaceT: self._interface_to_ast,
             BytesM_T: self._bytesm_to_ast,
             BytesT: self._bytes_to_ast,
             StringT: self._string_to_ast,
@@ -375,6 +378,41 @@ class ExprGenerator:
         node = ast.Hex(value=value)
         node._metadata["type"] = typ
         return node
+
+    def _interface_to_ast(self, value: str, typ: InterfaceT) -> ast.Call:
+        iface_name = self._interface_name_for_type(typ)
+        address_node = self._address_to_ast(value, AddressT())
+        iface_name_node = ast.Name(id=iface_name)
+        iface_name_node._metadata = {"type": TYPE_T(typ)}
+        call_node = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
+        call_node._metadata = {"type": typ}
+        return call_node
+
+    def register_interface_alias(self, interface_type: InterfaceT, alias: str) -> None:
+        self.interface_aliases[interface_type._id] = alias
+
+    def _interface_name_for_type(self, typ: InterfaceT) -> str:
+        alias = self.interface_aliases.get(typ._id)
+        if alias:
+            return alias
+
+        raw_name = typ._id
+        if raw_name.isidentifier():
+            return raw_name
+
+        candidate = raw_name.replace("\\", "/").split("/")[-1]
+        if candidate.endswith((".vyi", ".vy")):
+            candidate = candidate.rsplit(".", 1)[0]
+
+        if candidate.isidentifier():
+            return candidate
+
+        sanitized = "".join(
+            ch if (ch.isalnum() or ch == "_") else "_" for ch in candidate
+        )
+        if sanitized and sanitized[0].isdigit():
+            sanitized = f"iface_{sanitized}"
+        return sanitized or "iface"
 
     def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.Hex:
         # Hex expects a 0x-prefixed string for fixed-size bytes.
