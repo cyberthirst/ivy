@@ -25,6 +25,7 @@ from vyper.semantics.types import (
     StructT,
     TupleT,
     VyperType,
+    InterfaceT,
 )
 
 
@@ -50,6 +51,8 @@ class BaseValueGenerator(ABC):
 
     def generate(self, vyper_type: VyperType) -> Any:
         """Generate a value for the given type."""
+        if isinstance(vyper_type, InterfaceT):
+            return self._generate_address(AddressT())
         generator = self._generators.get(type(vyper_type))
         assert generator is not None, f"No generator for {type(vyper_type).__name__}"
         return generator(vyper_type)
