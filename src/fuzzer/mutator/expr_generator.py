@@ -878,6 +878,13 @@ class ExprGenerator:
 
         node = ast.BinOp(left=left, op=op_class(), right=right)
 
+        if isinstance(node.op, (ast.FloorDiv, ast.Mod, ast.Div)):
+            if isinstance(right, ast.Int) and right.value == 0:
+                replacement = 1
+                if target_type.is_signed and self.rng.random() < 0.5:
+                    replacement = -1
+                right.value = replacement
+
         node._metadata["type"] = target_type
         return node
 
@@ -1298,7 +1305,8 @@ class ExprGenerator:
                 zero = self._generate_uint256_literal(0)
 
                 len_is_zero = _uint_cmp(len_call, ast.Eq(), zero)
-                start_else = _uint_binop(rand_u, ast.Mod(), len_call)
+                safe_len = _builtin_call("max", [len_call, one], len_ret_t)
+                start_else = _uint_binop(rand_u, ast.Mod(), safe_len)
                 a1 = _ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
 
                 # remaining = len - start
@@ -1312,7 +1320,8 @@ class ExprGenerator:
                 else:
                     bound = remaining
                 # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
-                rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
+                safe_bound = _builtin_call("max", [bound, one], len_ret_t)
+                rand_mod = _uint_binop(rand_v, ast.Mod(), safe_bound)
                 plus_one = _uint_binop(rand_mod, ast.Add(), one)
                 len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)
                 a2 = _ifexp(rem_is_zero, zero, len_else, IntegerT(False, 256))
