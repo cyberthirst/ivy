@@ -17,6 +17,7 @@ class JournalEntryType(Enum):
     CODE = auto()
     TRANSIENT_STORAGE = auto()
     ARRAY_LENGTH = auto()
+    STORAGE_DESTRUCTION = auto()
 
 
 class JournalEntry:
@@ -176,6 +177,9 @@ class Journal:
             entry.obj[entry.key] = entry.old_value
         elif entry.entry_type == JournalEntryType.ARRAY_LENGTH:
             entry.obj.length = entry.old_value
+        elif entry.entry_type == JournalEntryType.STORAGE_DESTRUCTION:
+            # Restore the entire storage dict that was destroyed
+            entry.obj.storage = entry.old_value
         else:
             raise ValueError(f"Unknown journal entry type: {entry.entry_type}")
 

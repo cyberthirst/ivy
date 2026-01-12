@@ -150,6 +150,11 @@ class EVMCore:
     ) -> ExecutionOutput:
         self.journal.begin_call(message.is_static)
 
+        # Destroy any pre-existing storage at the target address.
+        # This handles the edge case where CREATE collides with a previously
+        # self-destructed address that still has storage.
+        self.state.destroy_storage(message.create_address)
+
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 

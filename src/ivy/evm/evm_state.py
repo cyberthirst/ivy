@@ -98,6 +98,23 @@ class EVMState:
     def get_storage(self, address: Address) -> dict:
         return self.state[address].storage
 
+    def destroy_storage(self, address: Address) -> None:
+        """Destroy all storage at the given address (for CREATE address reuse edge case)."""
+        if address not in self.state:
+            return
+        account = self.state[address]
+        if not account.storage:
+            return
+        # Journal the old storage for potential rollback
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.STORAGE_DESTRUCTION,
+                account,
+                "storage",
+                account.storage,
+            )
+        account.storage = {}
+
     def get_transient(self, address: Address) -> dict:
         account = self.state[address]
         self.accessed_accounts.add(account)
@@ -157,6 +174,8 @@ class StateAccess(Protocol):
 
     def get_storage(self, address: Address) -> int: ...
 
+    def destroy_storage(self, address: Address) -> None: ...
+
     def add_accessed_account(self, acc): ...
 
     def has_account(self, address) -> bool: ...
@@ -204,6 +223,9 @@ class StateAccessor(StateAccess):
 
     def get_storage(self, address: Address) -> dict:
         return self._state.get_storage(address)
+
+    def destroy_storage(self, address: Address) -> None:
+        self._state.destroy_storage(address)
 
     def add_accessed_account(self, acc):
         self._state.add_accessed_account(acc)
