@@ -5,6 +5,7 @@ from vyper.semantics.types import (
     VyperType,
     BoolT,
     HashMapT,
+    TupleT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
@@ -432,7 +433,16 @@ class StatementGenerator:
                 target_node = cur_node
                 target_type = cur_t
 
-        value = self.expr_generator.generate(target_type, context, depth=3)
+        if isinstance(target_type, TupleT):
+            value = self.expr_generator.random_var_ref(target_type, context)
+            if value is None:
+                value = self.expr_generator._generate_func_call(
+                    target_type, context, depth=2
+                )
+            if value is None:
+                return None
+        else:
+            value = self.expr_generator.generate(target_type, context, depth=3)
 
         return ast.Assign(targets=[target_node], value=value)
 

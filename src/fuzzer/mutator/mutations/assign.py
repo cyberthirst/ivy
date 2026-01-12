@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types import TupleT
 
 from fuzzer.mutator.strategy import Strategy, StrategyRegistry
 from fuzzer.mutator.mutations.base import MutationCtx
@@ -48,6 +49,16 @@ def _use_var_as_rhs(*, ctx: MutationCtx, **_) -> ast.Assign:
 
 
 def _generate_new_expr(*, ctx: MutationCtx, **_) -> ast.Assign:
-    new_expr = ctx.expr_gen.generate(ctx.inferred_type, ctx.context, depth=2)
+    assert ctx.inferred_type is not None
+    if isinstance(ctx.inferred_type, TupleT):
+        new_expr = ctx.expr_gen.random_var_ref(ctx.inferred_type, ctx.context)
+        if new_expr is None:
+            new_expr = ctx.expr_gen._generate_func_call(
+                ctx.inferred_type, ctx.context, depth=2
+            )
+        if new_expr is None:
+            return ctx.node
+    else:
+        new_expr = ctx.expr_gen.generate(ctx.inferred_type, ctx.context, depth=2)
     ctx.node.value = new_expr
     return ctx.node
