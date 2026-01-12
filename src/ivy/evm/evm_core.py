@@ -12,7 +12,7 @@ from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
 from ivy.exceptions import EVMException, Revert, StaticCallViolation
-from ivy.utils import compute_contract_address
+from ivy.utils import compute_contract_address, compute_create2_address
 from ivy.context import ExecutionContext, ExecutionOutput
 from ivy.evm.precompiles import PRECOMPILE_REGISTRY
 
@@ -321,11 +321,6 @@ class EVMCore:
             self.state.current_context.returndata = b""
             return output, Address(0)
 
-        if salt is not None:
-            raise NotImplementedError(
-                "Create2 depends on bytecode which isn't currently supported"
-            )
-
         current_address = self.state.current_context.msg.to
         # we're in a constructor
         if current_address == b"":
@@ -348,10 +343,21 @@ class EVMCore:
             empty_output.error = EVMException("Nonce overflow")
             return empty_output, Address(0)
 
-        # First compute address with current nonce
-        create_address = self.generate_create_address(current_address)
+        # Compute address - CREATE2 if salt provided, CREATE otherwise
+        if salt is not None:
+            # CREATE2: address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
+            init_code = code.compiler_data.bytecode
+            create_address = Address(
+                compute_create2_address(
+                    current_address.canonical_address, salt, init_code
+                )
+            )
+        else:
+            # CREATE: address derived from sender + nonce
+            create_address = self.generate_create_address(current_address)
 
-        # Then increment nonce (only after all checks pass)
+        # Increment nonce (only after all checks pass)
+        # Note: nonce is incremented for both CREATE and CREATE2
         self.state.increment_nonce(current_address)
 
         if self.account_has_code_or_nonce(create_address):

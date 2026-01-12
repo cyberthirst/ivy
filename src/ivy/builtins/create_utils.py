@@ -65,6 +65,7 @@ def __default__() -> Bytes[2**32]:
 
     """
     _compiler_data: CompilerData = None
+    _bytecode: bytes = None
 
     @classmethod
     def get_proxy_contract_data(cls):
@@ -73,5 +74,8 @@ def __default__() -> Bytes[2**32]:
             cls._compiler_data.annotated_vyper_module._metadata["is_minimal_proxy"] = (
                 True
             )
+            # Pre-compute and cache bytecode to avoid Vyper compiler state issues
+            # when bytecode is accessed after initial use
+            cls._bytecode = cls._compiler_data.bytecode
 
         return ContractData(cls._compiler_data)

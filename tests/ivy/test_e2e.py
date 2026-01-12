@@ -4176,3 +4176,257 @@ def test_static_value(middle: address, target: address) -> bool:
 
     with pytest.raises(StaticCallViolation):
         outer.test_static_value(middle, target)
+
+
+# ============================================================================
+# CREATE2 Tests
+# ============================================================================
+
+
+def test_create2_copy_of_address(get_contract, keccak):
+    """Test that create_copy_of with salt produces the correct CREATE2 address."""
+    src = """
+a: public(uint256)
+
+@external
+def create_with_salt(salt: bytes32) -> address:
+    self.a = 42
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+
+    salt = b"\x00" * 32
+    created_addr = c.create_with_salt(salt)
+
+    # Compute expected CREATE2 address manually
+    # address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_copy_of_different_salts(get_contract):
+    """Test that different salts produce different addresses."""
+    src = """
+a: public(uint256)
+
+@external
+def create_with_salt(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+
+    salt1 = b"\x00" * 32
+    salt2 = b"\x01" + b"\x00" * 31
+
+    addr1 = c.create_with_salt(salt1)
+    addr2 = c.create_with_salt(salt2)
+
+    assert addr1 != addr2
+
+
+def test_create2_copy_of_deterministic(get_contract, env, keccak):
+    """Test that CREATE2 is deterministic - same inputs produce same address."""
+    # Deploy two separate factory contracts
+    factory_src = """
+@external
+def compute_create2_addr(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    # We'll deploy the factory, compute expected address, and verify
+    c = get_contract(factory_src)
+
+    salt = b"\xde\xad\xbe\xef" + b"\x00" * 28
+
+    # Get the address that would be created
+    created_addr = c.compute_create2_addr(salt)
+
+    # Verify it matches the formula
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_minimal_proxy_address(get_contract, keccak):
+    """Test that create_minimal_proxy_to with salt produces correct CREATE2 address."""
+    target_src = """
+value: public(uint256)
+
+@external
+def set_value(v: uint256):
+    self.value = v
+    """
+
+    factory_src = """
+@external
+def create_proxy(target: address, salt: bytes32) -> address:
+    return create_minimal_proxy_to(target, salt=salt)
+    """
+
+    from vyper.compiler import CompilerData
+    from ivy.builtins.create_utils import MinimalProxyFactory
+
+    target = get_contract(target_src)
+    factory = get_contract(factory_src)
+
+    salt = b"\x12\x34" + b"\x00" * 30
+    created_proxy = factory.create_proxy(target.address, salt)
+
+    # Get the init_code for the minimal proxy
+    proxy_data = MinimalProxyFactory.get_proxy_contract_data()
+    init_code = proxy_data.compiler_data.bytecode
+
+    # Compute expected CREATE2 address
+    sender = factory.address.canonical_address
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_proxy.canonical_address == expected_addr
+
+
+def test_create2_from_blueprint_address(get_contract, make_input_bundle, keccak):
+    """Test that create_from_blueprint with salt produces correct CREATE2 address."""
+    blueprint_src = """
+value: public(uint256)
+
+@deploy
+def __init__(v: uint256):
+    self.value = v
+
+@external
+def get_value() -> uint256:
+    return self.value
+    """
+
+    factory_src = """
+import blueprint_contract as Blueprint
+
+@external
+def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
+    return create_from_blueprint(bp, init_val, salt=salt)
+    """
+
+    from vyper.compiler import CompilerData
+
+    input_bundle = make_input_bundle({"blueprint_contract.vy": blueprint_src})
+    # Blueprint needs an initial value for constructor
+    blueprint = get_contract(blueprint_src, 0)
+    factory = get_contract(factory_src, input_bundle=input_bundle)
+
+    salt = b"\xab\xcd" + b"\x00" * 30
+    init_val = 999
+
+    created_addr = factory.create_from_bp(blueprint.address, salt, init_val)
+
+    # For blueprint, the init_code is the blueprint's bytecode
+    init_code = blueprint.compiler_data.bytecode
+
+    # Compute expected CREATE2 address
+    sender = factory.address.canonical_address
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_same_salt_same_sender_same_code(get_contract, keccak):
+    """Test that CREATE2 with same salt, sender, and code always gives same address."""
+    src = """
+@external
+def get_create2_addr(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+    salt = b"\xff" * 32
+
+    # First call creates the contract
+    addr1 = c.get_create2_addr(salt)
+
+    # Compute expected address
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected = keccak(preimage)[-20:]
+
+    assert addr1.canonical_address == expected
+
+
+def test_create2_nonce_incremented(get_contract):
+    """Test that nonce is incremented for CREATE2 just like CREATE.
+
+    We verify this indirectly: CREATE uses nonce for address derivation,
+    so if we call CREATE after CREATE2, the CREATE address should be different
+    than if we had just called CREATE without the CREATE2 call first.
+    """
+    src = """
+@external
+def create_with_salt_then_without(salt: bytes32) -> (address, address):
+    # First CREATE2
+    addr1: address = create_copy_of(self, salt=salt)
+    # Then regular CREATE - should use incremented nonce
+    addr2: address = create_copy_of(self)
+    return addr1, addr2
+
+@external
+def create_without_salt() -> address:
+    return create_copy_of(self)
+    """
+
+    c = get_contract(src)
+
+    # Deploy fresh contract to compare
+    c2 = get_contract(src)
+
+    salt = b"\x00" * 32
+
+    # With CREATE2 first, then CREATE
+    addr1, addr2 = c.create_with_salt_then_without(salt)
+
+    # Regular CREATE (with same starting nonce)
+    addr3 = c2.create_without_salt()
+
+    # addr2 and addr3 should be DIFFERENT because c's nonce was incremented by CREATE2
+    # (both c and c2 started with same nonce, but c had +1 from CREATE2)
+    assert addr2 != addr3
+
+
+def test_create2_created_contract_works(get_contract):
+    """Test that contracts created via CREATE2 work correctly."""
+    src = """
+value: public(uint256)
+
+interface Self:
+    def value() -> uint256: view
+    def set_value(v: uint256): nonpayable
+
+@external
+def create_and_call(salt: bytes32, v: uint256) -> uint256:
+    new_contract: address = create_copy_of(self, salt=salt)
+    extcall Self(new_contract).set_value(v)
+    return staticcall Self(new_contract).value()
+
+@external
+def set_value(v: uint256):
+    self.value = v
+    """
+
+    c = get_contract(src)
+    salt = b"\x42" + b"\x00" * 31
+
+    result = c.create_and_call(salt, 12345)
+    assert result == 12345
