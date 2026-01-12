@@ -211,3 +211,4 @@ Skills are task-specific guides in `skills/<name>.md`. Read the relevant skill b
 | **write-skill** | Create new skills - use this to add skills, then update this table |
 | **code-review** | Dual-agent review (Claude + Codex) - bugs, architecture, cross-review, final report |
 | **debugging** | Debugging bugs in Ivy/Viper/Titanoboa - structured bug reports, tracking in BUGS/ directory |
+| **launch-agents** | Launching Codex and Claude agents as bash commands with prompts via stdin |
