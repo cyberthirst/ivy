@@ -589,15 +589,30 @@ class ExprGenerator:
         def _random_uint_index():
             return self.generate(idx_t, context, max(0, depth))
 
-        # Helper: guarded index using len(base)
+        # Helper: guarded index using len(base) (DynArray) or literal bounds (SArray)
         def _guarded_index():
-            # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
             i_expr = (
                 _small_literal_for_dynarray()
                 if isinstance(seq_t, DArrayT) and self.rng.random() < 0.75
                 else _random_uint_index()
             )
 
+            if isinstance(seq_t, SArrayT):
+                cap = seq_t.length
+                if cap <= 0:
+                    return self._int_to_ast(0, idx_t)
+
+                cap_lit = self._int_to_ast(cap, idx_t)
+                cap_minus_one = self._int_to_ast(cap - 1, idx_t)
+
+                cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[cap_lit])
+                cond._metadata = {"type": BoolT()}
+
+                guarded = ast.IfExp(test=cond, body=i_expr, orelse=cap_minus_one)
+                guarded._metadata = {"type": idx_t}
+                return guarded
+
+            # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
             len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
             len_call._metadata = getattr(len_call, "_metadata", {})
             len_call._metadata["type"] = IntegerT(False, 256)
