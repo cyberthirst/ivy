@@ -267,6 +267,8 @@ class StatementGenerator:
 
         # Generate variables first and insert at beginning
         num_vars = self.rng.randint(0, 2)
+        if context.is_module_scope and n_stmts is not None and num_vars == 0:
+            num_vars = 1
         for i in range(num_vars):
             var_decl = self.create_vardecl_and_register(context, parent)
             body.insert(i, var_decl)
@@ -378,7 +380,15 @@ class StatementGenerator:
             return False
 
         last_stmt = body[-1]
-        return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
+        if isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return)):
+            return True
+
+        if isinstance(last_stmt, ast.If):
+            return self.scope_is_terminated(last_stmt.body) and self.scope_is_terminated(
+                last_stmt.orelse
+            )
+
+        return False
 
     def get_writable_variables(self, context: Context) -> list[tuple[str, VarInfo]]:
         with context.access_mode(AccessMode.WRITE):
