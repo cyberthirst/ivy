@@ -89,6 +89,8 @@ class CandidateSelector:
         """Return True if node is a valid mutation candidate."""
         # Tuple subscript indices - changing index changes result type
         if isinstance(node, ast.Subscript):
+            if not isinstance(node.slice, ast.Int):
+                return False
             base_type = self._type_of(node.value)
             if isinstance(base_type, TupleT) and isinstance(node.slice, ast.Int):
                 return False
