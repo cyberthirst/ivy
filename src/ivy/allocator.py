@@ -16,6 +16,7 @@ class Allocator:
             if location not in IGNORED_LOCATIONS
         }
         self.visited = {}
+        self.positions = {}  # VarInfo -> int
 
     def _get_allocatable(self, vyper_module: ast.Module) -> list[ast.VyperNode]:
         allocable = (ast.InitializesDecl, ast.VariableDecl)
@@ -41,7 +42,7 @@ class Allocator:
         assert varinfo not in self.visited
         assert varinfo.is_state_variable
 
-        varinfo.position = self._increment_counter(varinfo.location)
+        self.positions[varinfo] = self._increment_counter(varinfo.location)
         self.visited[varinfo] = True
 
     def _allocate_r(self, mod: ast.Module):
@@ -98,4 +99,4 @@ class Allocator:
         nonreentrant = self.allocate_nonreentrant_key()
         self._allocate_r(module_t.decl_node)
         self._allocate_constants_r(module_t.decl_node, set())
-        return nonreentrant, self.visited
+        return nonreentrant, self.visited, self.positions

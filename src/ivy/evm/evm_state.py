@@ -14,6 +14,7 @@ class EVMState:
         self.accessed_accounts = set()
         self._env = None
         self._journal = Journal()
+        self.created_accounts: set[Address] = set()  # EIP-6780 tracking
 
     def _create_account(self, address):
         """Create a new account and journal it if we're in an active transaction."""
@@ -25,18 +26,14 @@ class EVMState:
                 address,  # key is the address
                 None,  # old value is None for new accounts
             )
+            self.created_accounts.add(address)  # Track for EIP-6780
         return account
 
     def __getitem__(self, key):
-        # Check if this is a new account creation
-        is_new = key not in self.state
-        account = self.state[key]
-        if is_new and self._journal.is_active:
-            # Record the account creation
-            self._journal.record(
-                JournalEntryType.ACCOUNT_CREATION, self.state, key, None
-            )
-        return account
+        # Reading a non-existent account returns an empty account but doesn't
+        # modify state - account creation is only journaled when actually
+        # modifying the account (balance transfer, code set, etc.)
+        return self.state[key]
 
     def __delitem__(self, key: Address):
         if key in self.state:
@@ -54,11 +51,21 @@ class EVMState:
             #    self.accessed_accounts.remove(account)
             del self.state[key]
 
-    def has_account(self, address) -> bool:
-        # TODO add detection for an empty account (+ maybe rename to smth like non-empty)
-        return False
+    def has_account(self, address: Address) -> bool:
+        # An account "exists" if it has non-zero balance, nonce, or code
+        # Per EIP-161: empty accounts are those with no code, zero nonce, zero balance
+        if address not in self.state:
+            return False
+        account = self.state[address]
+        return (
+            account.balance != 0
+            or account.nonce != 0
+            or account.contract_data is not None
+        )
 
     def get_nonce(self, address: Address) -> int:
+        if address not in self.state:
+            return 0
         return self.state[address].nonce
 
     def increment_nonce(self, address: Address):
@@ -70,15 +77,24 @@ class EVMState:
         account.nonce += 1
 
     def get_balance(self, address: Address) -> int:
+        if address not in self.state:
+            return 0
         return self.state[address].balance
 
     def set_balance(self, address: Address, value: int):
-        self.state[address].balance = value
+        account = self.state[address]
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.BALANCE, account, "balance", account.balance
+            )
+        account.balance = value
 
     def get_code(self, address: Address) -> Optional[ContractData]:
+        if address not in self.state:
+            return None
         return self.state[address].contract_data
 
-    def set_code(self, address: Address, code: ContractData):
+    def set_code(self, address: Address, code: Optional[ContractData]):
         account = self.state[address]
         if self._journal.is_active:
             self._journal.record(
@@ -88,6 +104,23 @@ class EVMState:
 
     def get_storage(self, address: Address) -> dict:
         return self.state[address].storage
+
+    def destroy_storage(self, address: Address) -> None:
+        """Destroy all storage at the given address (for CREATE address reuse edge case)."""
+        if address not in self.state:
+            return
+        account = self.state[address]
+        if not account.storage:
+            return
+        # Journal the old storage for potential rollback
+        if self._journal.is_active:
+            self._journal.record(
+                JournalEntryType.STORAGE_DESTRUCTION,
+                account,
+                "storage",
+                account.storage,
+            )
+        account.storage = {}
 
     def get_transient(self, address: Address) -> dict:
         account = self.state[address]
@@ -104,6 +137,7 @@ class EVMState:
         for account in self.accessed_accounts:
             account.transient.clear()
         self.accessed_accounts.clear()
+        self.created_accounts.clear()  # Clear at transaction end
 
     def get_account(self, address: Address) -> Account:
         account = self.state[address]
@@ -146,7 +180,11 @@ class StateAccess(Protocol):
 
     def get_code(self, address: Address) -> Optional[ContractData]: ...
 
+    def set_code(self, address: Address, code: Optional[ContractData]): ...
+
     def get_storage(self, address: Address) -> int: ...
+
+    def destroy_storage(self, address: Address) -> None: ...
 
     def add_accessed_account(self, acc): ...
 
@@ -193,8 +231,14 @@ class StateAccessor(StateAccess):
     def get_code(self, address):
         return self._state.get_code(address)
 
+    def set_code(self, address: Address, code: Optional[ContractData]):
+        self._state.set_code(address, code)
+
     def get_storage(self, address: Address) -> dict:
         return self._state.get_storage(address)
+
+    def destroy_storage(self, address: Address) -> None:
+        self._state.destroy_storage(address)
 
     def add_accessed_account(self, acc):
         self._state.add_accessed_account(acc)

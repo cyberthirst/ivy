@@ -1,7 +1,6 @@
 from typing import Optional, Union
 
-import vyper.ast.nodes as ast
-from vyper.semantics.types.module import ModuleT
+from vyper.compiler import CompilerData
 
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_structures import (
@@ -12,10 +11,16 @@ from ivy.evm.evm_structures import (
 from ivy.evm.evm_state import EVMState, StateAccessor
 from ivy.journal import Journal
 from ivy.types import Address
-from ivy.exceptions import EVMException, Revert
-from ivy.utils import compute_contract_address
+from ivy.exceptions import EVMException, Revert, SelfDestruct, StaticCallViolation
+from ivy.utils import compute_contract_address, compute_create2_address
 from ivy.context import ExecutionContext, ExecutionOutput
 from ivy.evm.precompiles import PRECOMPILE_REGISTRY
+
+# Maximum call depth limit as per EVM specification
+STACK_DEPTH_LIMIT = 1024
+
+# Maximum nonce value (uint64 max) - CREATE fails gracefully at this value
+MAX_NONCE = 2**64 - 1
 
 
 class EVMCore:
@@ -34,19 +39,17 @@ class EVMCore:
         value: int,
         calldata: bytes = b"",
         is_static: bool = False,
-        module: Optional[ast.Module] = None,
+        compiler_data: Optional[CompilerData] = None,
     ):
         is_deploy = to == b""
         create_address, code = None, None
 
         # TODO merge this with do_create_message_call and do_message_call
         if is_deploy:
-            assert module is not None
-            module_t = module._metadata["type"]
-            assert isinstance(module_t, ModuleT)
+            assert compiler_data is not None
             # Compute address with current nonce (before incrementing)
             create_address = self.generate_create_address(sender)
-            code = ContractData(module_t)
+            code = ContractData(compiler_data)
         else:
             assert isinstance(to, Address)
             code = self.state.get_code(to)
@@ -147,11 +150,21 @@ class EVMCore:
     ) -> ExecutionOutput:
         self.journal.begin_call(message.is_static)
 
+        # Destroy any pre-existing storage at the target address.
+        # This handles the edge case where CREATE collides with a previously
+        # self-destructed address that still has storage.
+        self.state.destroy_storage(message.create_address)
+
         if self.state.has_account(message.create_address):
             raise EVMException("Address already taken")
 
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
+
+        # EIP-161: newly created contracts start with nonce=1, not nonce=0
+        # This must happen before init code runs, so any CREATE inside __init__
+        # uses the correct nonce for address computation
+        self.state.increment_nonce(message.create_address)
 
         exec_ctx = ExecutionContext(new_account, message)
         self.state.push_context(exec_ctx)
@@ -173,7 +186,13 @@ class EVMCore:
                         module_t.init_function
                     )
 
-            new_account.contract_data = new_contract_code
+            self.state.set_code(message.create_address, new_contract_code)
+
+        except SelfDestruct:
+            # SelfDestruct in constructor - clean halt
+            # The contract destroys itself during deployment
+            # Account deletion already handled by builtin_selfdestruct
+            pass
 
         # TODO can we merge the exception handler from
         # process_message and process_create_message?
@@ -192,9 +211,9 @@ class EVMCore:
         return ret
 
     def _execute_precompile(self, message: Message):
-        to = message.to
+        code_address = message.code_address
         data = message.data
-        self.state.current_output.output = PRECOMPILE_REGISTRY[to](data)
+        self.state.current_output.output = PRECOMPILE_REGISTRY[code_address](data)
 
     def process_message(
         self, message: Message, manage_journal: bool = True
@@ -209,11 +228,17 @@ class EVMCore:
         try:
             self._handle_value_transfer(message)
 
-            if message.to in PRECOMPILE_REGISTRY:
+            if message.code_address in PRECOMPILE_REGISTRY:
                 self._execute_precompile(message)
 
             elif message.code:
                 self.callbacks.dispatch()
+
+        except SelfDestruct:
+            # SelfDestruct is a clean halt, NOT an error
+            # State changes (balance transfer, account deletion) are already done
+            # Don't set error - execution was successful
+            pass
 
         except Exception as e:
             self.state.current_output.error = e
@@ -237,12 +262,26 @@ class EVMCore:
         is_static: bool = False,
         is_delegate: bool = False,
     ) -> ExecutionOutput:
+        # Check call depth limit before creating child message
+        # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
+        new_depth = self.state.current_context.msg.depth + 1
+        if new_depth > STACK_DEPTH_LIMIT:
+            output = ExecutionOutput()
+            output.error = EVMException("Stack depth limit exceeded")
+            self.state.current_context.returndata = b""
+            return output
+
         code_address = target
         code = self.state.get_code(code_address)
 
-        caller = self.state.current_context.msg.to
+        # Get current_target: use create_address if in constructor (msg.to == b"")
+        current_target = self.state.current_context.msg.to
+        if current_target == b"":
+            current_target = self.state.current_context.msg.create_address
+
+        caller = current_target
         if is_delegate:
-            target = self.state.current_context.msg.to
+            target = current_target
             assert value == 0
             value = self.state.current_context.msg.value
             caller = self.state.current_context.msg.caller
@@ -259,6 +298,7 @@ class EVMCore:
             code=code,
             depth=self.state.current_context.msg.depth + 1,
             is_static=is_static,
+            should_transfer_value=not is_delegate,  # DELEGATECALL should not transfer value
         )
 
         child_output = self.process_message(msg)
@@ -283,20 +323,53 @@ class EVMCore:
         salt: Optional[bytes] = None,
         is_runtime_copy: Optional[bool] = False,
     ) -> tuple[ExecutionOutput, Address]:
-        if salt is not None:
-            raise NotImplementedError(
-                "Create2 depends on bytecode which isn't currently supported"
-            )
+        # Check call depth limit before creating child message
+        # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
+        # Note: nonce is NOT incremented if depth limit is exceeded
+        new_depth = self.state.current_context.msg.depth + 1
+        if new_depth > STACK_DEPTH_LIMIT:
+            output = ExecutionOutput()
+            output.error = EVMException("Stack depth limit exceeded")
+            self.state.current_context.returndata = b""
+            return output, Address(0)
 
         current_address = self.state.current_context.msg.to
         # we're in a constructor
         if current_address == b"":
             current_address = self.state.current_context.msg.create_address
 
-        # First compute address with current nonce
-        create_address = self.generate_create_address(current_address)
+        # Per Execution Spec: check balance and nonce BEFORE incrementing nonce
+        # If any check fails, return early without modifying state
+        sender_balance = self.state[current_address].balance
+        sender_nonce = self.state.get_nonce(current_address)
 
-        # Then increment nonce
+        if sender_balance < value:
+            # Insufficient balance - fail gracefully without incrementing nonce
+            empty_output = ExecutionOutput()
+            empty_output.error = EVMException("Insufficient balance for transfer")
+            return empty_output, Address(0)
+
+        if sender_nonce >= MAX_NONCE:
+            # Nonce overflow - fail gracefully without incrementing nonce
+            empty_output = ExecutionOutput()
+            empty_output.error = EVMException("Nonce overflow")
+            return empty_output, Address(0)
+
+        # Compute address - CREATE2 if salt provided, CREATE otherwise
+        if salt is not None:
+            # CREATE2: address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
+            init_code = code.compiler_data.bytecode
+            create_address = Address(
+                compute_create2_address(
+                    current_address.canonical_address, salt, init_code
+                )
+            )
+        else:
+            # CREATE: address derived from sender + nonce
+            create_address = self.generate_create_address(current_address)
+
+        # Increment nonce (only after all checks pass)
+        # Note: nonce is incremented for both CREATE and CREATE2
         self.state.increment_nonce(current_address)
 
         if self.account_has_code_or_nonce(create_address):
@@ -333,7 +406,10 @@ class EVMCore:
         return child_output, return_address
 
     def _handle_value_transfer(self, message: Message) -> None:
-        if message.value > 0:
+        if message.is_static and message.value != 0:
+            raise StaticCallViolation("Cannot transfer value in static context")
+        # DELEGATECALL should not transfer value, only inherit msg.value for context
+        if message.should_transfer_value and message.value > 0:
             if self.state[message.caller].balance < message.value:
                 raise EVMException("Insufficient balance for transfer")
             self.state[message.caller].balance -= message.value

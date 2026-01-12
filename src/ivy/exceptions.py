@@ -10,6 +10,10 @@ class StaticCallViolation(EVMException):
     pass
 
 
+class SelfDestruct(EVMException):
+    pass
+
+
 class GasReference(EVMException):
     def __init__(self, message="Gas is not a supported concept in Ivy"):
         super().__init__(message)

@@ -57,21 +57,25 @@ class GlobalVariables:
         self.variables = {}
         self.reentrant_key_address = None
         self.adrr_to_name = {}
+        self.positions = {}  # VarInfo -> int
 
     def _get_address(self, var: VarInfo):
-        return (var.position, var.location)
+        return (self.positions[var], var.location)
 
     def new_variable(
         self,
         var: VarInfo,
         get_location: callable,
+        position: int,
         initial_value=None,
         name=Optional[str],
     ):
-        address = self._get_address(var)
+        # Store position for this varinfo
+        self.positions[var] = position
+        address = (position, var.location)
         assert address not in self.variables
         variable = GlobalVariable(
-            var.position, var.typ, get_location, var, initial_value
+            position, var.typ, get_location, var, initial_value
         )
         self.variables[address] = variable
         if name:
@@ -102,7 +106,8 @@ class GlobalVariables:
             is_public=False,
             decl_node=None,
         )
-        varinfo.position = position
+        # Store position in our dict (not on varinfo) for consistency
+        self.positions[varinfo] = position
         self.variables[address] = GlobalVariable(
             position, BoolT(), get_location, varinfo
         )

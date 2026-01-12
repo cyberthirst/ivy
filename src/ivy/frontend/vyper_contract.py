@@ -4,7 +4,10 @@ from dataclasses import astuple
 from functools import cached_property
 from abc import ABC, abstractmethod
 
-from vyper.codegen.core import calculate_type_for_external_return
+from vyper.codegen.core import (
+    calculate_type_for_external_return,
+    needs_external_call_wrap,
+)
 
 from vyper.compiler import CompilerData
 from vyper.compiler.output import build_abi_output
@@ -215,8 +218,8 @@ class VyperContract:
         return_typ = calculate_type_for_external_return(vyper_typ)
         ret = abi_decode(return_typ, execution_output.output, ivy_compat=False)
 
-        # unwrap the tuple if needed
-        if not isinstance(vyper_typ, TupleT):
+        # unwrap the tuple if needed (single values AND single-element tuples get wrapped)
+        if needs_external_call_wrap(vyper_typ):
             (ret,) = ret
 
         return ret
@@ -239,13 +242,11 @@ class VyperContract:
             encoded_args = self._ctor.prepare_calldata(*args)
             self.ctor_encoded_args = encoded_args.hex()
 
-        module = self.compiler_data.annotated_vyper_module
-
         # touch bytecode to ensure the contract compiles (not all semantic checks are done in the frontend)
         _ = self.compiler_data.bytecode
 
         address, execution_output = self.env.deploy(
-            module=module,
+            compiler_data=self.compiler_data,
             raw_args=encoded_args,
             value=value,
         )

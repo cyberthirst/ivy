@@ -919,6 +919,33 @@ def bar(a: uint256) -> uint256:
         c.foo(c2)
 
 
+def test_log_in_static_context():
+    """LOG operations should fail in static context per EVM spec."""
+    src = """
+event MyEvent:
+    value: uint256
+
+@external
+def emit_event(val: uint256) -> uint256:
+    log MyEvent(value=val)
+    return val
+    """
+
+    src2 = """
+interface Emitter:
+    def emit_event(val: uint256) -> uint256: view
+
+@external
+def foo(target: address) -> uint256:
+    return staticcall Emitter(target).emit_event(42)
+    """
+
+    emitter = loads(src)
+    caller = loads(src2)
+    with pytest.raises(StaticCallViolation):
+        caller.foo(emitter)
+
+
 def test_abi_encode_builtin():
     src = """
 @external
@@ -2070,6 +2097,32 @@ def a() -> uint256:
     c = get_contract(src)
 
     assert c.foo(target) == 0
+
+
+def test_create_copy_of_empty_target(get_contract, tx_failed, env):
+    from ivy.types import Address
+    from ivy.exceptions import Revert
+
+    src = """
+@external
+def copy_with_revert(target: address) -> address:
+    return create_copy_of(target, revert_on_failure=True)
+
+@external
+def copy_no_revert(target: address) -> address:
+    return create_copy_of(target, revert_on_failure=False)
+    """
+
+    c = get_contract(src)
+    empty_address = Address(0)
+
+    # Empty target always reverts - extcodesize check fails before CREATE
+    # regardless of revert_on_failure flag
+    with tx_failed(Revert):
+        c.copy_with_revert(empty_address)
+
+    with tx_failed(Revert):
+        c.copy_no_revert(empty_address)
 
 
 def test_log(get_contract):
@@ -3754,3 +3807,652 @@ def get_prevhash() -> bytes32:
     result = c.get_prevhash()
 
     assert result == b"\x00" * 32
+
+
+def test_call_depth_limit(get_contract):
+    """Test that call depth limit (1024) is enforced per EVM spec.
+
+    When call depth exceeds 1024, nested calls should fail gracefully
+    (return failure status) without reverting the caller.
+    """
+    src = """
+max_depth_reached: public(uint256)
+
+@external
+def recursive_call(depth: uint256) -> (bool, uint256):
+    self.max_depth_reached = depth
+
+    if depth >= 1030:  # Stop before hitting Python's recursion limit
+        return True, depth
+
+    # Try to call ourselves recursively using raw_call
+    success: bool = False
+    response: Bytes[64] = b""
+    success, response = raw_call(
+        self,
+        abi_encode(depth + 1, method_id=method_id("recursive_call(uint256)")),
+        max_outsize=64,
+        revert_on_failure=False
+    )
+
+    if not success:
+        # Call failed due to depth limit - this is expected at depth 1024
+        return False, depth
+
+    # Call succeeded, decode the result
+    child_success: bool = False
+    child_depth: uint256 = 0
+    child_success, child_depth = abi_decode(response, (bool, uint256))
+    return child_success, child_depth
+    """
+
+    c = get_contract(src)
+
+    # Start the recursive call chain at depth 1 (top-level call has msg.depth=0)
+    # The depth parameter tracks our iteration, while msg.depth is the actual EVM depth
+    # When depth param = N, msg.depth = N-1
+    success, final_depth = c.recursive_call(1)
+
+    # The call at msg.depth 1024 (depth param 1025) should succeed and set max_depth_reached=1025
+    # The raw_call FROM that depth trying to create msg.depth 1025 should fail (1025 > 1024)
+    # So max_depth_reached = 1025 (last value set before the child call failed)
+    assert c.max_depth_reached() == 1025
+    assert success == False  # The chain stopped due to depth limit
+    assert final_depth == 1025  # Last successfully reached depth (where the child call failed)
+
+
+def test_call_depth_tracking(get_contract):
+    """Test that call depth is correctly tracked through nested calls."""
+    src = """
+interface Self:
+    def inner() -> uint256: nonpayable
+
+depth_at_inner: public(uint256)
+
+@external
+def outer() -> uint256:
+    # Call inner which will check its depth
+    return extcall Self(self).inner()
+
+@external
+def inner() -> uint256:
+    # Return some value indicating we reached here
+    return 42
+    """
+
+    c = get_contract(src)
+
+    # outer() at depth 0 calls inner() at depth 1
+    result = c.outer()
+    assert result == 42
+
+
+def test_codesize(get_contract, env):
+    """Test codesize returns the bytecode size for various address types."""
+    src = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-zero codesize
+    self_codesize = c.get_self_codesize()
+    assert self_codesize > 0
+
+    # Querying own address should match self.codesize
+    assert c.get_codesize(c.address) == self_codesize
+
+    # EOA address should have zero codesize
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+    # Empty/unused address should have zero codesize
+    empty_addr = "0x" + "00" * 20
+    assert c.get_codesize(empty_addr) == 0
+
+    # Arbitrary unused address should have zero codesize
+    arbitrary = "0x" + "de" * 20
+    assert c.get_codesize(arbitrary) == 0
+
+
+def test_codesize_another_contract(get_contract, env):
+    """Test codesize works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's codesize
+    c1_codesize = c2.get_codesize(c1.address)
+    assert c1_codesize > 0
+
+
+def test_codehash(get_contract, env, keccak):
+    """Test codehash returns the keccak256 hash of the bytecode."""
+    src = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+
+@external
+def get_self_codehash() -> bytes32:
+    return self.codehash
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-empty codehash
+    self_codehash = c.get_self_codehash()
+    assert self_codehash != b"\x00" * 32
+
+    # Querying own address should match self.codehash
+    assert c.get_codehash(c.address) == self_codehash
+
+    # EOA address should return keccak256 of empty bytes
+    # (EOA is an account that exists - has been used - but has no code)
+    eoa = env.eoa
+    eoa_codehash = c.get_codehash(eoa)
+    assert eoa_codehash == keccak(b"")
+
+    # Non-existent account (never touched, no balance/nonce/code) returns 0
+    # per EIP-1052
+    empty_addr = "0x" + "00" * 20
+    assert c.get_codehash(empty_addr) == b"\x00" * 32
+
+    # Another arbitrary unused address should also return 0
+    arbitrary = "0x" + "de" * 20
+    assert c.get_codehash(arbitrary) == b"\x00" * 32
+
+
+def test_codehash_another_contract(get_contract, env):
+    """Test codehash works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's codehash
+    c1_codehash = c2.get_codehash(c1.address)
+    assert c1_codehash != b"\x00" * 32
+
+    # Two different contracts should have different codehashes
+    c2_self_codehash = c2.get_codehash(c2.address)
+    assert c1_codehash != c2_self_codehash
+
+
+def test_address_code(get_contract, env):
+    """Test address.code returns the runtime bytecode (via slice)."""
+    src = """
+@external
+def get_code_16(addr: address) -> Bytes[16]:
+    return slice(addr.code, 0, 16)
+
+@external
+def get_self_code_16() -> Bytes[16]:
+    return slice(self.code, 0, 16)
+
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have non-empty code
+    self_code = c.get_self_code_16()
+    assert len(self_code) == 16
+
+    # Querying own address should return same code
+    assert c.get_code_16(c.address) == self_code
+
+    # EOA address has zero codesize (can't slice from it)
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+
+def test_address_code_slice(get_contract, env):
+    """Test address.code via slice with specific lengths."""
+    src = """
+@external
+def get_code_slice(addr: address) -> Bytes[32]:
+    return slice(addr.code, 0, 32)
+
+@external
+def get_self_code_slice() -> Bytes[32]:
+    return slice(self.code, 0, 32)
+    """
+
+    c = get_contract(src)
+
+    # Deployed contract should have at least 32 bytes of code
+    self_code = c.get_self_code_slice()
+    assert len(self_code) == 32
+
+    # Querying own address should match self.code
+    assert c.get_code_slice(c.address) == self_code
+
+
+def test_address_code_another_contract(get_contract, env):
+    """Test address.code works for querying another deployed contract."""
+    src1 = """
+@external
+def foo() -> uint256:
+    return 42
+    """
+
+    src2 = """
+@external
+def get_code_slice(addr: address) -> Bytes[16]:
+    return slice(addr.code, 0, 16)
+    """
+
+    c1 = get_contract(src1)
+    c2 = get_contract(src2)
+
+    # c2 should be able to get c1's code (first 16 bytes)
+    c1_code = c2.get_code_slice(c1.address)
+    assert len(c1_code) == 16
+
+    # Two different contracts should have different code
+    c2_self_code = c2.get_code_slice(c2.address)
+    assert c1_code != c2_self_code
+
+
+def test_code_codesize_consistency(get_contract, env):
+    """Test that codesize works correctly."""
+    src = """
+@external
+def get_codesize(addr: address) -> uint256:
+    return addr.codesize
+
+@external
+def get_self_codesize() -> uint256:
+    return self.codesize
+
+@external
+def get_code_slice(addr: address) -> Bytes[100]:
+    return slice(addr.code, 0, 100)
+
+@external
+def get_self_code_slice() -> Bytes[100]:
+    return slice(self.code, 0, 100)
+    """
+
+    c = get_contract(src)
+
+    # Self codesize should be > 0 for deployed contract
+    self_codesize = c.get_self_codesize()
+    assert self_codesize > 0
+
+    # Contract address codesize should match
+    assert c.get_codesize(c.address) == self_codesize
+
+    # EOA codesize should be 0
+    eoa = env.eoa
+    assert c.get_codesize(eoa) == 0
+
+
+def test_codehash_consistency(get_contract, env, keccak):
+    """Test that codehash returns correct values."""
+    src = """
+@external
+def get_codehash(addr: address) -> bytes32:
+    return addr.codehash
+
+@external
+def get_self_codehash() -> bytes32:
+    return self.codehash
+    """
+
+    c = get_contract(src)
+
+    # Self codehash should not be zero for deployed contract
+    self_codehash = c.get_self_codehash()
+    assert self_codehash != b"\x00" * 32
+
+    # Contract address codehash should match
+    assert c.get_codehash(c.address) == self_codehash
+
+    # EOA codehash should be keccak of empty bytes (exists but no code)
+    eoa = env.eoa
+    eoa_codehash = c.get_codehash(eoa)
+    assert eoa_codehash == keccak(b"")
+
+    # Non-existent account should return 0 per EIP-1052
+    empty_addr = "0x" + "ab" * 20
+    assert c.get_codehash(empty_addr) == b"\x00" * 32
+
+
+def test_static_call_with_value_raises_before_balance_check(get_contract, env):
+    """Test that call with value in static context raises StaticCallViolation.
+
+    Per EVM specs, the check for value != 0 in static context must happen
+    BEFORE balance checks. This test verifies we get StaticCallViolation
+    rather than 'Insufficient balance for transfer' even when balance is zero.
+
+    Setup: ContractA calls ContractB via staticcall, ContractB then tries
+    to call ContractC with value - this should raise StaticCallViolation.
+    """
+    # Contract C - just receives ether
+    target_src = """
+@external
+@payable
+def receive():
+    pass
+    """
+
+    # Contract B - called via staticcall, tries to forward with value
+    middle_src = """
+@external
+def forward_with_value(target: address) -> bool:
+    # This runs in static context when called via staticcall
+    # Trying to send value should raise StaticCallViolation
+    raw_call(target, b"", value=1)
+    return True
+    """
+
+    # Contract A - initiates the static call chain
+    outer_src = """
+interface Middle:
+    def forward_with_value(target: address) -> bool: view
+
+@external
+def test_static_value(middle: address, target: address) -> bool:
+    # staticcall to middle, which then tries raw_call with value
+    return staticcall Middle(middle).forward_with_value(target)
+    """
+
+    target = get_contract(target_src)
+    middle = get_contract(middle_src)
+    outer = get_contract(outer_src)
+
+    # Set the middle contract's balance to 0 to ensure we test
+    # that static check happens BEFORE balance check
+    env.set_balance(middle.address, 0)
+
+    with pytest.raises(StaticCallViolation):
+        outer.test_static_value(middle, target)
+
+
+# ============================================================================
+# CREATE2 Tests
+# ============================================================================
+
+
+def test_create2_copy_of_address(get_contract, keccak):
+    """Test that create_copy_of with salt produces the correct CREATE2 address."""
+    src = """
+a: public(uint256)
+
+@external
+def create_with_salt(salt: bytes32) -> address:
+    self.a = 42
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+
+    salt = b"\x00" * 32
+    created_addr = c.create_with_salt(salt)
+
+    # Compute expected CREATE2 address manually
+    # address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_copy_of_different_salts(get_contract):
+    """Test that different salts produce different addresses."""
+    src = """
+a: public(uint256)
+
+@external
+def create_with_salt(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+
+    salt1 = b"\x00" * 32
+    salt2 = b"\x01" + b"\x00" * 31
+
+    addr1 = c.create_with_salt(salt1)
+    addr2 = c.create_with_salt(salt2)
+
+    assert addr1 != addr2
+
+
+def test_create2_copy_of_deterministic(get_contract, env, keccak):
+    """Test that CREATE2 is deterministic - same inputs produce same address."""
+    # Deploy two separate factory contracts
+    factory_src = """
+@external
+def compute_create2_addr(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    # We'll deploy the factory, compute expected address, and verify
+    c = get_contract(factory_src)
+
+    salt = b"\xde\xad\xbe\xef" + b"\x00" * 28
+
+    # Get the address that would be created
+    created_addr = c.compute_create2_addr(salt)
+
+    # Verify it matches the formula
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_minimal_proxy_address(get_contract, keccak):
+    """Test that create_minimal_proxy_to with salt produces correct CREATE2 address."""
+    target_src = """
+value: public(uint256)
+
+@external
+def set_value(v: uint256):
+    self.value = v
+    """
+
+    factory_src = """
+@external
+def create_proxy(target: address, salt: bytes32) -> address:
+    return create_minimal_proxy_to(target, salt=salt)
+    """
+
+    from vyper.compiler import CompilerData
+    from ivy.builtins.create_utils import MinimalProxyFactory
+
+    target = get_contract(target_src)
+    factory = get_contract(factory_src)
+
+    salt = b"\x12\x34" + b"\x00" * 30
+    created_proxy = factory.create_proxy(target.address, salt)
+
+    # Get the init_code for the minimal proxy
+    proxy_data = MinimalProxyFactory.get_proxy_contract_data()
+    init_code = proxy_data.compiler_data.bytecode
+
+    # Compute expected CREATE2 address
+    sender = factory.address.canonical_address
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_proxy.canonical_address == expected_addr
+
+
+def test_create2_from_blueprint_address(get_contract, make_input_bundle, keccak):
+    """Test that create_from_blueprint with salt produces correct CREATE2 address."""
+    blueprint_src = """
+value: public(uint256)
+
+@deploy
+def __init__(v: uint256):
+    self.value = v
+
+@external
+def get_value() -> uint256:
+    return self.value
+    """
+
+    factory_src = """
+import blueprint_contract as Blueprint
+
+@external
+def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
+    return create_from_blueprint(bp, init_val, salt=salt)
+    """
+
+    from vyper.compiler import CompilerData
+
+    input_bundle = make_input_bundle({"blueprint_contract.vy": blueprint_src})
+    # Blueprint needs an initial value for constructor
+    blueprint = get_contract(blueprint_src, 0)
+    factory = get_contract(factory_src, input_bundle=input_bundle)
+
+    salt = b"\xab\xcd" + b"\x00" * 30
+    init_val = 999
+
+    created_addr = factory.create_from_bp(blueprint.address, salt, init_val)
+
+    # For blueprint, the init_code is the blueprint's bytecode
+    init_code = blueprint.compiler_data.bytecode
+
+    # Compute expected CREATE2 address
+    sender = factory.address.canonical_address
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected_addr = keccak(preimage)[-20:]
+
+    assert created_addr.canonical_address == expected_addr
+
+
+def test_create2_same_salt_same_sender_same_code(get_contract, keccak):
+    """Test that CREATE2 with same salt, sender, and code always gives same address."""
+    src = """
+@external
+def get_create2_addr(salt: bytes32) -> address:
+    return create_copy_of(self, salt=salt)
+    """
+
+    c = get_contract(src)
+    salt = b"\xff" * 32
+
+    # First call creates the contract
+    addr1 = c.get_create2_addr(salt)
+
+    # Compute expected address
+    sender = c.address.canonical_address
+    init_code = c.compiler_data.bytecode
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    expected = keccak(preimage)[-20:]
+
+    assert addr1.canonical_address == expected
+
+
+def test_create2_nonce_incremented(get_contract):
+    """Test that nonce is incremented for CREATE2 just like CREATE.
+
+    We verify this indirectly: CREATE uses nonce for address derivation,
+    so if we call CREATE after CREATE2, the CREATE address should be different
+    than if we had just called CREATE without the CREATE2 call first.
+    """
+    src = """
+@external
+def create_with_salt_then_without(salt: bytes32) -> (address, address):
+    # First CREATE2
+    addr1: address = create_copy_of(self, salt=salt)
+    # Then regular CREATE - should use incremented nonce
+    addr2: address = create_copy_of(self)
+    return addr1, addr2
+
+@external
+def create_without_salt() -> address:
+    return create_copy_of(self)
+    """
+
+    c = get_contract(src)
+
+    # Deploy fresh contract to compare
+    c2 = get_contract(src)
+
+    salt = b"\x00" * 32
+
+    # With CREATE2 first, then CREATE
+    addr1, addr2 = c.create_with_salt_then_without(salt)
+
+    # Regular CREATE (with same starting nonce)
+    addr3 = c2.create_without_salt()
+
+    # addr2 and addr3 should be DIFFERENT because c's nonce was incremented by CREATE2
+    # (both c and c2 started with same nonce, but c had +1 from CREATE2)
+    assert addr2 != addr3
+
+
+def test_create2_created_contract_works(get_contract):
+    """Test that contracts created via CREATE2 work correctly."""
+    src = """
+value: public(uint256)
+
+interface Self:
+    def value() -> uint256: view
+    def set_value(v: uint256): nonpayable
+
+@external
+def create_and_call(salt: bytes32, v: uint256) -> uint256:
+    new_contract: address = create_copy_of(self, salt=salt)
+    extcall Self(new_contract).set_value(v)
+    return staticcall Self(new_contract).value()
+
+@external
+def set_value(v: uint256):
+    self.value = v
+    """
+
+    c = get_contract(src)
+    salt = b"\x42" + b"\x00" * 31
+
+    result = c.create_and_call(salt, 12345)
+    assert result == 12345

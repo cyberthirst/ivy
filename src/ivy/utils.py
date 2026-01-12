@@ -64,6 +64,21 @@ def compute_contract_address(address, nonce):
     return canonical_address
 
 
+def compute_create2_address(sender: bytes, salt: bytes, init_code: bytes) -> bytes:
+    """
+    Compute CREATE2 contract address per EIP-1014.
+
+    address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
+    """
+    assert len(sender) == 20, f"sender must be 20 bytes, got {len(sender)}"
+    assert len(salt) == 32, f"salt must be 32 bytes, got {len(salt)}"
+
+    init_code_hash = keccak(init_code)
+    preimage = b"\xff" + sender + salt + init_code_hash
+    computed_address = keccak(preimage)
+    return computed_address[-20:]
+
+
 def _trunc_div(n: int, d: int) -> int:
     """
     Integer division rounded **toward 0** for all sign combinations.

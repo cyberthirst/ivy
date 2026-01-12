@@ -15,12 +15,16 @@ from vyper.semantics.types import (
     StringT,
 )
 from vyper.semantics.types.shortcuts import UINT256_T, BYTES32_T
-from vyper.codegen.core import calculate_type_for_external_return
+from vyper.codegen.core import (
+    calculate_type_for_external_return,
+    needs_external_call_wrap,
+)
 from vyper.utils import method_id
 
 
 from ivy.abi import abi_decode, abi_encode
 import ivy.builtins.create_utils as create_utils
+from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
 from ivy.exceptions import GasReference, Revert
@@ -95,11 +99,10 @@ def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
     if unwrap_tuple is True:
         wrapped_typ = calculate_type_for_external_return(typ)
         result = abi_decode(wrapped_typ, data)
-        # If original type was already a tuple, return the whole decoded tuple
-        # If it was a single type (wrapped into 1-tuple), unwrap by taking [0]
-        if isinstance(typ, TupleT):
-            return result
-        return result[0]
+        # Unwrap if the type was wrapped (non-tuples and single-element tuples get wrapped)
+        if needs_external_call_wrap(typ):
+            return result[0]
+        return result
     else:
         return abi_decode(typ, data)
 
@@ -325,6 +328,10 @@ def builtin_create_copy_of(
     salt: Optional[bytes] = None,
 ) -> Address:
     code = create_utils.deepcopy_code(evm.state, target)
+    if code is None:
+        # Target has no code to copy - this is an extcodesize check failure
+        # which always reverts regardless of revert_on_failure flag
+        raise Revert(data=b"")
     return create_utils.create_builtin_shared(
         evm,
         code,
@@ -350,6 +357,10 @@ def builtin_create_from_blueprint(
     # reset_global_vars=True because blueprint creation runs the constructor
     # which will allocate fresh variables
     code = create_utils.deepcopy_code(evm.state, target, reset_global_vars=True)
+    if code is None:
+        # Blueprint target has no code - this is an extcodesize check failure
+        # which always reverts regardless of revert_on_failure flag
+        raise Revert(data=b"")
 
     # typs[0] is the target address type, typs[1:] are constructor arg types
     constructor_arg_typs = typs[1:]
@@ -550,3 +561,68 @@ def builtin_extract32(
         return value
     else:
         raise TypeError(f"extract32: unsupported output_type {output_type}")
+
+
+def builtin_ecrecover(
+    h: bytes, v: int, r: Union[int, bytes], s: Union[int, bytes]
+) -> Address:
+    # Normalize r and s to ints if they're bytes
+    if isinstance(r, bytes):
+        r = int.from_bytes(r, "big")
+    if isinstance(s, bytes):
+        s = int.from_bytes(s, "big")
+
+    # Build precompile calldata: hash(32) + v(32) + r(32) + s(32)
+    calldata = h + v.to_bytes(32, "big") + r.to_bytes(32, "big") + s.to_bytes(32, "big")
+
+    # Call precompile
+    result = precompile_ecrecover(calldata)
+
+    # Return Address(0) on failure (empty result), else recovered address
+    if len(result) != 32:
+        return Address(0)
+    return Address(result[-20:])
+
+
+def builtin_selfdestruct(evm: EVMCore, beneficiary: Address) -> None:
+    """
+    Halt execution and register account for later deletion (EIP-6780 semantics).
+
+    Post-Cancun behavior:
+    - Always transfers full balance to beneficiary
+    - Only deletes account if it was created in the same transaction
+    - If beneficiary == originator and account is deleted, ether is burnt
+    """
+    from ivy.exceptions import SelfDestruct
+
+    # Determine the current contract address (originator)
+    # In a constructor, msg.to is b"" and create_address holds the address
+    current_target = evm.state.current_context.msg.to
+    if current_target == b"":
+        current_target = evm.state.current_context.msg.create_address
+
+    originator = current_target
+    originator_balance = evm.state.get_balance(originator)
+
+    # Transfer ALL ether from originator to beneficiary (move_ether semantics)
+    # This happens unconditionally. When beneficiary == originator, it's a no-op.
+    if originator_balance > 0 and beneficiary != originator:
+        evm.state.set_balance(originator, 0)
+        beneficiary_balance = evm.state.get_balance(beneficiary)
+        evm.state.set_balance(beneficiary, beneficiary_balance + originator_balance)
+
+    # EIP-6780: Only actually delete the account if it was created in the same transaction
+    if originator in evm._state.created_accounts:
+        # Mark for deletion tracking (for output merging)
+        evm.state.current_output.accounts_to_delete.add(originator)
+
+        # If beneficiary is the same as originator, the ether is burnt
+        # (set balance to 0 before deletion)
+        evm.state.set_balance(originator, 0)
+
+        # Actually delete the account (journaled for potential rollback)
+        del evm.state[originator]
+
+    # Halt execution by raising SelfDestruct
+    # This is caught by process_message() and treated as successful completion
+    raise SelfDestruct()

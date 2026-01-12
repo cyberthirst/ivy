@@ -21,7 +21,7 @@ class Event:
 
     def ordered_args(self):
         # TODO what about raw_log?
-        t_i = 1  # skip the first topic which is the event_id
+        t_i = 0  # topics list does not include the event_id (excluded by decode_log)
         a_i = 0
         b = []
         # align the evm topic + args lists with the way they appear in the source

@@ -8,6 +8,7 @@ dependencies = [
     "vyper @ git+https://github.com/vyperlang/vyper.git@79d076225105d6416ba71e23c8ac896d15104c5a",
     "eth-utils>=5.3.1",
     "rlp>=4.1.0",
+    "coincurve>=20.0.0",
 ]
 
 [project.optional-dependencies]
