@@ -376,9 +376,11 @@ class ExprGenerator:
         node._metadata["type"] = typ
         return node
 
-    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.HexBytes:
-        # HexBytes expects bytes value
-        node = ast.HexBytes(value=value)
+    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.Hex:
+        # BytesM (e.g., bytes4, bytes32) uses 0x... syntax, not x"..." syntax
+        # ast.Hex expects a string value with 0x prefix
+        hex_str = f"0x{value.hex()}"
+        node = ast.Hex(value=hex_str)
         node._metadata["type"] = typ
         return node
 
@@ -557,14 +559,14 @@ class ExprGenerator:
         depth: int,
     ) -> ast.VyperNode:
         """Generate an index expression for arrays with three modes:
-        - Guarded by len(base) (preferred)
+        - Guarded by length (preferred) - uses len(base) for DynArray, constant for SArray
         - Random expression (unconstrained)
         - OOB literal that forces compilation xfail (rare)
 
         Notes:
         - Use uint256-only indices (no signedness for now).
         - Bias DynArray towards small literals because runtime len tends to be small.
-        - For SArray, guarding is still fine and semantically interesting.
+        - For SArray, use the known compile-time length (Vyper doesn't support len() on static arrays).
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
 
@@ -584,11 +586,18 @@ class ExprGenerator:
             val = self.rng.randint(0, 2)
             return self._int_to_ast(val, idx_t)
 
+        # Helper: bounded literal for SArray (always valid)
+        def _bounded_literal_for_sarray():
+            # Generate index in valid range [0, length-1]
+            max_idx = max(0, seq_t.length - 1)
+            val = self.rng.randint(0, max_idx)
+            return self._int_to_ast(val, idx_t)
+
         # Helper: generate random uint256 index expression
         def _random_uint_index():
             return self.generate(idx_t, context, max(0, depth))
 
-        # Helper: guarded index using len(base)
+        # Helper: guarded index using len(base) or known length
         def _guarded_index():
             # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
             i_expr = (
@@ -597,21 +606,28 @@ class ExprGenerator:
                 else _random_uint_index()
             )
 
-            len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
-            len_call._metadata = getattr(len_call, "_metadata", {})
-            len_call._metadata["type"] = IntegerT(False, 256)
+            # For static arrays, use the known compile-time length
+            # For dynamic arrays, use len() to get runtime length
+            # (Vyper doesn't support len() on static arrays)
+            if isinstance(seq_t, SArrayT):
+                len_expr = self._generate_uint256_literal(seq_t.length)
+            else:
+                len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
+                len_call._metadata = getattr(len_call, "_metadata", {})
+                len_call._metadata["type"] = IntegerT(False, 256)
+                len_expr = len_call
 
             zero = self._generate_uint256_literal(0)
             one = self._generate_uint256_literal(1)
 
             len_gt_zero = ast.Compare(
-                left=len_call,
+                left=len_expr,
                 ops=[ast.Gt()],
                 comparators=[zero],
             )
             len_gt_zero._metadata = {"type": BoolT()}
 
-            len_minus_one = ast.BinOp(left=len_call, op=ast.Sub(), right=one)
+            len_minus_one = ast.BinOp(left=len_expr, op=ast.Sub(), right=one)
             len_minus_one._metadata = {"type": idx_t}
 
             safe_fallback = ast.IfExp(
@@ -621,7 +637,7 @@ class ExprGenerator:
             )
             safe_fallback._metadata = {"type": idx_t}
 
-            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_call])
+            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_expr])
             cond._metadata = {"type": BoolT()}
 
             guarded = ast.IfExp(test=cond, body=i_expr, orelse=safe_fallback)
@@ -648,6 +664,9 @@ class ExprGenerator:
         if roll < p_guard:
             return _guarded_index()
         elif roll < p_guard + p_rand:
+            # For SArray, use bounded literal to avoid compile-time OOB errors
+            if isinstance(seq_t, SArrayT):
+                return _bounded_literal_for_sarray()
             # Bias for DynArray to small literal sometimes
             if isinstance(seq_t, DArrayT) and self.rng.random() < 0.6:
                 return _small_literal_for_dynarray()
@@ -1214,13 +1233,19 @@ class ExprGenerator:
             make_valid = self.rng.random() < 0.7
 
             if make_valid:
-                # Start: if len == 0 -> 0 else rand % len
+                # Start: rand % max(1, len) to avoid modulo-by-zero
+                # Note: We use max(1, len) instead of a ternary guard because
+                # Vyper's constant folding evaluates both branches of ternaries,
+                # causing modulo-by-zero even when guarded.
                 one = self._generate_uint256_literal(1)
                 zero = self._generate_uint256_literal(0)
 
+                # Safe divisor: max(1, len_call) ensures no divide-by-zero
+                safe_len = _builtin_call("max", [one, len_call], len_ret_t)
+                start_mod = _uint_binop(rand_u, ast.Mod(), safe_len)
+                # If len is 0, start should be 0; otherwise use the modulo result
                 len_is_zero = _uint_cmp(len_call, ast.Eq(), zero)
-                start_else = _uint_binop(rand_u, ast.Mod(), len_call)
-                a1 = _ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+                a1 = _ifexp(len_is_zero, zero, start_mod, IntegerT(False, 256))
 
                 # remaining = len - start
                 remaining = _uint_binop(len_call, ast.Sub(), a1)
@@ -1231,8 +1256,8 @@ class ExprGenerator:
                 if ret_len > 0:
                     bound = self._generate_uint256_literal(ret_len)
                 else:
-                    bound = remaining
-                # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
+                    # Use max(1, remaining) to avoid modulo-by-zero during constant folding
+                    bound = _builtin_call("max", [one, remaining], len_ret_t)
                 rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
                 plus_one = _uint_binop(rand_mod, ast.Add(), one)
                 len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)

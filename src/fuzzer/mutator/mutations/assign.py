@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from vyper.ast import nodes as ast
+from vyper.semantics.types import TupleT
 
 from fuzzer.mutator.strategy import Strategy, StrategyRegistry
 from fuzzer.mutator.mutations.base import MutationCtx
@@ -30,10 +31,16 @@ def register(registry: StrategyRegistry) -> None:
 
 
 def _has_rhs_type(*, ctx: MutationCtx, **_) -> bool:
+    # Vyper doesn't support tuple RHS assignment
+    if isinstance(ctx.inferred_type, TupleT):
+        return False
     return ctx.inferred_type is not None
 
 
 def _has_matching_var(*, ctx: MutationCtx, **_) -> bool:
+    # Vyper doesn't support tuple RHS assignment
+    if isinstance(ctx.inferred_type, TupleT):
+        return False
     return ctx.inferred_type is not None and bool(
         ctx.context.find_matching_vars(ctx.inferred_type)
     )

@@ -5,11 +5,12 @@ from vyper.semantics.types import (
     VyperType,
     BoolT,
     HashMapT,
+    TupleT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from src.fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
-from src.fuzzer.mutator.strategy import (
+from fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.strategy import (
     Strategy,
     StrategyRegistry,
     StrategySelector,
@@ -431,6 +432,10 @@ class StatementGenerator:
                 )
                 target_node = cur_node
                 target_type = cur_t
+
+        # Skip TupleT - Vyper doesn't support tuple RHS assignment
+        if isinstance(target_type, TupleT):
+            return None
 
         value = self.expr_generator.generate(target_type, context, depth=3)
 

@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from enum import Enum, auto
 
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, TupleT
 from vyper.semantics.types.function import StateMutability
 
 from fuzzer.xfail import XFailExpectation
@@ -70,9 +70,11 @@ class Context:
         self.all_vars[name] = var_info
 
         # Track immutables that need initialization in __init__
+        # Skip TupleT - Vyper doesn't support tuple RHS assignment
         if (
             var_info.location == DataLocation.CODE
             and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
+            and not isinstance(var_info.typ, TupleT)
         ):
             self.immutables_to_init.append((name, var_info))
 
