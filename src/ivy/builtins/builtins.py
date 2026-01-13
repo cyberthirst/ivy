@@ -75,13 +75,29 @@ _WEI_DENOMS = {
 
 
 def builtin_as_wei_value(value: Union[int, VyperDecimal], denom: str):
+    from ivy.exceptions import Assert
+
     if denom not in _WEI_DENOMS:
         raise ValueError(f"Unknown wei denomination: {denom}")
     multiplier = _WEI_DENOMS[denom]
+
     if isinstance(value, VyperDecimal):
+        # Vyper asserts value >= 0 for decimals
+        if value.value < 0:
+            raise Assert(data=b"")
         # For decimals: (scaled_value * multiplier) // SCALING_FACTOR
         return (value.value * multiplier) // VyperDecimal.SCALING_FACTOR
-    return value * multiplier
+
+    if value < 0:
+        raise Assert(data=b"")
+
+    result = value * multiplier
+
+    # result must fit in uint256
+    if result >= 2**256:
+        raise Assert(data=b"")
+
+    return result
 
 
 def builtin_len(x):
