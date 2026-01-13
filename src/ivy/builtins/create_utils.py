@@ -29,7 +29,9 @@ def deepcopy_code(state: StateAccess, target: Address, reset_global_vars: bool =
         # the variables dict (new GlobalVariable instances with same values).
         code_copy.global_vars.positions = code.global_vars.positions.copy()
         code_copy.global_vars.variables = copy.deepcopy(code.global_vars.variables)
-        code_copy.global_vars.reentrant_key_address = code.global_vars.reentrant_key_address
+        code_copy.global_vars.reentrant_key_address = (
+            code.global_vars.reentrant_key_address
+        )
         code_copy.global_vars.adrr_to_name = code.global_vars.adrr_to_name.copy()
 
         # Also copy immutables and constants for runtime copies

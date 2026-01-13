@@ -2440,7 +2440,6 @@ def foo(input: Bytes[64]) -> Bytes[32]:
     assert c.foo(input_data) == input_data[:32]
 
 
-@pytest.mark.xfail(reason="Convert failing")
 def test_blah(get_contract):
     src = """
 @external
