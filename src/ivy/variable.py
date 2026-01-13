@@ -74,9 +74,7 @@ class GlobalVariables:
         self.positions[var] = position
         address = (position, var.location)
         assert address not in self.variables
-        variable = GlobalVariable(
-            position, var.typ, get_location, var, initial_value
-        )
+        variable = GlobalVariable(position, var.typ, get_location, var, initial_value)
         self.variables[address] = variable
         if name:
             self.adrr_to_name[address] = name

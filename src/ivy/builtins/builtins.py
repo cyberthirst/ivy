@@ -292,22 +292,31 @@ def builtin_convert(typs: tuple[VyperType, VyperType], *values: Any):
         # Note: Decimal(True) == Decimal("1")
         return convert_utils._convert_int_to_decimal(val, o_typ)
 
+    # Track actual bytes length for BytesT (needed for correct padding conversion).
+    # StringT not tracked: String to int conversions are rejected by Vyper semantics.
+    actual_bytes_len = None
+    if isinstance(i_typ, BytesT):
+        actual_bytes_len = len(val)
+
     val_bits = convert_utils._to_bits(val, i_typ)
 
     if isinstance(i_typ, (BytesT, StringT)) and not isinstance(
         o_typ, (BytesT, StringT)
     ):
         val_bits = val_bits[32:]
-        # For BytesT/StringT to BytesM_T conversion, right-pad to 32 bytes
-        if isinstance(o_typ, BytesM_T):
-            val_bits = val_bits.ljust(32, b"\x00")
+        # Right-pad to 32 bytes (needed for empty/short bytes and BytesM_T conversion)
+        val_bits = val_bits.ljust(32, b"\x00")
 
     if convert_utils._padding_direction(i_typ) != convert_utils._padding_direction(
         o_typ
     ):
         # subtle! the padding conversion follows the bytes argument
         if isinstance(i_typ, (BytesM_T, BytesT)):
-            n = convert_utils.bytes_of_type(i_typ)
+            # For BytesT, use actual value length, not type's max length
+            if isinstance(i_typ, BytesT):
+                n = actual_bytes_len
+            else:
+                n = convert_utils.bytes_of_type(i_typ)
             padding_byte = None
         else:
             # output type is bytes
@@ -318,9 +327,15 @@ def builtin_convert(typs: tuple[VyperType, VyperType], *values: Any):
             val_bits, convert_utils._padding_direction(o_typ), n, padding_byte
         )
 
-    if getattr(o_typ, "is_signed", False) and isinstance(i_typ, BytesM_T):
-        n_bits = convert_utils._bits_of_type(i_typ)
-        val_bits = convert_utils._signextend(val_bits, n_bits)
+    # Sign extension for signed output types from BytesM_T or BytesT
+    if getattr(o_typ, "is_signed", False) and isinstance(i_typ, (BytesM_T, BytesT)):
+        if isinstance(i_typ, BytesT):
+            n_bits = actual_bytes_len * 8
+        else:
+            n_bits = convert_utils._bits_of_type(i_typ)
+        # Only sign-extend if there are bits to extend from (empty bytes = 0)
+        if n_bits > 0:
+            val_bits = convert_utils._signextend(val_bits, n_bits)
 
     try:
         if isinstance(o_typ, BoolT):

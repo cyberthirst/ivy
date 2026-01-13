@@ -280,11 +280,6 @@ def exclude_unsupported_patterns(test_filter: TestFilter) -> TestFilter:
         # address.code tests have test infrastructure issues (address mismatch)
         # but the functionality works - see test_e2e.py for working examples
         .exclude_name("test_address_code")
-        # create_copy_of tests fail when copying from address(0) - Ivy doesn't
-        # properly handle empty target (see TODO in deepcopy_code)
-        .exclude_name(r"test_create_copy_of\[False\]")
-        .exclude_name(r"test_create_copy_of\[None\]")
-        .exclude_name(r"test_create_copy_of\[True\]")
     )
 
 
