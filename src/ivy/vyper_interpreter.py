@@ -29,6 +29,7 @@ from vyper.semantics.types.shortcuts import UINT256_T
 from vyper.utils import keccak256
 
 from ivy.expr.expr import ExprVisitor
+from ivy.expr.clamper import box_value_from_node
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
@@ -604,7 +605,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id  # type: ignore[attr-defined]
-            return self.builtins.get(id).execute(*args, typs=typs, **kws)
+            result = self.builtins.get(id).execute(*args, typs=typs, **kws)
+            if id == "range":
+                return result  # Special case: untyped iterator
+            return box_value_from_node(call, result)
 
         if isinstance(func_t, TYPE_T):
             # struct & interface constructors

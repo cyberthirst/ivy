@@ -23,19 +23,25 @@ def box_value(value: Any, typ: VyperType) -> Any:
     Raises Revert if the value is out of bounds for the given type.
     """
     if isinstance(typ, IntegerT):
-        # Already boxed - no need to re-wrap
         if isinstance(value, VyperInt):
-            return value
+            if value.typ == typ:
+                return value
+            # Re-box with new type (e.g., after convert)
+            return VyperInt(int(value), typ)
         return VyperInt(value, typ)
 
     if isinstance(typ, BytesT):
         if isinstance(value, VyperBytes):
-            return value
+            if value.typ == typ:
+                return value
+            return VyperBytes(bytes(value), typ)
         return VyperBytes(value, typ)
 
     if isinstance(typ, StringT):
         if isinstance(value, VyperString):
-            return value
+            if value.typ == typ:
+                return value
+            return VyperString(str(value), typ)
         return VyperString(value, typ)
 
     # These types are either already validated or can't be invalid:
@@ -58,5 +64,6 @@ def box_value_from_node(node: Any, value: Any) -> Any:
     """
     typ = node._metadata.get("type")
     if typ is None:
-        return value
+        assert value is None, f"Untyped node returned {type(value)}: {value}"
+        return None
     return box_value(value, typ)
