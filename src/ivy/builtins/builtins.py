@@ -14,7 +14,7 @@ from vyper.semantics.types import (
     BytesM_T,
     StringT,
 )
-from vyper.semantics.types.shortcuts import UINT256_T, BYTES32_T
+from vyper.semantics.types.shortcuts import UINT256_T, BYTES32_T, INT256_T
 from vyper.codegen.core import (
     calculate_type_for_external_return,
     needs_external_call_wrap,
@@ -27,7 +27,7 @@ import ivy.builtins.create_utils as create_utils
 from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
-from ivy.exceptions import GasReference, Revert
+from ivy.exceptions import Assert, GasReference, Revert
 from ivy.types import Address, VyperDecimal
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
@@ -450,9 +450,10 @@ def builtin_epsilon(typ):
 
 
 def builtin_abs(x):
-    """Absolute value for integers and decimals."""
-    if isinstance(x, VyperDecimal):
-        return VyperDecimal(abs(x.value), scaled=True)
+    """Absolute value for int256."""
+    assert isinstance(x, int)
+    if x == INT256_T.int_bounds[0]:
+        raise Assert(data=b"")
     return abs(x)
 
 
