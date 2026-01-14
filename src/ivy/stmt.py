@@ -10,7 +10,7 @@ from ivy.abi import abi_encode
 from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
 from ivy.expr.operators import get_operator_handler
-from ivy.expr.clamper import box_value_from_node
+from ivy.expr.clamper import box_value_from_node, box_value
 
 
 class ReturnException(Exception):
@@ -105,7 +105,8 @@ class StmtVisitor(BaseVisitor):
                 iteration_count += 1
                 # New scope for each iteration
                 self._push_scope()
-                self._assign_target(target_name, item)
+                # Box the item with the target type (e.g., range yields plain ints)
+                self._assign_target(target_name, box_value(item, target_typ))
 
                 try:
                     for stmt in node.body:
