@@ -168,15 +168,17 @@ class EVMCore:
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
     ) -> ExecutionOutput:
+        if self.account_has_code_or_nonce(
+            message.create_address
+        ) or self.account_has_storage(message.create_address):
+            raise EVMException("Address already taken")
+
         self.journal.begin_call(message.is_static)
 
         # Destroy any pre-existing storage at the target address.
         # This handles the edge case where CREATE collides with a previously
         # self-destructed address that still has storage.
         self.state.destroy_storage(message.create_address)
-
-        if self.state.has_account(message.create_address):
-            raise EVMException("Address already taken")
 
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
@@ -395,7 +397,9 @@ class EVMCore:
         # Note: nonce is incremented for both CREATE and CREATE2
         self.state.increment_nonce(current_address)
 
-        if self.account_has_code_or_nonce(create_address):
+        if self.account_has_code_or_nonce(
+            create_address
+        ) or self.account_has_storage(create_address):
             # Return empty output and address(0) if account already exists
             empty_output = ExecutionOutput()
             empty_output.error = EVMException("Address collision")
@@ -450,6 +454,11 @@ class EVMCore:
         code = self.state.get_code(address)
         nonce = self.state.get_nonce(address)
         return code is not None or nonce > 0
+
+    def account_has_storage(self, address: Address) -> bool:
+        if address not in self._state.state:
+            return False
+        return bool(self._state.state[address].storage)
 
     def get_current_address(self) -> Address:
         """Get the address of the currently executing contract."""
