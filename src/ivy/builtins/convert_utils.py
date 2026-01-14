@@ -17,6 +17,7 @@ from vyper.utils import unsigned_to_signed
 
 from ivy.abi import abi_encode, abi_decode, DecodeError
 from ivy.types import VyperDecimal
+from ivy.utils import _trunc_div
 
 
 class _PadDirection(enum.Enum):
@@ -32,10 +33,13 @@ def _padding_direction(typ):
 
 def _convert_decimal_to_int(val: VyperDecimal, o_typ: IntegerT):
     lo, hi = o_typ.int_bounds
-    if not lo <= val.value <= hi:
+    # Check bounds BEFORE truncation (Vyper semantics):
+    # The untruncated decimal must fit within [lo, hi] scaled to fixed-point
+    scaled_lo = lo * VyperDecimal.SCALING_FACTOR
+    scaled_hi = hi * VyperDecimal.SCALING_FACTOR
+    if not scaled_lo <= val.value <= scaled_hi:
         raise ConvertError()
-
-    return val.truncate()
+    return _trunc_div(val.value, VyperDecimal.SCALING_FACTOR)
 
 
 def _convert_int_to_int(val, o_typ):
