@@ -10,7 +10,7 @@ from ivy.abi import abi_encode
 from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
 from ivy.expr.operators import get_operator_handler
-from ivy.expr.clamper import validate_value
+from ivy.expr.clamper import box_value_from_node
 
 
 class ReturnException(Exception):
@@ -127,7 +127,7 @@ class StmtVisitor(BaseVisitor):
 
         handler = get_operator_handler(node.op)
         new_val = handler(target_val, rhs_val)
-        validate_value(node.target, new_val)
+        new_val = box_value_from_node(node.target, new_val)
         self._assign_target(node.target, new_val)
         return None
 

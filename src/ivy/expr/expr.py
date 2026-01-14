@@ -27,7 +27,7 @@ from ivy.types import (
     Tuple as IvyTuple,
 )
 from ivy.expr.operators import get_operator_handler
-from ivy.expr.clamper import validate_value
+from ivy.expr.clamper import box_value_from_node
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -212,8 +212,7 @@ class ExprVisitor(BaseVisitor):
             res = handler(*args, typ=typ)
         else:
             res = handler(*args)
-        validate_value(node, res)
-        return res
+        return box_value_from_node(node, res)
 
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)

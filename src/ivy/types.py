@@ -15,12 +15,70 @@ from vyper.semantics.types import (
     SArrayT,
     DArrayT,
     TupleT,
+    IntegerT,
+    BytesT,
+    StringT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
 
 from ivy.utils import lrudict, _trunc_div
 from ivy.journal import Journal, JournalEntryType
+
+
+class VyperInt(int):
+    """Boxed integer with type info and bounds validation at construction."""
+
+    def __new__(cls, value: int, typ: IntegerT):
+        lo, hi = typ.ast_bounds
+        if not (lo <= value <= hi):
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperInt(int(self), self.typ)
+
+    def __reduce__(self):
+        return (VyperInt, (int(self), self.typ))
+
+
+class VyperBytes(bytes):
+    """Boxed bytes with type info and length validation at construction."""
+
+    def __new__(cls, value: bytes, typ: BytesT):
+        if len(value) > typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperBytes(bytes(self), self.typ)
+
+    def __reduce__(self):
+        return (VyperBytes, (bytes(self), self.typ))
+
+
+class VyperString(str):
+    """Boxed string with type info and length validation at construction."""
+
+    def __new__(cls, value: str, typ: StringT):
+        if len(value) > typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperString(str(self), self.typ)
+
+    def __reduce__(self):
+        return (VyperString, (str(self), self.typ))
 
 
 # adapted from titanoboa: https://github.com/vyperlang/titanoboa/blob/bedd49e5a4c1e79a7d12c799e42a23a9dc449395/boa/util/abi.py#L20
