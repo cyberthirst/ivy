@@ -18,9 +18,9 @@ def decode_ivy_object(v, typ):
     elif isinstance(v, Struct):
         # Convert struct to dict like boa does
         result = {}
-        for key in v._typ.members.keys():
+        for key in v.typ.members.keys():
             value = v[key]
-            member_typ = v._typ.members[key]
+            member_typ = v.typ.members[key]
             if typ_needs_decode(member_typ):
                 value = decode_ivy_object(value, member_typ)
             result[key] = value
