@@ -22,6 +22,7 @@ from ivy.types import (
     DynamicArray,
     StaticArray,
     VyperDecimal,
+    VyperBool,
     Tuple as IvyTuple,
 )
 
@@ -172,8 +173,8 @@ def _encode_bytesM(abi_t: ABI_BytesM, value: Union[bytes, str]) -> bytes:
     return value.ljust(32, b"\x00")
 
 
-def _encode_bool(_: ABI_Bool, value: bool) -> bytes:
-    if not isinstance(value, bool):
+def _encode_bool(_: ABI_Bool, value: Union[bool, VyperBool]) -> bytes:
+    if not isinstance(value, (bool, VyperBool)):
         raise EncodeError(f"Expected bool, got {type(value)}")
     return (1 if value else 0).to_bytes(32, "big")
 

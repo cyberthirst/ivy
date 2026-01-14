@@ -21,6 +21,7 @@ from vyper.semantics.types import (
     StringT,
     AddressT,
     DecimalT,
+    BoolT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
@@ -96,6 +97,39 @@ class VyperBytesM(VyperValue, bytes):
 
     def __deepcopy__(self, memo):
         return VyperBytesM(bytes(self), self.typ)
+
+
+# Singleton BoolT instance for VyperBool
+_BOOL_T = BoolT()
+
+
+class VyperBool(VyperValue):
+    """Boxed boolean with type info."""
+
+    __slots__ = ("_value", "typ")
+
+    def __init__(self, value: bool):
+        self._value = bool(value)
+        self.typ = _BOOL_T
+
+    def __bool__(self) -> bool:
+        return self._value
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VyperBool):
+            return self._value == other._value
+        if isinstance(other, bool):
+            return self._value == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._value)
+
+    def __repr__(self) -> str:
+        return f"VyperBool({self._value})"
+
+    def __deepcopy__(self, memo):
+        return VyperBool(self._value)
 
 
 # adapted from titanoboa: https://github.com/vyperlang/titanoboa/blob/bedd49e5a4c1e79a7d12c799e42a23a9dc449395/boa/util/abi.py#L20

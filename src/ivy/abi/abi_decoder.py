@@ -42,6 +42,7 @@ from ivy.types import (
     StaticArray,
     DynamicArray,
     VyperDecimal,
+    VyperBool,
     Tuple as IvyTuple,
     VyperInt,
     VyperBytes,
@@ -60,6 +61,7 @@ DecodedValue = Union[
     str,
     int,
     bool,
+    VyperBool,
     Address,
     Flag,
     VyperDecimal,
@@ -240,7 +242,9 @@ def _decode_r(
         if isinstance(abi_t, ABI_Bool):
             if ret not in (0, 1):
                 raise DecodeError("invalid bool")
-            return True if ret == 1 else False
+            if ivy_compat:
+                return VyperBool(ret == 1)
+            return ret == 1
 
         if isinstance(typ, FlagT):
             bits = len(typ._flag_members)
