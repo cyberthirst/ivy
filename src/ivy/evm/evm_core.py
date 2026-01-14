@@ -41,6 +41,10 @@ class EVMCore:
         is_static: bool = False,
         compiler_data: Optional[CompilerData] = None,
     ):
+        # EIP-6780: Clear created_accounts at transaction start
+        # This ensures the set is transaction-scoped, not persisted across transactions
+        self._state.created_accounts.clear()
+
         is_deploy = to == b""
         create_address, code = None, None
 
@@ -149,11 +153,10 @@ class EVMCore:
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
 
-        # EIP-6780: Delete accounts marked for deletion
-        # In test context, each execute_message is effectively a transaction
-        if output.error is None:
-            for address in output.accounts_to_delete:
-                del self.state[address]
+        # NOTE: Unlike execute_tx(), we do NOT delete accounts here.
+        # This matches Boa's test environment behavior where account deletion
+        # only happens at real transaction boundaries, not message calls.
+        # The accounts_to_delete set is populated but deletion is deferred.
 
         return output
 

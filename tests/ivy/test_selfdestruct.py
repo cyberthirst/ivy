@@ -484,6 +484,10 @@ def test_factory_create_child_selfdestruct_same_tx(get_contract, env):
     This tests that created_accounts is properly populated for nested CREATE operations.
     When factory deploys a child and then calls the child's selfdestruct in the same
     transaction, the child SHOULD be deleted (created in same tx).
+
+    NOTE: Uses transact=True to test proper EVM transaction-boundary semantics.
+    With transact=False (message_call mode), accounts are NOT deleted at the end
+    to match Boa's test environment behavior.
     """
     receiver_src = """
 @external
@@ -519,7 +523,8 @@ def deploy_and_destroy(recipient: address) -> address:
     initial_receiver_balance = env.get_balance(receiver.address)
 
     # Deploy child and destroy it in same transaction
-    child_address = factory.deploy_and_destroy(receiver.address, value=1000)
+    # transact=True ensures proper EVM transaction semantics (account deletion at tx end)
+    child_address = factory.deploy_and_destroy(receiver.address, value=1000, transact=True)
 
     # Child was created and destroyed in same tx, so it should be deleted
     assert env.state.get_code(child_address) is None
@@ -536,6 +541,10 @@ def test_factory_create2_child_selfdestruct_same_tx(get_contract, env):
 
     Similar to CREATE test but using CREATE2 with salt. The created_accounts
     tracking should work the same for both opcodes.
+
+    NOTE: Uses transact=True to test proper EVM transaction-boundary semantics.
+    With transact=False (message_call mode), accounts are NOT deleted at the end
+    to match Boa's test environment behavior.
     """
     receiver_src = """
 @external
@@ -571,8 +580,9 @@ def deploy_and_destroy_create2(recipient: address, salt: bytes32) -> address:
     initial_receiver_balance = env.get_balance(receiver.address)
 
     # Deploy child with CREATE2 and destroy it in same transaction
+    # transact=True ensures proper EVM transaction semantics (account deletion at tx end)
     salt = b"\x00" * 31 + b"\x01"  # salt = 1
-    child_address = factory.deploy_and_destroy_create2(receiver.address, salt, value=1000)
+    child_address = factory.deploy_and_destroy_create2(receiver.address, salt, value=1000, transact=True)
 
     # Child was created and destroyed in same tx, so it should be deleted
     assert env.state.get_code(child_address) is None
