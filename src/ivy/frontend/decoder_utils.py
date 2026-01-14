@@ -1,6 +1,18 @@
 from vyper.semantics.types.primitives import _PrimT
 
-from ivy.types import StaticArray, DynamicArray, Map, Address, Struct, Tuple as IvyTuple
+from ivy.types import (
+    StaticArray,
+    DynamicArray,
+    Map,
+    Address,
+    Struct,
+    Tuple as IvyTuple,
+    VyperInt,
+    VyperBool,
+    VyperBytes,
+    VyperBytesM,
+    VyperString,
+)
 
 
 def decode_ivy_object(v, typ):
@@ -31,6 +43,15 @@ def decode_ivy_object(v, typ):
             if typ_needs_decode(member_typ):
                 v[i] = decode_ivy_object(v[i], member_typ)
         v = tuple(v)
+    # Unbox primitives to their raw Python types
+    elif isinstance(v, VyperInt):
+        v = int(v)
+    elif isinstance(v, VyperBool):
+        v = bool(v)
+    elif isinstance(v, (VyperBytes, VyperBytesM)):
+        v = bytes(v)
+    elif isinstance(v, VyperString):
+        v = str(v)
     # TODO add flag
     return v
 
