@@ -212,6 +212,8 @@ def builtin_raw_call(
     if not success:
         raise output.error
 
+    if max_outsize == 0:
+        return None  # void return
     return returndata[:max_outsize]
 
 

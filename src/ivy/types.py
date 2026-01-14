@@ -38,6 +38,15 @@ class VyperValue:
     typ: VyperType
 
 
+T = TypeVar("T")
+
+
+def boxed(value: T) -> T:
+    """Assert and return a boxed value."""
+    assert value is None or isinstance(value, VyperValue), f"Expected VyperValue, got {type(value)}"
+    return value
+
+
 class VyperInt(VyperValue, int):
     """Boxed integer with type info and bounds validation at construction."""
 
@@ -381,6 +390,7 @@ class _Sequence(_Container, Generic[T]):
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
 
@@ -452,6 +462,7 @@ class DynamicArray(_Sequence[T]):
         Journal().record(JournalEntryType.ARRAY_LENGTH, self, None, self.length)
 
     def append(self, value: T, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if len(self) >= self.capacity:
             raise ValueError(f"Cannot exceed maximum length {self.capacity}")
 
@@ -493,6 +504,7 @@ class Map(_Container):
         return self._values[key]
 
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         self._journal(key, loc)
         self._values[key] = value
 
@@ -532,6 +544,7 @@ class Struct(_Container):
         return self._values[key]
 
     def __setitem__(self, key: str, value: Any, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if key not in self._values:
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
         self._journal(key, loc)
@@ -578,6 +591,7 @@ class Tuple(_Container):
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: Any, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         self._validate_index(idx)
         self._journal(idx, loc)
         self._values[idx] = value

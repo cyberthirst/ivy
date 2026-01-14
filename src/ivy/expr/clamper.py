@@ -6,10 +6,18 @@ from vyper.semantics.types import (
     BytesM_T,
     StringT,
     BoolT,
+    TupleT,
     VyperType,
 )
 
-from ivy.types import VyperInt, VyperBytes, VyperBytesM, VyperString, VyperBool
+from ivy.types import (
+    VyperInt,
+    VyperBytes,
+    VyperBytesM,
+    VyperString,
+    VyperBool,
+    Tuple as IvyTuple,
+)
 
 
 def box_value(value: Any, typ: VyperType) -> Any:
@@ -58,13 +66,24 @@ def box_value(value: Any, typ: VyperType) -> Any:
             return value
         return VyperBool(value)
 
+    if isinstance(typ, TupleT):
+        if isinstance(value, IvyTuple):
+            return value
+        # Convert Python tuple to IvyTuple, boxing each element
+        assert isinstance(value, tuple), f"Expected tuple, got {type(value)}"
+        member_types = typ.member_types
+        assert len(value) == len(member_types)
+        result = IvyTuple(typ)
+        for i, (v, t) in enumerate(zip(value, member_types)):
+            result[i] = box_value(v, t)
+        return result
+
     # These types are either already validated or can't be invalid:
     # - DecimalT: VyperDecimal already validates
     # - SArrayT, DArrayT: Already boxed with validation
     # - StructT: Already boxed
     # - FlagT: Already boxed
     # - AddressT: Already boxed
-    # - TupleT: Already boxed
     return value
 
 
