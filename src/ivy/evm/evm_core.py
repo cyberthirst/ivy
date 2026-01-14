@@ -31,6 +31,7 @@ class EVMCore:
         self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
+        self._pending_accounts_to_delete: set[Address] = set()
 
     def execute_tx(
         self,
@@ -44,6 +45,7 @@ class EVMCore:
         # EIP-6780: Clear created_accounts at transaction start
         # This ensures the set is transaction-scoped, not persisted across transactions
         self._state.created_accounts.clear()
+        self._pending_accounts_to_delete.clear()
 
         is_deploy = to == b""
         create_address, code = None, None
@@ -156,7 +158,10 @@ class EVMCore:
         # NOTE: Unlike execute_tx(), we do NOT delete accounts here.
         # This matches Boa's test environment behavior where account deletion
         # only happens at real transaction boundaries, not message calls.
-        # The accounts_to_delete set is populated but deletion is deferred.
+        # The accounts_to_delete set is populated but deletion is deferred
+        # until finalize_transaction().
+        if output.error is None:
+            self._pending_accounts_to_delete.update(output.accounts_to_delete)
 
         return output
 
@@ -511,3 +516,10 @@ class EVMCore:
 
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
+
+        if not is_error:
+            for address in self._pending_accounts_to_delete:
+                del self.state[address]
+
+        self._pending_accounts_to_delete.clear()
+        self.state.clear_transient_storage()

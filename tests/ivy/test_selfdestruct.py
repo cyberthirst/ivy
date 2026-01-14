@@ -4,7 +4,9 @@ Tests for selfdestruct builtin (EIP-6780 semantics).
 Post-Cancun: selfdestruct only deletes account if created in same transaction.
 """
 import pytest
+
 from ivy.types import Address
+from ivy.utils import compute_contract_address
 
 
 def test_selfdestruct_transfers_balance(get_contract, env):
@@ -535,6 +537,70 @@ def deploy_and_destroy(recipient: address) -> address:
     assert env.get_balance(receiver.address) == initial_receiver_balance + 1000
 
 
+def test_factory_create_child_selfdestruct_prefunded_address(get_contract, env):
+    """
+    EIP-6780 regression: CREATE should succeed on a pre-funded address.
+
+    If the CREATE target address already has a balance but no code/nonce/storage,
+    the creation should proceed and the contract should still be considered
+    created in the current transaction for SELFDESTRUCT semantics.
+    """
+    receiver_src = """
+@external
+@payable
+def __default__():
+    pass
+    """
+    receiver = get_contract(receiver_src)
+
+    child_src = """
+@external
+def destroy(recipient: address):
+    selfdestruct(recipient)
+    """
+    child_template = get_contract(child_src)
+
+    factory_src = f"""
+interface Child:
+    def destroy(recipient: address): nonpayable
+
+@external
+@payable
+def deploy_and_destroy(recipient: address) -> address:
+    child: address = create_copy_of({child_template.address}, value=msg.value)
+    extcall Child(child).destroy(recipient)
+    return child
+    """
+    factory = get_contract(factory_src)
+
+    env.set_balance(env.deployer, 10000)
+    initial_receiver_balance = env.get_balance(receiver.address)
+
+    # Pre-fund the predicted CREATE address
+    predicted = Address(
+        compute_contract_address(
+            factory.address.canonical_address,
+            env.state.get_nonce(factory.address),
+        )
+    )
+    prefund_amount = 777
+    env.set_balance(predicted, prefund_amount)
+
+    # Deploy child and destroy it in same transaction
+    child_address = factory.deploy_and_destroy(
+        receiver.address, value=1000, transact=True
+    )
+
+    assert child_address == predicted
+    assert env.state.get_code(child_address) is None
+    assert env.state.get_nonce(child_address) == 0
+    assert env.get_balance(child_address) == 0
+    assert (
+        env.get_balance(receiver.address)
+        == initial_receiver_balance + prefund_amount + 1000
+    )
+
+
 def test_factory_create2_child_selfdestruct_same_tx(get_contract, env):
     """
     EIP-6780 regression: factory creates child via CREATE2, child selfdestructs in same tx.
@@ -591,3 +657,89 @@ def deploy_and_destroy_create2(recipient: address, salt: bytes32) -> address:
 
     # Balance should be transferred to receiver
     assert env.get_balance(receiver.address) == initial_receiver_balance + 1000
+
+
+def test_message_call_finalize_deletes_created_contract(get_contract, env):
+    """
+    Message-call mode: deletion is deferred until finalize_transaction().
+    """
+    receiver_src = """
+@external
+@payable
+def __default__():
+    pass
+    """
+    receiver = get_contract(receiver_src)
+
+    child_src = """
+@external
+def destroy(recipient: address):
+    selfdestruct(recipient)
+    """
+    child_template = get_contract(child_src)
+
+    factory_src = f"""
+interface Child:
+    def destroy(recipient: address): nonpayable
+
+@external
+@payable
+def deploy_and_destroy(recipient: address) -> address:
+    child: address = create_copy_of({child_template.address}, value=msg.value)
+    extcall Child(child).destroy(recipient)
+    return child
+    """
+    factory = get_contract(factory_src)
+
+    env.set_balance(env.deployer, 10000)
+
+    child_address = factory.deploy_and_destroy(
+        receiver.address, value=1000, transact=False
+    )
+    env.finalize_transaction()
+
+    assert env.state.get_code(child_address) is None
+    assert env.state.get_nonce(child_address) == 0
+    assert env.get_balance(child_address) == 0
+
+
+def test_message_call_finalize_clears_created_accounts(get_contract, env):
+    """
+    Message-call mode: created_accounts must reset at finalize_transaction().
+    """
+    receiver_src = """
+@external
+@payable
+def __default__():
+    pass
+    """
+    receiver = get_contract(receiver_src)
+
+    child_src = """
+@external
+def destroy(recipient: address):
+    selfdestruct(recipient)
+    """
+    child_template = get_contract(child_src)
+
+    factory_src = f"""
+@external
+def deploy_child() -> address:
+    child: address = create_copy_of({child_template.address})
+    return child
+    """
+    factory = get_contract(factory_src)
+
+    child_address = factory.deploy_child(transact=False)
+    env.finalize_transaction()
+
+    env.set_balance(child_address, 123)
+    initial_receiver_balance = env.get_balance(receiver.address)
+
+    calldata = child_template.destroy.prepare_calldata(receiver.address)
+    env.message_call(to_address=child_address, data=calldata)
+    env.finalize_transaction()
+
+    assert env.get_balance(receiver.address) == initial_receiver_balance + 123
+    assert env.get_balance(child_address) == 0
+    assert env.state.get_code(child_address) is not None
