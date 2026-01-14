@@ -28,7 +28,7 @@ from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
 from ivy.exceptions import Assert, GasReference, Revert
-from ivy.types import Address, VyperDecimal
+from ivy.types import Address, VyperDecimal, VyperBytes, VyperInt
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
 from ivy.builtins import unsafe_math_utils as unsafe_math
@@ -92,8 +92,8 @@ def builtin_print(*args):
     print(*args)
 
 
-def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
-    assert isinstance(data, bytes)
+def builtin_abi_decode(data: VyperBytes, typ: VyperType, unwrap_tuple=True):
+    assert isinstance(data, VyperBytes)
     assert isinstance(typ, VyperType)
 
     if unwrap_tuple:
@@ -400,8 +400,8 @@ def builtin_create_minimal_proxy_to(
     )
 
 
-def builtin_raw_revert(x):
-    assert isinstance(x, bytes)
+def builtin_raw_revert(x: VyperBytes):
+    assert isinstance(x, VyperBytes)
     raise Revert(data=x)
 
 
@@ -441,9 +441,9 @@ def builtin_epsilon(typ):
     return VyperDecimal(1, scaled=True)
 
 
-def builtin_abs(x):
+def builtin_abs(x: VyperInt):
     """Absolute value for int256."""
-    assert isinstance(x, int)
+    assert isinstance(x, VyperInt)
     if x == INT256_T.int_bounds[0]:
         raise Assert(data=b"")
     return abs(x)
@@ -514,11 +514,11 @@ def builtin_keccak256(value: Union[str, bytes]) -> bytes:
 
 
 def builtin_extract32(
-    b: bytes, start: int, output_type: Optional[VyperType] = None
+    b: VyperBytes, start: VyperInt, output_type: Optional[VyperType] = None
 ) -> Any:
     if output_type is None:
         output_type = BYTES32_T
-    assert isinstance(b, bytes)
+    assert isinstance(b, VyperBytes)
     assert start >= 0
 
     # Revert if we can't extract 32 bytes from position start
