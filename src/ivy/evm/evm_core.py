@@ -86,6 +86,12 @@ class EVMCore:
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
 
+        # EIP-6780: Delete accounts marked for deletion at transaction end
+        # Only if transaction succeeded (no error in output)
+        if output.error is None:
+            for address in output.accounts_to_delete:
+                del self.state[address]
+
         self.state.clear_transient_storage()
 
         if is_deploy:
@@ -143,6 +149,12 @@ class EVMCore:
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
 
+        # EIP-6780: Delete accounts marked for deletion
+        # In test context, each execute_message is effectively a transaction
+        if output.error is None:
+            for address in output.accounts_to_delete:
+                del self.state[address]
+
         return output
 
     def process_create_message(
@@ -160,6 +172,9 @@ class EVMCore:
 
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
+
+        # Track for EIP-6780 selfdestruct semantics
+        self._state.created_accounts.add(message.create_address)
 
         # EIP-161: newly created contracts start with nonce=1, not nonce=0
         # This must happen before init code runs, so any CREATE inside __init__
@@ -427,6 +442,46 @@ class EVMCore:
         code = self.state.get_code(address)
         nonce = self.state.get_nonce(address)
         return code is not None or nonce > 0
+
+    def get_current_address(self) -> Address:
+        """Get the address of the currently executing contract."""
+        current_target = self.state.current_context.msg.to
+        if current_target == b"":
+            current_target = self.state.current_context.msg.create_address
+        return current_target
+
+    def selfdestruct(self, beneficiary: Address) -> None:
+        """
+        EVM SELFDESTRUCT opcode implementation (EIP-6780 semantics).
+
+        Post-Cancun behavior:
+        - Always transfers full balance to beneficiary
+        - Only deletes account if it was created in the same transaction
+        - If beneficiary == originator and account is deleted, ether is burnt
+        - Raises SelfDestruct to halt execution
+        """
+        originator = self.get_current_address()
+        originator_balance = self.state.get_balance(originator)
+
+        # Transfer ALL ether from originator to beneficiary
+        # When beneficiary == originator, this is a no-op
+        if originator_balance > 0 and beneficiary != originator:
+            self.state.set_balance(originator, 0)
+            beneficiary_balance = self.state.get_balance(beneficiary)
+            self.state.set_balance(
+                beneficiary, beneficiary_balance + originator_balance
+            )
+
+        # EIP-6780: Only mark for deletion if created in the same transaction
+        # Actual deletion happens at transaction end (in execute_tx/execute_message)
+        if originator in self._state.created_accounts:
+            self.state.current_output.accounts_to_delete.add(originator)
+            # If beneficiary == originator, the ether is burnt
+            # (balance is zeroed, and account will be deleted at tx end)
+            self.state.set_balance(originator, 0)
+
+        # Halt execution
+        raise SelfDestruct()
 
     def incorporate_child_on_success(self, child_output: ExecutionOutput) -> None:
         output = self.state.current_output
