@@ -42,9 +42,6 @@ class VyperInt(int):
     def __deepcopy__(self, memo):
         return VyperInt(int(self), self.typ)
 
-    def __reduce__(self):
-        return (VyperInt, (int(self), self.typ))
-
 
 class VyperBytes(bytes):
     """Boxed bytes with type info and length validation at construction."""
@@ -59,9 +56,6 @@ class VyperBytes(bytes):
 
     def __deepcopy__(self, memo):
         return VyperBytes(bytes(self), self.typ)
-
-    def __reduce__(self):
-        return (VyperBytes, (bytes(self), self.typ))
 
 
 class VyperString(str):
@@ -78,9 +72,6 @@ class VyperString(str):
     def __deepcopy__(self, memo):
         return VyperString(str(self), self.typ)
 
-    def __reduce__(self):
-        return (VyperString, (str(self), self.typ))
-
 
 class VyperBytesM(bytes):
     """Boxed fixed-size bytes with type info and length validation at construction."""
@@ -95,9 +86,6 @@ class VyperBytesM(bytes):
 
     def __deepcopy__(self, memo):
         return VyperBytesM(bytes(self), self.typ)
-
-    def __reduce__(self):
-        return (VyperBytesM, (bytes(self), self.typ))
 
 
 # adapted from titanoboa: https://github.com/vyperlang/titanoboa/blob/bedd49e5a4c1e79a7d12c799e42a23a9dc449395/boa/util/abi.py#L20
