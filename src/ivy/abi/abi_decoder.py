@@ -29,6 +29,7 @@ from vyper.semantics.types import (
     DArrayT,
     FlagT,
     DecimalT,
+    BytesM_T,
 )
 
 from ivy.types import (
@@ -39,6 +40,7 @@ from ivy.types import (
     DynamicArray,
     VyperDecimal,
     Tuple as IvyTuple,
+    VyperBytesM,
 )
 
 # Union of all possible decoded types
@@ -246,10 +248,15 @@ def _decode_r(
         ret = _strict_slice(payload, current_offset, 32, from_calldata)
         m = abi_t.m_bytes
         assert 1 <= m <= 32  # internal sanity check
+        # NOTE: this check may be removed once VyperBytesM boxing is validated
         # BytesM is right-padded with zeroes
         if ret[m:] != b"\x00" * (32 - m):
             raise DecodeError(f"invalid bytes{m}")
-        return ret[:m]
+        ret = ret[:m]
+        # Box fixed-size bytes - VyperBytesM validates length
+        if ivy_compat and isinstance(typ, BytesM_T):
+            return VyperBytesM(ret, typ)
+        return ret
 
     raise RuntimeError("unreachable")
 

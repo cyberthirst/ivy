@@ -17,6 +17,7 @@ from vyper.semantics.types import (
     TupleT,
     IntegerT,
     BytesT,
+    BytesM_T,
     StringT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
@@ -79,6 +80,24 @@ class VyperString(str):
 
     def __reduce__(self):
         return (VyperString, (str(self), self.typ))
+
+
+class VyperBytesM(bytes):
+    """Boxed fixed-size bytes with type info and length validation at construction."""
+
+    def __new__(cls, value: bytes, typ: BytesM_T):
+        if len(value) != typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperBytesM(bytes(self), self.typ)
+
+    def __reduce__(self):
+        return (VyperBytesM, (bytes(self), self.typ))
 
 
 # adapted from titanoboa: https://github.com/vyperlang/titanoboa/blob/bedd49e5a4c1e79a7d12c799e42a23a9dc449395/boa/util/abi.py#L20

@@ -3,19 +3,21 @@ from typing import Any
 from vyper.semantics.types import (
     IntegerT,
     BytesT,
+    BytesM_T,
     StringT,
     VyperType,
 )
 
-from ivy.types import VyperInt, VyperBytes, VyperString
+from ivy.types import VyperInt, VyperBytes, VyperBytesM, VyperString
 
 
 def box_value(value: Any, typ: VyperType) -> Any:
     """
     Box a raw Python value with its Vyper type.
 
-    For integers, bytes, and strings this wraps the value in a type-aware
-    container that validates bounds/length at construction time.
+    For integers, bytes (dynamic and fixed-size), and strings this wraps
+    the value in a type-aware container that validates bounds/length at
+    construction time.
 
     For other types (bool, decimal, arrays, structs, etc.) the value is
     returned as-is since they're either already boxed or can't be invalid.
@@ -36,6 +38,13 @@ def box_value(value: Any, typ: VyperType) -> Any:
                 return value
             return VyperBytes(bytes(value), typ)
         return VyperBytes(value, typ)
+
+    if isinstance(typ, BytesM_T):
+        if isinstance(value, VyperBytesM):
+            if value.typ == typ:
+                return value
+            return VyperBytesM(bytes(value), typ)
+        return VyperBytesM(value, typ)
 
     if isinstance(typ, StringT):
         if isinstance(value, VyperString):
