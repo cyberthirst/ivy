@@ -17,6 +17,7 @@ from vyper.utils import unsigned_to_signed
 
 from ivy.abi import abi_encode, abi_decode, DecodeError
 from ivy.types import VyperDecimal
+from ivy.exceptions import Revert
 
 
 class _PadDirection(enum.Enum):
@@ -124,7 +125,7 @@ def _from_bits(val_bits, o_typ):
     try:
         ret = abi_decode(o_typ, val_bits)
         return ret
-    except DecodeError:
+    except (DecodeError, Revert):
         raise ConvertError()
 
 

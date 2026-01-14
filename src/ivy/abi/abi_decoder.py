@@ -29,7 +29,10 @@ from vyper.semantics.types import (
     DArrayT,
     FlagT,
     DecimalT,
+    IntegerT,
+    BytesT,
     BytesM_T,
+    StringT,
 )
 
 from ivy.types import (
@@ -40,7 +43,10 @@ from ivy.types import (
     DynamicArray,
     VyperDecimal,
     Tuple as IvyTuple,
+    VyperInt,
+    VyperBytes,
     VyperBytesM,
+    VyperString,
 )
 
 # Union of all possible decoded types
@@ -190,6 +196,7 @@ def _decode_r(
     if isinstance(abi_t, ABI_Bytes):
         bound = abi_t.bytes_bound
         length = _read_int(payload, current_offset, from_calldata)
+        # NOTE: this check may be removed once VyperBytes/VyperString boxing is validated
         if length > bound:
             raise DecodeError("bytes too large")
 
@@ -201,7 +208,14 @@ def _decode_r(
         if isinstance(abi_t, ABI_String):
             # match eth-stdlib, since that's what we check against
             ret = ret.decode(errors="surrogateescape")
+            # Box strings - VyperString validates length
+            if ivy_compat and isinstance(typ, StringT):
+                return VyperString(ret, typ)
+            return ret
 
+        # Box bytes - VyperBytes validates length
+        if ivy_compat and isinstance(typ, BytesT):
+            return VyperBytes(ret, typ)
         return ret
 
     # sanity check
@@ -214,7 +228,7 @@ def _decode_r(
         if abi_t.signed:
             ret = unsigned_to_signed(ret, 256, strict=True)
 
-        # bounds check
+        # NOTE: this check may be removed once VyperInt boxing is validated
         lo, hi = int_bounds(signed=abi_t.signed, bits=abi_t.m_bits)
         if not (lo <= ret <= hi):
             u = "" if abi_t.signed else "u"
@@ -242,6 +256,9 @@ def _decode_r(
 
             return VyperDecimal(ret, scaled=True)
 
+        # Box plain integers - VyperInt validates bounds
+        if ivy_compat and isinstance(typ, IntegerT):
+            return VyperInt(ret, typ)
         return ret
 
     if isinstance(abi_t, ABI_BytesM):
