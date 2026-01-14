@@ -73,6 +73,7 @@ class MinimalProxyFactory:
 implementation: immutable(address)
 
 @deploy
+@payable
 def __init__(_implementation: address):
     implementation = _implementation
 
