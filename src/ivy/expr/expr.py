@@ -69,14 +69,12 @@ class ExprVisitor(BaseVisitor):
         pass
 
     def visit_Int(self, node: ast.Int):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_Decimal(self, node: ast.Decimal):
         return VyperDecimal(node.value)
 
     def visit_Hex(self, node: ast.Hex):
-        # literals are validated in Vyper
         typ = node._metadata["type"]
 
         val = node.value
@@ -89,12 +87,10 @@ class ExprVisitor(BaseVisitor):
         return bytes_val[: typ.m]
 
     def visit_Str(self, node: ast.Str):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_Bytes(self, node: ast.Bytes):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_NameConstant(self, node: ast.NameConstant):
         return node.value
