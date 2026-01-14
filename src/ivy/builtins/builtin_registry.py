@@ -42,20 +42,11 @@ from ivy.builtins.builtins import (
 
 
 class BuiltinWrapper:
-    def __init__(self, fn, context=None, needs_types=False):
+    def __init__(self, fn, context=None):
         self.fn = fn
         self.context = context
-        # we don't tag runtime values with a corresponding vyper type, thus we have to
-        # collect the types separately and for certain builtins inject them
-        self.needs_types = needs_types
 
-    def execute(self, *args, typs=None, **kwargs):
-        if self.needs_types:
-            if typs is None:
-                raise ValueError("Type information is required for this built-in")
-            if self.context:
-                return self.fn(self.context, typs, *args, **kwargs)
-            return self.fn(typs, *args, **kwargs)
+    def execute(self, *args, **kwargs):
         if self.context:
             return self.fn(self.context, *args, **kwargs)
         return self.fn(*args, **kwargs)
@@ -69,7 +60,7 @@ class BuiltinRegistry:
 
     def _register_builtins(self):
         return {
-            # Pure built-ins (no context, no types)
+            # Pure built-ins (no context)
             "len": BuiltinWrapper(builtin_len),
             "slice": BuiltinWrapper(builtin_slice),
             "concat": BuiltinWrapper(builtin_concat),
@@ -86,24 +77,13 @@ class BuiltinRegistry:
             "method_id": BuiltinWrapper(builtin_method_id),
             "print": BuiltinWrapper(builtin_print),
             "raw_revert": BuiltinWrapper(builtin_raw_revert),
-            # Pure built-ins (no context, with types)
-            "convert": BuiltinWrapper(builtin_convert, needs_types=True),
-            "abi_encode": BuiltinWrapper(builtin_abi_encode, needs_types=True),
-            "_abi_encode": BuiltinWrapper(builtin_abi_encode, needs_types=True),
-            # EVM built-ins (with evm context, no types)
-            "raw_call": BuiltinWrapper(builtin_raw_call, context=self.evm),
-            "send": BuiltinWrapper(builtin_send, context=self.evm),
-            "create_copy_of": BuiltinWrapper(builtin_create_copy_of, context=self.evm),
-            "create_from_blueprint": BuiltinWrapper(
-                builtin_create_from_blueprint, context=self.evm, needs_types=True
-            ),
-            "create_minimal_proxy_to": BuiltinWrapper(
-                builtin_create_minimal_proxy_to, context=self.evm
-            ),
-            "unsafe_add": BuiltinWrapper(builtin_unsafe_add, needs_types=True),
-            "unsafe_sub": BuiltinWrapper(builtin_unsafe_sub, needs_types=True),
-            "unsafe_mul": BuiltinWrapper(builtin_unsafe_mul, needs_types=True),
-            "unsafe_div": BuiltinWrapper(builtin_unsafe_div, needs_types=True),
+            "convert": BuiltinWrapper(builtin_convert),
+            "abi_encode": BuiltinWrapper(builtin_abi_encode),
+            "_abi_encode": BuiltinWrapper(builtin_abi_encode),
+            "unsafe_add": BuiltinWrapper(builtin_unsafe_add),
+            "unsafe_sub": BuiltinWrapper(builtin_unsafe_sub),
+            "unsafe_mul": BuiltinWrapper(builtin_unsafe_mul),
+            "unsafe_div": BuiltinWrapper(builtin_unsafe_div),
             "floor": BuiltinWrapper(builtin_floor),
             "ceil": BuiltinWrapper(builtin_ceil),
             "epsilon": BuiltinWrapper(builtin_epsilon),
@@ -116,6 +96,16 @@ class BuiltinRegistry:
             "uint256_mulmod": BuiltinWrapper(builtin_uint256_mulmod),
             "shift": BuiltinWrapper(builtin_shift),
             "ecrecover": BuiltinWrapper(builtin_ecrecover),
+            # EVM built-ins (with evm context)
+            "raw_call": BuiltinWrapper(builtin_raw_call, context=self.evm),
+            "send": BuiltinWrapper(builtin_send, context=self.evm),
+            "create_copy_of": BuiltinWrapper(builtin_create_copy_of, context=self.evm),
+            "create_from_blueprint": BuiltinWrapper(
+                builtin_create_from_blueprint, context=self.evm
+            ),
+            "create_minimal_proxy_to": BuiltinWrapper(
+                builtin_create_minimal_proxy_to, context=self.evm
+            ),
             "selfdestruct": BuiltinWrapper(builtin_selfdestruct, context=self.evm),
         }
 

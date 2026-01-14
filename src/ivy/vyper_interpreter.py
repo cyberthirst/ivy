@@ -596,7 +596,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         call: ast.Call,
         args,
         kws,
-        typs,
         target: Optional[Address] = None,
         is_static: bool = False,
     ):
@@ -605,7 +604,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id  # type: ignore[attr-defined]
-            result = self.builtins.get(id).execute(*args, typs=typs, **kws)
+            result = self.builtins.get(id).execute(*args, **kws)
             if id == "range":
                 return result  # Special case: untyped iterator
             return box_value_from_node(call, result)

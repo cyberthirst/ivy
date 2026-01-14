@@ -9,11 +9,10 @@ def evm_div(x, y):
     return sign * (abs(x) // abs(y))  # adapted from py-evm
 
 
-def validate_typs(typs):
-    assert len(typs) == 2
-    # TODO is this the right way to compare?
-    assert typs[0] == typs[1]
-    typ = typs[0]
+def get_int_params(x, y):
+    """Get bits and signed from boxed integer values."""
+    typ = x.typ
+    assert typ == y.typ, f"Type mismatch: {x.typ} != {y.typ}"
     assert isinstance(typ, IntegerT)
     return typ.bits, typ.is_signed
 

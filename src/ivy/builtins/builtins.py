@@ -96,7 +96,7 @@ def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
     assert isinstance(data, bytes)
     assert isinstance(typ, VyperType)
 
-    if unwrap_tuple is True:
+    if unwrap_tuple:
         wrapped_typ = calculate_type_for_external_return(typ)
         result = abi_decode(wrapped_typ, data)
         # Unwrap if the type was wrapped (non-tuples and single-element tuples get wrapped)
@@ -107,28 +107,22 @@ def builtin_abi_decode(data: bytes, typ: VyperType, unwrap_tuple=True):
         return abi_decode(typ, data)
 
 
-# we don't follow the api of vyper's abi_encode - this is because we also need the
-# types of the arguments which in the case of the compiler are available as metadata
-# of the arguments
-# however, in ivy, we represent values as primitive python objects, and we don't associate them
-# with the corresponding vyper type. thus, we have to retrieve the types from
-# the ast nodes and pass them through
-def builtin_abi_encode(
-    typs: tuple[VyperType], *values: tuple[Any], ensure_tuple=True, method_id=None
-):
-    assert len(typs) == len(values)
-    assert isinstance(values, tuple) and isinstance(typs, tuple)
+def builtin_abi_encode(*values: tuple[Any], ensure_tuple=True, method_id=None):
+    assert isinstance(values, tuple)
+
+    # Get types from the boxed values
+    typs = tuple(v.typ for v in values)
 
     if len(values) == 1 and not ensure_tuple:
         # unwrap tuple
-        typs = typs[0]
+        typ = typs[0]
         encode_input = values[0]
     else:
-        typs = TupleT(list(arg for arg in typs))
+        typ = TupleT(list(typs))
         # values are already a tuple
         encode_input = values
 
-    ret = abi_encode(typs, encode_input)
+    ret = abi_encode(typ, encode_input)
 
     if method_id is not None:
         ret = method_id + ret
@@ -256,15 +250,13 @@ def builtin_concat(*args):
 
 # all the convert functionality is adapted from vyper's test suite
 # - https://github.com/vyperlang/vyper/blob/c32b9b4c6f0d8b8cdb103d3017ff540faf56a305/tests/functional/builtins/codegen/test_convert.py#L301
-def builtin_convert(typs: tuple[VyperType, VyperType], *values: Any):
+def builtin_convert(val: Any, o_typ: VyperType):
     """
     Perform conversion on the Python representation of a Vyper value.
     Returns None if the conversion is invalid (i.e., would revert in Vyper)
     """
-
-    assert len(typs) == 2
-    i_typ = typs[0]
-    val, o_typ = values
+    # Get input type from the boxed value
+    i_typ = val.typ
 
     if isinstance(i_typ, IntegerT) and isinstance(o_typ, IntegerT):
         return convert_utils._convert_int_to_int(val, o_typ)
@@ -345,7 +337,6 @@ def builtin_create_copy_of(
 
 def builtin_create_from_blueprint(
     evm: EVMCore,
-    typs: tuple[VyperType],
     target: Address,
     *args,
     value: int = 0,
@@ -362,14 +353,12 @@ def builtin_create_from_blueprint(
         # which always reverts regardless of revert_on_failure flag
         raise Revert(data=b"")
 
-    # typs[0] is the target address type, typs[1:] are constructor arg types
-    constructor_arg_typs = typs[1:]
     values = args  # remaining positional args are constructor values
 
     if not raw_args:
-        # encode the arguments
-        if constructor_arg_typs and values:
-            encoded_args = builtin_abi_encode(constructor_arg_typs, *values)
+        # encode the arguments - types are read from the boxed values
+        if values:
+            encoded_args = builtin_abi_encode(*values)
         else:
             encoded_args = b""
     else:
@@ -396,7 +385,8 @@ def builtin_create_minimal_proxy_to(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
-    encoded_target = builtin_abi_encode((AddressT(),), *(target,))
+    # target is an Address which has .typ
+    encoded_target = builtin_abi_encode(target)
     code = create_utils.MinimalProxyFactory.get_proxy_contract_data()
     return create_utils.create_builtin_shared(
         evm,
@@ -413,23 +403,23 @@ def builtin_raw_revert(x):
     raise Revert(data=x)
 
 
-def builtin_unsafe_add(typs, x, y):
-    bits, signed = unsafe_math.validate_typs(typs)
+def builtin_unsafe_add(x, y):
+    bits, signed = unsafe_math.get_int_params(x, y)
     return unsafe_math.wrap_value(x + y, bits, signed)
 
 
-def builtin_unsafe_sub(typs, x, y):
-    bits, signed = unsafe_math.validate_typs(typs)
+def builtin_unsafe_sub(x, y):
+    bits, signed = unsafe_math.get_int_params(x, y)
     return unsafe_math.wrap_value(x - y, bits, signed)
 
 
-def builtin_unsafe_mul(typs, x, y):
-    bits, signed = unsafe_math.validate_typs(typs)
+def builtin_unsafe_mul(x, y):
+    bits, signed = unsafe_math.get_int_params(x, y)
     return unsafe_math.wrap_value(x * y, bits, signed)
 
 
-def builtin_unsafe_div(typs, x, y):
-    bits, signed = unsafe_math.validate_typs(typs)
+def builtin_unsafe_div(x, y):
+    bits, signed = unsafe_math.get_int_params(x, y)
     return unsafe_math.wrap_value(unsafe_math.evm_div(x, y), bits, signed)
 
 
