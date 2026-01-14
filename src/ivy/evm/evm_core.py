@@ -31,6 +31,13 @@ class EVMCore:
         self.state = StateAccessor(self._state)
         self.journal = Journal()
         self.callbacks = callbacks
+        self._pending_accounts_to_delete: set[Address] = set()
+
+    def begin_transaction(self) -> None:
+        # EIP-6780: Clear created_accounts at transaction start
+        # This ensures the set is transaction-scoped, not persisted across transactions
+        self._state.created_accounts.clear()
+        self._pending_accounts_to_delete.clear()
 
     def execute_tx(
         self,
@@ -41,6 +48,8 @@ class EVMCore:
         is_static: bool = False,
         compiler_data: Optional[CompilerData] = None,
     ):
+        self.begin_transaction()
+
         is_deploy = to == b""
         create_address, code = None, None
 
@@ -83,10 +92,10 @@ class EVMCore:
 
         assert not self.journal.is_active
 
-        if self.journal.pop_state_committed():
-            self.callbacks.on_state_committed()
+        if output.error is None:
+            self._pending_accounts_to_delete.update(output.accounts_to_delete)
 
-        self.state.clear_transient_storage()
+        self.finalize_transaction(is_error=output.is_error)
 
         if is_deploy:
             return create_address, output
@@ -143,11 +152,24 @@ class EVMCore:
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
 
+        # NOTE: Unlike execute_tx(), we do NOT delete accounts here.
+        # This matches Boa's test environment behavior where account deletion
+        # only happens at real transaction boundaries, not message calls.
+        # The accounts_to_delete set is populated but deletion is deferred
+        # until finalize_transaction().
+        if output.error is None:
+            self._pending_accounts_to_delete.update(output.accounts_to_delete)
+
         return output
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
     ) -> ExecutionOutput:
+        if self.account_has_code_or_nonce(
+            message.create_address
+        ) or self.account_has_storage(message.create_address):
+            raise EVMException("Address already taken")
+
         self.journal.begin_call(message.is_static)
 
         # Destroy any pre-existing storage at the target address.
@@ -155,11 +177,11 @@ class EVMCore:
         # self-destructed address that still has storage.
         self.state.destroy_storage(message.create_address)
 
-        if self.state.has_account(message.create_address):
-            raise EVMException("Address already taken")
-
         new_account = self.state[message.create_address]
         self.state.add_accessed_account(new_account)
+
+        # Track for EIP-6780 selfdestruct semantics
+        self._state.created_accounts.add(message.create_address)
 
         # EIP-161: newly created contracts start with nonce=1, not nonce=0
         # This must happen before init code runs, so any CREATE inside __init__
@@ -372,7 +394,9 @@ class EVMCore:
         # Note: nonce is incremented for both CREATE and CREATE2
         self.state.increment_nonce(current_address)
 
-        if self.account_has_code_or_nonce(create_address):
+        if self.account_has_code_or_nonce(
+            create_address
+        ) or self.account_has_storage(create_address):
             # Return empty output and address(0) if account already exists
             empty_output = ExecutionOutput()
             empty_output.error = EVMException("Address collision")
@@ -428,6 +452,51 @@ class EVMCore:
         nonce = self.state.get_nonce(address)
         return code is not None or nonce > 0
 
+    def account_has_storage(self, address: Address) -> bool:
+        if address not in self._state.state:
+            return False
+        return bool(self._state.state[address].storage)
+
+    def get_current_address(self) -> Address:
+        """Get the address of the currently executing contract."""
+        current_target = self.state.current_context.msg.to
+        if current_target == b"":
+            current_target = self.state.current_context.msg.create_address
+        return current_target
+
+    def selfdestruct(self, beneficiary: Address) -> None:
+        """
+        EVM SELFDESTRUCT opcode implementation (EIP-6780 semantics).
+
+        Post-Cancun behavior:
+        - Always transfers full balance to beneficiary
+        - Only deletes account if it was created in the same transaction
+        - If beneficiary == originator and account is deleted, ether is burnt
+        - Raises SelfDestruct to halt execution
+        """
+        originator = self.get_current_address()
+        originator_balance = self.state.get_balance(originator)
+
+        # Transfer ALL ether from originator to beneficiary
+        # When beneficiary == originator, this is a no-op
+        if originator_balance > 0 and beneficiary != originator:
+            self.state.set_balance(originator, 0)
+            beneficiary_balance = self.state.get_balance(beneficiary)
+            self.state.set_balance(
+                beneficiary, beneficiary_balance + originator_balance
+            )
+
+        # EIP-6780: Only mark for deletion if created in the same transaction
+        # Actual deletion happens at transaction end (in execute_tx/execute_message)
+        if originator in self._state.created_accounts:
+            self.state.current_output.accounts_to_delete.add(originator)
+            # If beneficiary == originator, the ether is burnt
+            # (balance is zeroed, and account will be deleted at tx end)
+            self.state.set_balance(originator, 0)
+
+        # Halt execution
+        raise SelfDestruct()
+
     def incorporate_child_on_success(self, child_output: ExecutionOutput) -> None:
         output = self.state.current_output
 
@@ -453,3 +522,10 @@ class EVMCore:
 
         if self.journal.pop_state_committed():
             self.callbacks.on_state_committed()
+
+        if not is_error:
+            for address in self._pending_accounts_to_delete:
+                del self.state[address]
+
+        self._pending_accounts_to_delete.clear()
+        self.state.clear_transient_storage()
