@@ -15,6 +15,13 @@ from vyper.semantics.types import (
     SArrayT,
     DArrayT,
     TupleT,
+    IntegerT,
+    BytesT,
+    BytesM_T,
+    StringT,
+    AddressT,
+    DecimalT,
+    BoolT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
@@ -23,13 +30,124 @@ from ivy.utils import lrudict, _trunc_div
 from ivy.journal import Journal, JournalEntryType
 
 
+class VyperValue:
+    """Base class for all Vyper runtime values with type information."""
+
+    __slots__ = ()
+
+    typ: VyperType
+
+
+T = TypeVar("T")
+
+
+def boxed(value: T) -> T:
+    """Assert and return a boxed value."""
+    assert value is None or isinstance(value, VyperValue), f"Expected VyperValue, got {type(value)}"
+    return value
+
+
+class VyperInt(VyperValue, int):
+    """Boxed integer with type info and bounds validation at construction."""
+
+    def __new__(cls, value: int, typ: IntegerT):
+        lo, hi = typ.ast_bounds
+        if not (lo <= value <= hi):
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperInt(int(self), self.typ)
+
+
+class VyperBytes(VyperValue, bytes):
+    """Boxed bytes with type info and length validation at construction."""
+
+    def __new__(cls, value: bytes, typ: BytesT):
+        if len(value) > typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperBytes(bytes(self), self.typ)
+
+
+class VyperString(VyperValue, str):
+    """Boxed string with type info and length validation at construction."""
+
+    def __new__(cls, value: str, typ: StringT):
+        if len(value) > typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperString(str(self), self.typ)
+
+
+class VyperBytesM(VyperValue, bytes):
+    """Boxed fixed-size bytes with type info and length validation at construction."""
+
+    def __new__(cls, value: bytes, typ: BytesM_T):
+        if len(value) != typ.length:
+            from ivy.exceptions import Revert
+            raise Revert(data=b"")
+        instance = super().__new__(cls, value)
+        instance.typ = typ
+        return instance
+
+    def __deepcopy__(self, memo):
+        return VyperBytesM(bytes(self), self.typ)
+
+
+# Singleton BoolT instance for VyperBool
+_BOOL_T = BoolT()
+
+
+class VyperBool(VyperValue):
+    """Boxed boolean with type info."""
+
+    __slots__ = ("_value", "typ")
+
+    def __init__(self, value: bool):
+        self._value = bool(value)
+        self.typ = _BOOL_T
+
+    def __bool__(self) -> bool:
+        return self._value
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VyperBool):
+            return self._value == other._value
+        if isinstance(other, bool):
+            return self._value == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        return hash(self._value)
+
+    def __repr__(self) -> str:
+        return f"VyperBool({self._value})"
+
+    def __deepcopy__(self, memo):
+        return VyperBool(self._value)
+
+
 # adapted from titanoboa: https://github.com/vyperlang/titanoboa/blob/bedd49e5a4c1e79a7d12c799e42a23a9dc449395/boa/util/abi.py#L20
 # inherit from `str` so that users can compare with regular hex string
 # addresses
-class Address(str):
+class Address(VyperValue, str):
     # converting between checksum and canonical addresses is a hotspot;
     # this class contains both and caches recently seen conversions
-    __slots__ = ("canonical_address",)
+    __slots__ = ("canonical_address", "typ")
     _cache = lrudict(1024)
 
     canonical_address: EthAddress
@@ -55,6 +173,7 @@ class Address(str):
         checksum_address = to_checksum_address(address)
         self = super().__new__(cls, checksum_address)
         self.canonical_address = to_canonical_address(address)
+        self.typ = AddressT()
         cls._cache[address] = self
         return self
 
@@ -63,7 +182,7 @@ class Address(str):
         return f"Address({checksum_addr})"
 
 
-class Flag:
+class Flag(VyperValue):
     def __init__(self, typ: FlagT, source: Union[str, int]):
         self.typ = typ
         self.mask = (1 << len(typ._flag_members)) - 1
@@ -98,7 +217,7 @@ class Flag:
         return hash(self.value)
 
 
-class VyperDecimal:
+class VyperDecimal(VyperValue):
     """Fixed‑point decimal matching Vyper/EVM 10‑dec semantics."""
 
     value: int
@@ -121,6 +240,7 @@ class VyperDecimal:
         return result
 
     def __init__(self, value: Union[Decimal, int, float], *, scaled: bool = False):
+        self.typ = DecimalT()
         if not scaled:
             self.value = int(value * self.SCALING_FACTOR)
         else:
@@ -222,9 +342,9 @@ class VyperDecimal:
 T = TypeVar("T")
 
 
-class _Container:
+class _Container(VyperValue):
     def __init__(self, vyper_type: VyperType):
-        self._typ: VyperType = vyper_type
+        self.typ: VyperType = vyper_type
         self._values: Dict[Any, Any] = {}
 
     def _journal(self, key: Any, loc: Optional[DataLocation] = None):
@@ -240,7 +360,7 @@ class _Container:
 
     def __deepcopy__(self, _):
         result = self.__class__.__new__(self.__class__)
-        result._typ = self._typ  # Types are immutable
+        result.typ = self.typ  # Types are immutable
         result._values = {k: copy.deepcopy(v) for k, v in self._values.items()}
         return result
 
@@ -270,6 +390,7 @@ class _Sequence(_Container, Generic[T]):
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
 
@@ -341,6 +462,7 @@ class DynamicArray(_Sequence[T]):
         Journal().record(JournalEntryType.ARRAY_LENGTH, self, None, self.length)
 
     def append(self, value: T, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if len(self) >= self.capacity:
             raise ValueError(f"Cannot exceed maximum length {self.capacity}")
 
@@ -382,6 +504,7 @@ class Map(_Container):
         return self._values[key]
 
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         self._journal(key, loc)
         self._values[key] = value
 
@@ -405,7 +528,7 @@ class Map(_Container):
 
 
 class Struct(_Container):
-    _typ: StructT
+    typ: StructT
 
     def __init__(
         self,
@@ -417,26 +540,27 @@ class Struct(_Container):
 
     def __getitem__(self, key: str) -> Any:
         if key not in self._values:
-            raise KeyError(f"'{self._typ.name}' struct has no member '{key}'")
+            raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
         return self._values[key]
 
     def __setitem__(self, key: str, value: Any, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         if key not in self._values:
-            raise KeyError(f"'{self._typ.name}' struct has no member '{key}'")
+            raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
         self._journal(key, loc)
         self._values[key] = value
 
     def values(self):
-        values = [self._values[k] for k, _ in self._typ.members.items()]
+        values = [self._values[k] for k, _ in self.typ.members.items()]
         return values
 
     def __str__(self):
-        items = [f"{k}={str(self[k])}" for k in self._typ.members.keys()]
-        return f"{self._typ.name}({', '.join(items)})"
+        items = [f"{k}={str(self[k])}" for k in self.typ.members.keys()]
+        return f"{self.typ.name}({', '.join(items)})"
 
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
-        result._typ = self._typ
+        result.typ = self.typ
         return result
 
 
@@ -467,6 +591,7 @@ class Tuple(_Container):
         return self._values[idx]
 
     def __setitem__(self, idx: int, value: Any, loc: Optional[DataLocation] = None):
+        assert isinstance(value, VyperValue)
         self._validate_index(idx)
         self._journal(idx, loc)
         self._values[idx] = value

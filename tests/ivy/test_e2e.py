@@ -3520,7 +3520,7 @@ def get_trace() -> DynArray[uint256, 5]:
     assert c.get_trace() == [1, 2]
 
 
-def test_darray_append_rollback_overflow(get_contract):
+def test_darray_append_rollback_overflow(get_contract, tx_failed):
     src = """
 x: uint256
 trace: DynArray[uint256, 3]
@@ -3548,7 +3548,8 @@ def get_x() -> uint256:
     assert c.get_trace() == []
     assert c.get_x() == 0
 
-    with pytest.raises(ValueError):
+    from ivy.exceptions import Revert
+    with tx_failed(Revert):
         c.test()
 
     assert c.get_trace() == []

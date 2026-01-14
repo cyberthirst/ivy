@@ -24,6 +24,11 @@ from ivy.types import (
     DynamicArray,
     Map,
     VyperDecimal,
+    VyperBool,
+    VyperInt,
+    VyperBytes,
+    VyperBytesM,
+    VyperString,
     Tuple as IvyTuple,
 )
 
@@ -57,8 +62,8 @@ def get_default_value(typ: Any) -> Any:
 
 
 @register_default(IntegerT)
-def default_integer(_: IntegerT) -> int:
-    return 0
+def default_integer(typ: IntegerT) -> VyperInt:
+    return VyperInt(0, typ)
 
 
 @register_default(DecimalT)
@@ -67,8 +72,8 @@ def default_decimal(_: DecimalT) -> VyperDecimal:
 
 
 @register_default(BoolT)
-def default_bool(_: BoolT) -> bool:
-    return False
+def default_bool(_: BoolT) -> VyperBool:
+    return VyperBool(False)
 
 
 @register_default(AddressT)
@@ -93,20 +98,18 @@ def default_static_array(typ: SArrayT) -> StaticArray:
 
 
 @register_default(BytesT)
-def default_bytes(_: BytesT) -> bytes:
-    # variable length byte array defaults to empty bytes
-    return b""
+def default_bytes(typ: BytesT) -> VyperBytes:
+    return VyperBytes(b"", typ)
 
 
 @register_default(BytesM_T)
-def default_fixed_bytes(typ: BytesM_T) -> bytes:
-    # fixed-length bytes default to zero-filled
-    return b"\x00" * typ.length
+def default_fixed_bytes(typ: BytesM_T) -> VyperBytesM:
+    return VyperBytesM(b"\x00" * typ.length, typ)
 
 
 @register_default(StringT)
-def default_string(_: StringT) -> str:
-    return ""
+def default_string(typ: StringT) -> VyperString:
+    return VyperString("", typ)
 
 
 @register_default(StructT)

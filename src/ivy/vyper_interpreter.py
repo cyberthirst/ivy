@@ -29,6 +29,7 @@ from vyper.semantics.types.shortcuts import UINT256_T
 from vyper.utils import keccak256
 
 from ivy.expr.expr import ExprVisitor
+from ivy.expr.clamper import box_value_from_node
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
@@ -41,7 +42,16 @@ from ivy.exceptions import (
     StaticCallViolation,
 )
 from ivy.tracer import Tracer
-from ivy.types import Address, Struct, StaticArray, DynamicArray, Map, Tuple as IvyTuple
+from ivy.types import (
+    Address,
+    Struct,
+    StaticArray,
+    DynamicArray,
+    Map,
+    Tuple as IvyTuple,
+    VyperValue,
+    boxed,
+)
 from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
@@ -366,7 +376,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t.is_deploy:
             return self.current_context.contract
-        return ret
+        if getattr(func_t, "do_raw_return", False):
+            assert isinstance(ret, bytes)
+            return ret
+        return boxed(ret)
 
     def _is_global_var(self, varinfo: Optional[VarInfo]):
         if varinfo is None:
@@ -395,6 +408,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         return res
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
+        boxed(value)
         varinfo, is_global = self._resolve_variable_info(node)
         if is_global:
             assert varinfo is not None
@@ -421,9 +435,7 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self.memory.new_variable(identifier, typ)
 
     def _assign_target(self, target, value):
-        if isinstance(target, ast.Name):
-            self.set_variable(target.id, value, target)
-        elif isinstance(target, ast.Tuple):
+        if isinstance(target, ast.Tuple):
             if not isinstance(value, (tuple, IvyTuple)):
                 raise TypeError("Cannot unpack non-iterable to tuple")
             # Normalize IvyTuple to a sequence of values
@@ -432,6 +444,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 raise ValueError("Mismatch in number of items to unpack")
             for t, v in zip(target.elements, seq):
                 self._assign_target(t, v)
+        elif isinstance(target, ast.Name):
+            self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Subscript):
             container = self.visit(target.value)
             index = self.visit(target.slice)
@@ -461,17 +475,19 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # x.balance: balance of address x
         if node.attr == "balance":
             addr = self.visit(node.value)
-            return self.state.get_balance(addr)
+            return box_value_from_node(node, self.state.get_balance(addr))
         # x.codesize: codesize of address x
         elif node.attr == "codesize" or node.attr == "is_contract":
             addr = self.visit(node.value)
             contract_data = self.state.get_code(addr)
             if node.attr == "codesize":
                 if contract_data is None:
-                    return 0
-                return len(contract_data.compiler_data.bytecode_runtime)
+                    return box_value_from_node(node, 0)
+                return box_value_from_node(
+                    node, len(contract_data.compiler_data.bytecode_runtime)
+                )
             else:
-                return contract_data is not None
+                return box_value_from_node(node, contract_data is not None)
         # x.codehash: keccak of address x
         elif node.attr == "codehash":
             addr = self.visit(node.value)
@@ -480,12 +496,16 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 # Check if account exists (has balance, nonce, or was touched)
                 if not self.state.has_account(addr):
                     # Non-existent account returns 0 per EIP-1052
-                    return b"\x00" * 32
+                    return box_value_from_node(node, b"\x00" * 32)
                 # EOA (existing account with no code) returns keccak of empty bytes
-                return keccak256(b"")
-            return keccak256(contract_data.compiler_data.bytecode_runtime)
+                return box_value_from_node(node, keccak256(b""))
+            return box_value_from_node(
+                node, keccak256(contract_data.compiler_data.bytecode_runtime)
+            )
         # x.code: codecopy/extcodecopy of address x
         elif node.attr == "code":
+            # code has special semantics - type annotation is Bytes[0] placeholder
+            # but actual value can be any length, so don't box it
             addr = self.visit(node.value)
             contract_data = self.state.get_code(addr)
             if contract_data is None:
@@ -499,23 +519,25 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         if key == "msg.sender":
             return self.msg.caller
         elif key == "msg.data":
+            # msg.data has special semantics - type annotation is Bytes[0] placeholder
+            # but actual value can be any length, so don't box it
             return self.msg.data
         elif (
             key == "msg.value"
         ):  # TODO check payble (context and self.context.is_payable:)
-            return self.msg.value
+            return box_value_from_node(node, self.msg.value)
         elif key in ("msg.gas", "msg.mana"):
             raise GasReference()
         elif key == "block.prevrandao":
-            return self.env.prev_randao
+            return box_value_from_node(node, self.env.prev_randao)
         elif key == "block.difficulty":
-            return int.from_bytes(self.env.prev_randao, "big")
+            return box_value_from_node(node, int.from_bytes(self.env.prev_randao, "big"))
         elif key == "block.timestamp":
-            return self.env.time
+            return box_value_from_node(node, self.env.time)
         elif key == "block.coinbase":
             return self.env.coinbase
         elif key == "block.number":
-            return self.env.block_number
+            return box_value_from_node(node, self.env.block_number)
         elif key == "block.gaslimit":
             raise GasReference()
         elif key == "block.basefee":
@@ -526,14 +548,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             # Return the hash of the previous block (block_hashes[-1])
             # If no previous block exists (block_number == 0 or empty block_hashes), return 0
             if self.env.block_number == 0 or len(self.env.block_hashes) == 0:
-                return b"\x00" * 32
-            return self.env.block_hashes[-1]
+                return box_value_from_node(node, b"\x00" * 32)
+            return box_value_from_node(node, self.env.block_hashes[-1])
         elif key == "tx.origin":
             return self.env.origin
         elif key == "tx.gasprice":
             raise GasReference()
         elif key == "chain.id":
-            return self.env.chain_id
+            return box_value_from_node(node, self.env.chain_id)
         else:
             assert False, "unreachable"
 
@@ -595,7 +617,6 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         call: ast.Call,
         args,
         kws,
-        typs,
         target: Optional[Address] = None,
         is_static: bool = False,
     ):
@@ -604,7 +625,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
 
         if func_t is None or isinstance(func_t, BuiltinFunctionT):
             id = call.func.id  # type: ignore[attr-defined]
-            return self.builtins.get(id).execute(*args, typs=typs, **kws)
+            result = self.builtins.get(id).execute(*args, **kws)
+            if id == "range":
+                return result  # Special case: untyped iterator
+            return boxed(box_value_from_node(call, result))
 
         if isinstance(func_t, TYPE_T):
             # struct & interface constructors
@@ -613,19 +637,19 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 # TODO should we return an address here? or an interface object wrapping the address?
                 # we will likely need the attrs of the interface..
                 assert len(args) == 1
-                return args[0]
+                return boxed(args[0])
             elif isinstance(typedef, EventT):
                 _args = args if len(args) > 0 else kws.values()
                 self._log(typedef, _args)
                 return None
             else:
                 assert isinstance(typedef, StructT) and len(args) == 0
-                return Struct(typedef, kws)
+                return boxed(Struct(typedef, kws))
 
         if isinstance(func_t, MemberFunctionT):
             if func_t.name == "__at__":
                 assert len(args) == 1
-                return args[0]
+                return boxed(args[0])
             darray = self.visit(call.func.value)  # type: ignore[attr-defined]
             assert isinstance(darray, DynamicArray)
             loc = call.func.value._expr_info.location  # type: ignore[attr-defined]
@@ -635,16 +659,20 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 return None
             else:
                 assert func_t.name == "pop" and len(args) == 0
-                return darray.pop(loc)
+                return boxed(darray.pop(loc))
 
         assert isinstance(func_t, ContractFunctionT)
 
         if func_t.is_external:
             assert target is not None and isinstance(func_t, ContractFunctionT)
-            return self._external_function_call(func_t, args, kws, is_static, target)
+            return boxed(
+                self._external_function_call(func_t, args, kws, is_static, target)
+            )
 
         assert func_t.is_internal or func_t.is_deploy
-        return self._execute_function(func_t, args)
+        if func_t.is_deploy:
+            return self._execute_function(func_t, args)
+        return boxed(self._execute_function(func_t, args))
 
     def _external_function_call(
         self, func_t: ContractFunctionT, args, kwargs, is_static: bool, target: Address

@@ -24,10 +24,12 @@ from ivy.types import (
     StaticArray,
     DynamicArray,
     VyperDecimal,
+    VyperBool,
+    VyperBytesM,
     Tuple as IvyTuple,
 )
 from ivy.expr.operators import get_operator_handler
-from ivy.expr.clamper import validate_value
+from ivy.expr.clamper import box_value_from_node
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -49,7 +51,6 @@ class ExprVisitor(BaseVisitor):
         func,
         args,
         kws,
-        typs,
         target: Optional[Address] = None,
         is_static: Optional[bool] = None,
     ):
@@ -69,14 +70,12 @@ class ExprVisitor(BaseVisitor):
         pass
 
     def visit_Int(self, node: ast.Int):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_Decimal(self, node: ast.Decimal):
         return VyperDecimal(node.value)
 
     def visit_Hex(self, node: ast.Hex):
-        # literals are validated in Vyper
         typ = node._metadata["type"]
 
         val = node.value
@@ -86,18 +85,17 @@ class ExprVisitor(BaseVisitor):
         assert isinstance(typ, BytesM_T)
 
         bytes_val = bytes.fromhex(val[2:])
-        return bytes_val[: typ.m]
+        return VyperBytesM(bytes_val[: typ.m], typ)
 
     def visit_Str(self, node: ast.Str):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_Bytes(self, node: ast.Bytes):
-        # literals are validated in Vyper
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_NameConstant(self, node: ast.NameConstant):
-        return node.value
+        # Box True/False to VyperBool, None passes through as-is
+        return box_value_from_node(node, node.value)
 
     def visit_Name(self, node: ast.Name):
         if node.id == "self":
@@ -212,8 +210,7 @@ class ExprVisitor(BaseVisitor):
             res = handler(*args, typ=typ)
         else:
             res = handler(*args)
-        validate_value(node, res)
-        return res
+        return box_value_from_node(node, res)
 
     def visit_BinOp(self, node: ast.BinOp):
         left = self.visit(node.left)
@@ -243,8 +240,8 @@ class ExprVisitor(BaseVisitor):
                 self._on_boolop(node, op, evaluated_count, bool(result))
                 return result
 
-        assert isinstance(result, bool)
-        self._on_boolop(node, op, evaluated_count, result)
+        assert isinstance(result, (bool, VyperBool))
+        self._on_boolop(node, op, evaluated_count, bool(result))
         return result
 
     def visit_UnaryOp(self, node: ast.UnaryOp):
@@ -280,7 +277,7 @@ class ExprVisitor(BaseVisitor):
             return self.visit(node.orelse)
 
     def visit_HexBytes(self, node: ast.HexBytes):
-        return node.value
+        return box_value_from_node(node, node.value)
 
     def visit_ExtCall(self, node: ast.ExtCall):
         return self._visit_external_call(node, is_static=False)
@@ -308,15 +305,14 @@ class ExprVisitor(BaseVisitor):
     ):
         assert isinstance(node, ast.Call)
         args = ()
-        typs = ()
         for arg in node.args:
             typ = arg._metadata["type"]
             if isinstance(typ, TYPE_T):
+                # Type arguments (like in convert(x, uint256)) pass the type directly
                 args += (typ.typedef,)
-                typs += (typ,)
             else:
+                # Value arguments are evaluated and boxed with their types
                 args += (self.deep_copy_visit(arg),)
-                typs += (typ,)
         kws = {}
         for kw in node.keywords:
             if kw.arg == "default_return_value":
@@ -329,4 +325,4 @@ class ExprVisitor(BaseVisitor):
                 kws[kw.arg] = kw_typ.typedef
             else:
                 kws[kw.arg] = self.deep_copy_visit(kw.value)
-        return self.generic_call_handler(node, args, kws, typs, target, is_static)
+        return self.generic_call_handler(node, args, kws, target, is_static)
