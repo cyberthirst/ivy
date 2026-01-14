@@ -33,6 +33,12 @@ class EVMCore:
         self.callbacks = callbacks
         self._pending_accounts_to_delete: set[Address] = set()
 
+    def begin_transaction(self) -> None:
+        # EIP-6780: Clear created_accounts at transaction start
+        # This ensures the set is transaction-scoped, not persisted across transactions
+        self._state.created_accounts.clear()
+        self._pending_accounts_to_delete.clear()
+
     def execute_tx(
         self,
         sender: Address,
@@ -42,10 +48,7 @@ class EVMCore:
         is_static: bool = False,
         compiler_data: Optional[CompilerData] = None,
     ):
-        # EIP-6780: Clear created_accounts at transaction start
-        # This ensures the set is transaction-scoped, not persisted across transactions
-        self._state.created_accounts.clear()
-        self._pending_accounts_to_delete.clear()
+        self.begin_transaction()
 
         is_deploy = to == b""
         create_address, code = None, None
@@ -89,16 +92,10 @@ class EVMCore:
 
         assert not self.journal.is_active
 
-        if self.journal.pop_state_committed():
-            self.callbacks.on_state_committed()
-
-        # EIP-6780: Delete accounts marked for deletion at transaction end
-        # Only if transaction succeeded (no error in output)
         if output.error is None:
-            for address in output.accounts_to_delete:
-                del self.state[address]
+            self._pending_accounts_to_delete.update(output.accounts_to_delete)
 
-        self.state.clear_transient_storage()
+        self.finalize_transaction(is_error=output.is_error)
 
         if is_deploy:
             return create_address, output
