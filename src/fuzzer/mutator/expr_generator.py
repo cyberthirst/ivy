@@ -392,27 +392,10 @@ class ExprGenerator:
         self.interface_aliases[interface_type._id] = alias
 
     def _interface_name_for_type(self, typ: InterfaceT) -> str:
-        alias = self.interface_aliases.get(typ._id)
-        if alias:
+        if alias := self.interface_aliases.get(typ._id):
             return alias
-
-        raw_name = typ._id
-        if raw_name.isidentifier():
-            return raw_name
-
-        candidate = raw_name.replace("\\", "/").split("/")[-1]
-        if candidate.endswith((".vyi", ".vy")):
-            candidate = candidate.rsplit(".", 1)[0]
-
-        if candidate.isidentifier():
-            return candidate
-
-        sanitized = "".join(
-            ch if (ch.isalnum() or ch == "_") else "_" for ch in candidate
-        )
-        if sanitized and sanitized[0].isdigit():
-            sanitized = f"iface_{sanitized}"
-        return sanitized or "iface"
+        # Inline interface - _id is already a valid identifier
+        return typ._id
 
     def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.Hex:
         # Hex expects a 0x-prefixed string for fixed-size bytes.

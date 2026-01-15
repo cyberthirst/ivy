@@ -242,7 +242,7 @@ class AstMutator(VyperNodeTransformer):
                 if func_type and isinstance(func_type, ContractFunctionT):
                     self.function_registry.register_function(func_type)
 
-            elif isinstance(item, ast.ImportFrom):
+            elif isinstance(item, (ast.Import, ast.ImportFrom)):
                 for info in item._metadata.get("import_infos", []):
                     iface_type = getattr(info, "_typ", None)
                     if isinstance(iface_type, InterfaceT):
