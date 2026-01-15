@@ -79,7 +79,7 @@ def get_mutator_test_cases():
     return cases
 
 
-@pytest.mark.xfail(reason="mutator WIP - many mutations cause compilation failures")
+@pytest.mark.xfail(reason="mutator WIP - many mutations cause compilation failures", strict=False)
 @pytest.mark.parametrize("source_code,test_id", get_mutator_test_cases())
 def test_mutator_produces_valid_code(source_code: str, test_id: str):
     """Test that the AST mutator produces semantically valid Vyper code.
