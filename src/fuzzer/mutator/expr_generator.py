@@ -1,5 +1,7 @@
-import random
+from __future__ import annotations
 
+import random
+from dataclasses import dataclass
 from typing import Optional, Union
 
 from vyper.ast import nodes as ast
@@ -45,6 +47,17 @@ from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
 
 
+@dataclass
+class ExprGenCtx:
+    target_type: VyperType
+    context: Context
+    depth: int
+    rng: random.Random
+    function_registry: FunctionRegistry
+    mutability: ExprMutability
+    gen: ExprGenerator
+
+
 class ExprGenerator:
     def __init__(
         self,
@@ -83,40 +96,35 @@ class ExprGenerator:
         if depth <= 0 or self.rng.random() > self.CONTINUATION_PROB:
             return self._generate_terminal(target_type, context)
 
-        # Collect strategies via registry and execute with retry
+        ctx = ExprGenCtx(
+            target_type=target_type,
+            context=context,
+            depth=depth,
+            rng=self.rng,
+            function_registry=self.function_registry,
+            mutability=context.current_mutability,
+            gen=self,
+        )
+
+        # Collect strategies via registry
         strategies = self._strategy_registry.collect(
             type_class=type(target_type),
             include_tags=("expr",),
-            context={
-                "target_type": target_type,
-                "context": context,
-                "depth": depth,
-                "rng": self.rng,
-                "gen": self,
-                "function_registry": self.function_registry,
-                "mutability": context.current_mutability,
-            },
+            context={"ctx": ctx},
         )
 
         # Always include literal as a safe fallback if not already in the set
-        # (Registry likely contains it already, but make sure.)
-        # Execution context is passed through executor.
         def _fallback_literal():
             return self._generate_literal(target_type, context)
+
+        # Recursive strategies consume depth
+        ctx.depth -= 1
 
         return self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",  # TODO nested hash maps
             fallback=_fallback_literal,
-            context={
-                "target_type": target_type,
-                "context": context,
-                "depth": depth - 1,  # recursive strategies consume depth
-                "rng": self.rng,
-                "gen": self,
-                "function_registry": self.function_registry,
-                "mutability": context.current_mutability,
-            },
+            context={"ctx": ctx},
         )
 
     def _register_strategies(self) -> None:
@@ -124,58 +132,47 @@ class ExprGenerator:
 
     # Applicability/weight helpers
 
-    def _is_var_ref_applicable(self, **ctx) -> bool:
-        target_type: VyperType = ctx["target_type"]
-        context: Context = ctx["context"]
-        return bool(context.find_matching_vars(target_type))
+    def _is_var_ref_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return bool(ctx.context.find_matching_vars(ctx.target_type))
 
-    def _weight_var_ref(self, **ctx) -> float:
+    def _weight_var_ref(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slightly bias towards var refs when there are many
-        target_type: VyperType = ctx["target_type"]
-        context: Context = ctx["context"]
-        n = len(context.find_matching_vars(target_type))
+        n = len(ctx.context.find_matching_vars(ctx.target_type))
         return 1.0 if n == 0 else min(2.0, 0.5 + 0.1 * n)
 
-    def _is_unary_minus_applicable(self, **ctx) -> bool:
-        target_type: VyperType = ctx["target_type"]
-        return isinstance(target_type, IntegerT) and target_type.is_signed
+    def _is_unary_minus_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return isinstance(ctx.target_type, IntegerT) and ctx.target_type.is_signed
 
-    def _is_func_call_applicable(self, **ctx) -> bool:
+    def _is_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
-        mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
-        if mutability == ExprMutability.CONST:
+        if ctx.mutability == ExprMutability.CONST:
             return False
-        return not ctx["context"].is_module_scope
+        return not ctx.context.is_module_scope
 
-    def _is_subscript_applicable(self, **ctx) -> bool:
-        target_type: VyperType = ctx["target_type"]
-        context: Context = ctx["context"]
-        vars_dict = dict(context.find_matching_vars(None))
-        return bool(find_nested_subscript_bases(target_type, vars_dict, max_steps=3))
+    def _is_subscript_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        vars_dict = dict(ctx.context.find_matching_vars(None))
+        return bool(find_nested_subscript_bases(ctx.target_type, vars_dict, max_steps=3))
 
-    def _is_ifexp_applicable(self, **ctx) -> bool:
+    def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
-        mutability: ExprMutability = ctx.get("mutability", ExprMutability.STATEFUL)
-        return mutability != ExprMutability.CONST
+        return ctx.mutability != ExprMutability.CONST
 
-    def _weight_subscript(self, **ctx) -> float:
-        target_type: VyperType = ctx["target_type"]
-        context: Context = ctx["context"]
+    def _weight_subscript(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slight bias based on number of available bases
-        vars_dict = dict(context.find_matching_vars(None))
-        n = len(find_subscript_bases(target_type, vars_dict))
+        vars_dict = dict(ctx.context.find_matching_vars(None))
+        n = len(find_subscript_bases(ctx.target_type, vars_dict))
         return 1.0 if n == 0 else min(2.5, 0.5 + 0.2 * n)
 
-    # Runner helpers (consume context kwargs)
+    # Runner helpers
 
     @strategy(
         name="expr.literal",
         tags=frozenset({"expr", "terminal"}),
         weight=lambda **_: 0.15,
     )
-    def _run_literal(self, **ctx):
-        return self._generate_literal(ctx["target_type"], ctx["context"])
+    def _run_literal(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_literal(ctx.target_type, ctx.context)
 
     @strategy(
         name="expr.var_ref",
@@ -183,23 +180,19 @@ class ExprGenerator:
         is_applicable="_is_var_ref_applicable",
         weight="_weight_var_ref",
     )
-    def _run_var_ref(self, **ctx):
-        target_type: VyperType = ctx["target_type"]
-        context: Context = ctx["context"]
-        matches = context.find_matching_vars(target_type)
+    def _run_var_ref(self, *, ctx: ExprGenCtx, **_):
+        matches = ctx.context.find_matching_vars(ctx.target_type)
         if not matches:
             return None
-        return self._generate_variable_ref(self.rng.choice(matches), context)
+        return self._generate_variable_ref(self.rng.choice(matches), ctx.context)
 
     @strategy(
         name="expr.arithmetic",
         tags=frozenset({"expr", "recursive"}),
         type_classes=(IntegerT,),
     )
-    def _run_arithmetic(self, **ctx):
-        return self._generate_arithmetic(
-            ctx["target_type"], ctx["context"], ctx["depth"]
-        )
+    def _run_arithmetic(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_arithmetic(ctx.target_type, ctx.context, ctx.depth)
 
     @strategy(
         name="expr.unary_minus",
@@ -207,34 +200,32 @@ class ExprGenerator:
         type_classes=(IntegerT,),
         is_applicable="_is_unary_minus_applicable",
     )
-    def _run_unary_minus(self, **ctx):
-        return self._generate_unary_minus(
-            ctx["target_type"], ctx["context"], ctx["depth"]
-        )
+    def _run_unary_minus(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_unary_minus(ctx.target_type, ctx.context, ctx.depth)
 
     @strategy(
         name="expr.comparison",
         tags=frozenset({"expr", "recursive"}),
         type_classes=(BoolT,),
     )
-    def _run_comparison(self, **ctx):
-        return self._generate_comparison(ctx["context"], ctx["depth"])
+    def _run_comparison(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_comparison(ctx.context, ctx.depth)
 
     @strategy(
         name="expr.boolean_op",
         tags=frozenset({"expr", "recursive"}),
         type_classes=(BoolT,),
     )
-    def _run_boolean_op(self, **ctx):
-        return self._generate_boolean_op(ctx["context"], ctx["depth"])
+    def _run_boolean_op(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_boolean_op(ctx.context, ctx.depth)
 
     @strategy(
         name="expr.not",
         tags=frozenset({"expr", "recursive"}),
         type_classes=(BoolT,),
     )
-    def _run_not(self, **ctx):
-        return self._generate_not(ctx["context"], ctx["depth"])
+    def _run_not(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_not(ctx.context, ctx.depth)
 
     @strategy(
         name="expr.ifexp",
@@ -242,18 +233,16 @@ class ExprGenerator:
         is_applicable="_is_ifexp_applicable",
         weight=lambda **_: 0.3,
     )
-    def _run_ifexp(self, **ctx):
-        return self._generate_ifexp(ctx["target_type"], ctx["context"], ctx["depth"])
+    def _run_ifexp(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_ifexp(ctx.target_type, ctx.context, ctx.depth)
 
     @strategy(
         name="expr.func_call",
         tags=frozenset({"expr", "recursive"}),
         is_applicable="_is_func_call_applicable",
     )
-    def _run_func_call(self, **ctx):
-        return self._generate_func_call(
-            ctx["target_type"], ctx["context"], ctx["depth"]
-        )
+    def _run_func_call(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_func_call(ctx.target_type, ctx.context, ctx.depth)
 
     @strategy(
         name="expr.subscript",
@@ -261,10 +250,8 @@ class ExprGenerator:
         is_applicable="_is_subscript_applicable",
         weight="_weight_subscript",
     )
-    def _run_subscript(self, **ctx):
-        return self._generate_subscript(
-            ctx["target_type"], ctx["context"], ctx["depth"]
-        )
+    def _run_subscript(self, *, ctx: ExprGenCtx, **_):
+        return self._generate_subscript(ctx.target_type, ctx.context, ctx.depth)
 
     def _generate_terminal(
         self, target_type: VyperType, context: Context

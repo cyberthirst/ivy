@@ -1,5 +1,9 @@
+from __future__ import annotations
+
 import random
+from dataclasses import dataclass
 from typing import Optional, Union
+
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -16,6 +20,17 @@ from fuzzer.mutator.strategy import (
     register_decorated,
     strategy,
 )
+
+
+@dataclass
+class StmtGenCtx:
+    context: Context
+    parent: Optional[ast.VyperNode]
+    depth: int
+    return_type: Optional[VyperType]
+    rng: random.Random
+    nest_decay: float
+    gen: StatementGenerator
 
 
 class FreshNameGenerator:
@@ -62,27 +77,24 @@ class StatementGenerator:
     def _register_strategies(self) -> None:
         register_decorated(self._strategy_registry, self)
 
-    def _is_vardecl_applicable(self, **ctx) -> bool:
-        context: Context = ctx["context"]
-        return bool(context.is_module_scope)
+    def _is_vardecl_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        return bool(ctx.context.is_module_scope)
 
-    def _is_assign_applicable(self, **ctx) -> bool:
-        context: Context = ctx["context"]
-        if context.is_module_scope:
+    def _is_assign_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
             return False
-        return bool(self.get_writable_variables(context))
+        return bool(self.get_writable_variables(ctx.context))
 
-    def _is_if_applicable(self, **ctx) -> bool:
-        context: Context = ctx["context"]
-        return not context.is_module_scope
+    def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        return not ctx.context.is_module_scope
 
-    def _weight_vardecl(self, **ctx) -> float:
+    def _weight_vardecl(self, *, ctx: StmtGenCtx, **_) -> float:
         return float(self.statement_weights.get("vardecl", 1.0))
 
-    def _weight_assign(self, **ctx) -> float:
+    def _weight_assign(self, *, ctx: StmtGenCtx, **_) -> float:
         return float(self.statement_weights.get("assign", 1.0))
 
-    def _weight_if(self, **ctx) -> float:
+    def _weight_if(self, *, ctx: StmtGenCtx, **_) -> float:
         return float(self.statement_weights.get("if", 1.0))
 
     @strategy(
@@ -91,8 +103,8 @@ class StatementGenerator:
         is_applicable="_is_vardecl_applicable",
         weight="_weight_vardecl",
     )
-    def _run_stmt_vardecl(self, **ctx):
-        return self.create_vardecl_and_register(ctx["context"], ctx.get("parent"))
+    def _run_stmt_vardecl(self, *, ctx: StmtGenCtx, **_):
+        return self.create_vardecl_and_register(ctx.context, ctx.parent)
 
     @strategy(
         name="stmt.assign",
@@ -100,8 +112,8 @@ class StatementGenerator:
         is_applicable="_is_assign_applicable",
         weight="_weight_assign",
     )
-    def _run_stmt_assign(self, **ctx):
-        return self.generate_assign(ctx["context"], ctx.get("parent"))
+    def _run_stmt_assign(self, *, ctx: StmtGenCtx, **_):
+        return self.generate_assign(ctx.context, ctx.parent)
 
     @strategy(
         name="stmt.if",
@@ -109,9 +121,8 @@ class StatementGenerator:
         is_applicable="_is_if_applicable",
         weight="_weight_if",
     )
-    def _run_stmt_if(self, **ctx):
-        depth = ctx.get("depth", 0)
-        return self.generate_if(ctx["context"], ctx.get("parent"), depth)
+    def _run_stmt_if(self, *, ctx: StmtGenCtx, **_):
+        return self.generate_if(ctx.context, ctx.parent, ctx.depth)
 
     def _create_var_info(
         self,
@@ -305,30 +316,27 @@ class StatementGenerator:
         else:
             include_tags = ("terminal",)  # Only terminal (assign, vardecl)
 
-        # Collect available statement strategies and execute with retry
+        ctx = StmtGenCtx(
+            context=context,
+            parent=parent,
+            depth=depth,
+            return_type=return_type,
+            rng=self.rng,
+            nest_decay=self.nest_decay,
+            gen=self,
+        )
+
+        # Collect available statement strategies
         strategies = self._strategy_registry.collect(
             include_tags=include_tags,
-            context={
-                "context": context,
-                "parent": parent,
-                "depth": depth,
-                "return_type": return_type,
-                "rng": self.rng,
-            },
+            context={"ctx": ctx},
         )
 
         return self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",
             fallback=lambda: ast.Pass(),
-            context={
-                "context": context,
-                "parent": parent,
-                "depth": depth,
-                "return_type": return_type,
-                "rng": self.rng,
-                "nest_decay": self.nest_decay,
-            },
+            context={"ctx": ctx},
         )
 
     def _generate_simple_statement(
