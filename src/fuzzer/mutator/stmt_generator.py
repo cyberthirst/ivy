@@ -12,7 +12,7 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -24,7 +24,7 @@ from fuzzer.mutator.strategy import (
 
 @dataclass
 class StmtGenCtx:
-    context: Context
+    context: GenerationContext
     parent: Optional[ast.VyperNode]
     depth: int
     return_type: Optional[VyperType]
@@ -172,7 +172,7 @@ class StatementGenerator:
             nesting=nesting, skip=skip, size_budget=size_budget
         )
 
-    def _generate_varinfo(self, context: Context) -> tuple[str, VarInfo]:
+    def _generate_varinfo(self, context: GenerationContext) -> tuple[str, VarInfo]:
         """Generate a random variable with VarInfo.
 
         Returns:
@@ -247,7 +247,7 @@ class StatementGenerator:
     def inject_statements(
         self,
         body: list,
-        context: Context,
+        context: GenerationContext,
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
         n_stmts: Optional[int] = None,
@@ -349,7 +349,7 @@ class StatementGenerator:
         return ast.Pass()
 
     def generate_if(
-        self, context: Context, parent: Optional[ast.VyperNode], depth: int
+        self, context: GenerationContext, parent: Optional[ast.VyperNode], depth: int
     ) -> ast.If:
         test_expr = self.expr_generator.generate(BoolT(), context, depth=2)
 
@@ -375,7 +375,7 @@ class StatementGenerator:
         last_stmt = body[-1]
         return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
 
-    def get_writable_variables(self, context: Context) -> list[tuple[str, VarInfo]]:
+    def get_writable_variables(self, context: GenerationContext) -> list[tuple[str, VarInfo]]:
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
 

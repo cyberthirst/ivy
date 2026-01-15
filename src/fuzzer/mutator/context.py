@@ -44,7 +44,7 @@ class Scope:
 
 
 @dataclass
-class Context:
+class GenerationContext:
     current_scope: Scope = field(default_factory=lambda: Scope(ScopeType.MODULE))
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)

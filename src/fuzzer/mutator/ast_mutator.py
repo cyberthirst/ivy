@@ -13,7 +13,7 @@ from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.candidate_selector import CandidateSelector
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
-from fuzzer.mutator.context import Context, ScopeType, state_to_expr_mutability
+from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
 from fuzzer.mutator.strategy import StrategyRegistry
@@ -109,7 +109,7 @@ class AstMutator(VyperNodeTransformer):
         self.max_mutations = max_mutations
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
-        self.context = Context()
+        self.context = GenerationContext()
         self.name_generator = FreshNameGenerator()
         self.literal_generator = LiteralGenerator(rng)
         self.value_mutator = ValueMutator(rng)
@@ -177,7 +177,7 @@ class AstMutator(VyperNodeTransformer):
     def reset_state(self) -> None:
         """Reset all per-mutation internal state to a clean baseline."""
         self._mutation_targets = set()
-        self.context = Context()
+        self.context = GenerationContext()
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
         self.name_generator.counter = 0
         self.type_generator.struct_counter = 0

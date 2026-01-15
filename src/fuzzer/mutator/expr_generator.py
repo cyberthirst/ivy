@@ -26,7 +26,7 @@ from vyper.semantics.analysis.base import DataLocation, VarInfo
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator.literal_generator import LiteralGenerator
-from fuzzer.mutator.context import Context, ExprMutability
+from fuzzer.mutator.context import GenerationContext, ExprMutability
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
@@ -50,7 +50,7 @@ from fuzzer.type_generator import TypeGenerator
 @dataclass
 class ExprGenCtx:
     target_type: VyperType
-    context: Context
+    context: GenerationContext
     depth: int
     rng: random.Random
     function_registry: FunctionRegistry
@@ -86,7 +86,7 @@ class ExprGenerator:
     CONTINUATION_PROB = 0.2
 
     def generate(
-        self, target_type: VyperType, context: Context, depth: int = 3
+        self, target_type: VyperType, context: GenerationContext, depth: int = 3
     ) -> ast.VyperNode:
         # TODO we probably need a special case also for tuples
         if isinstance(target_type, StructT):
@@ -254,7 +254,7 @@ class ExprGenerator:
         return self._generate_subscript(ctx.target_type, ctx.context, ctx.depth)
 
     def _generate_terminal(
-        self, target_type: VyperType, context: Context
+        self, target_type: VyperType, context: GenerationContext
     ) -> ast.VyperNode:
         if isinstance(target_type, StructT):
             return self._generate_struct(target_type, context, depth=0)
@@ -267,14 +267,14 @@ class ExprGenerator:
             return self._generate_literal(target_type, context)
 
     def _generate_literal(
-        self, target_type: VyperType, context: Context
+        self, target_type: VyperType, context: GenerationContext
     ) -> ast.VyperNode:
         """Generate AST node for a literal value of the given type."""
         value = self.literal_generator.generate(target_type)
         return ast_builder.literal(value, target_type)
 
     def random_var_ref(
-        self, target_type: VyperType, context: Context
+        self, target_type: VyperType, context: GenerationContext
     ) -> Optional[Union[ast.Attribute, ast.Name]]:
         """Pick a random variable matching target_type, returns proper AST ref."""
         matches = context.find_matching_vars(target_type)
@@ -283,7 +283,7 @@ class ExprGenerator:
         return self._generate_variable_ref(self.rng.choice(matches), context)
 
     def _generate_variable_ref(
-        self, target: Union[str, tuple[str, VarInfo]], context: Context
+        self, target: Union[str, tuple[str, VarInfo]], context: GenerationContext
     ) -> Union[ast.Attribute, ast.Name]:
         if isinstance(target, str):
             name = target
@@ -301,7 +301,7 @@ class ExprGenerator:
         return node
 
     def _generate_subscript(
-        self, target_type: VyperType, context: Context, depth: int
+        self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> Optional[ast.Subscript]:
         vars_dict = dict(context.find_matching_vars(None))
         bases = find_nested_subscript_bases(target_type, vars_dict, max_steps=3)
@@ -326,7 +326,7 @@ class ExprGenerator:
         return node
 
     def _generate_ifexp(
-        self, target_type: VyperType, context: Context, depth: int
+        self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> ast.IfExp:
         # Condition must be bool; branches must yield the same type
         test = self.generate(BoolT(), context, depth)
@@ -350,7 +350,7 @@ class ExprGenerator:
         self,
         base_node: ast.VyperNode,
         seq_t: _SequenceT,
-        context: Context,
+        context: GenerationContext,
         depth: int,
     ) -> ast.VyperNode:
         """Generate an index expression for arrays with three modes:
@@ -458,7 +458,7 @@ class ExprGenerator:
         base_node: ast.VyperNode,
         base_type: VyperType,
         target_type: VyperType,
-        context: Context,
+        context: GenerationContext,
         depth: int,
         max_steps: int = 3,
     ) -> Optional[tuple[ast.VyperNode, VyperType]]:
@@ -515,7 +515,7 @@ class ExprGenerator:
         self,
         base_node: ast.VyperNode,
         base_type: VyperType,
-        context: Context,
+        context: GenerationContext,
         depth: int,
         max_steps: int = 2,
     ) -> tuple[ast.VyperNode, VyperType]:
@@ -551,7 +551,7 @@ class ExprGenerator:
         return node, cur_t
 
     def _generate_arithmetic(
-        self, target_type: IntegerT, context: Context, depth: int
+        self, target_type: IntegerT, context: GenerationContext, depth: int
     ) -> ast.BinOp:
         op_classes = [ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod]
         op_class = self.rng.choice(op_classes)
@@ -573,7 +573,7 @@ class ExprGenerator:
         node._metadata["type"] = target_type
         return node
 
-    def _generate_comparison(self, context: Context, depth: int) -> ast.Compare:
+    def _generate_comparison(self, context: GenerationContext, depth: int) -> ast.Compare:
         op_classes = [ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq]
         op_class = self.rng.choice(op_classes)
 
@@ -602,7 +602,7 @@ class ExprGenerator:
         node._metadata["type"] = BoolT()
         return node
 
-    def _generate_boolean_op(self, context: Context, depth: int) -> ast.BoolOp:
+    def _generate_boolean_op(self, context: GenerationContext, depth: int) -> ast.BoolOp:
         op_classes = [ast.And, ast.Or]
         op_class = self.rng.choice(op_classes)
 
@@ -612,21 +612,21 @@ class ExprGenerator:
         node._metadata["type"] = BoolT()
         return node
 
-    def _generate_not(self, context: Context, depth: int) -> ast.UnaryOp:
+    def _generate_not(self, context: GenerationContext, depth: int) -> ast.UnaryOp:
         operand = self.generate(BoolT(), context, depth)
         node = ast.UnaryOp(op=ast.Not(), operand=operand)
         node._metadata["type"] = BoolT()
         return node
 
     def _generate_unary_minus(
-        self, target_type: IntegerT, context: Context, depth: int
+        self, target_type: IntegerT, context: GenerationContext, depth: int
     ) -> ast.UnaryOp:
         operand = self.generate(target_type, context, depth)
         node = ast.UnaryOp(op=ast.USub(), operand=operand)
         node._metadata["type"] = target_type
         return node
 
-    def _generate_struct(self, target_type, context: Context, depth: int) -> ast.Call:
+    def _generate_struct(self, target_type, context: GenerationContext, depth: int) -> ast.Call:
         assert isinstance(target_type, StructT)
 
         # Create the struct constructor call
@@ -642,7 +642,7 @@ class ExprGenerator:
         return call_node
 
     def _generate_func_call(
-        self, target_type: VyperType, context: Context, depth: int
+        self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         """Generate a function call, selecting between user functions and builtins."""
         if not self.function_registry:
@@ -785,7 +785,7 @@ class ExprGenerator:
         name: str,
         builtin,
         target_type: VyperType,
-        context: Context,
+        context: GenerationContext,
         depth: int,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         # func node
