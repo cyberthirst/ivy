@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import random
 from array import array
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
@@ -19,21 +18,39 @@ from fuzzer.trace_types import (
     SetBalanceTrace,
 )
 
-from fuzzer.runtime_engine.call_generator import CallGenerator
+from fuzzer.runtime_engine.call_generator import (
+    CallGenerator,
+    CallKey,
+    Corpus,
+    GeneratedCall,
+)
 from fuzzer.runtime_engine.timeout import CallTimeout, call_with_timeout
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
 
 @dataclass
 class HarnessConfig:
-    # Harness behavior
-    max_fuzz_calls: int = 100
+    # Call budget limits
+    max_total_calls: int = 1000
+    max_enumeration_calls: int = 200
+    max_replay_calls: int = 200
+    max_fuzz_calls: int = 600
+
+    # Plateau and timeout behavior
     plateau_calls: int = 20
     call_timeout_s: float = 5.0
+    max_timeouts_per_func: int = 3
+
+    # Coverage map
     map_size: int = 1 << 16
+
     # Runner behavior
-    collect_storage_dumps: bool = True
+    collect_storage_dumps: bool = False  # Disabled during exploration
     no_solc_json: bool = True
+
+    # Corpus settings
+    max_seeds_per_func: int = 16
+    max_seeds_total: int = 512
 
 
 @dataclass
@@ -43,6 +60,25 @@ class HarnessStats:
     fuzz_calls: int = 0
     timeouts: int = 0
     new_coverage_calls: int = 0
+    state_modified_calls: int = 0
+    interesting_calls: int = 0
+    skipped_replay: int = 0
+
+
+@dataclass
+class CallOutcome:
+    new_cov: int
+    state_modified: bool
+    timed_out: bool
+    trace_result: Optional[TraceResult]
+
+    @property
+    def is_interesting(self) -> bool:
+        return self.new_cov > 0 or self.state_modified
+
+    @property
+    def is_progress(self) -> bool:
+        return self.new_cov > 0 or self.state_modified
 
 
 @dataclass
@@ -100,6 +136,14 @@ class RuntimeCoverageTracker:
         return new_count
 
 
+@dataclass
+class FunctionInfo:
+    addr: str
+    fn_name: str
+    func_t: Any
+    timeout_count: int = 0
+
+
 class RuntimeFuzzEngine:
     def __init__(
         self,
@@ -128,9 +172,11 @@ class RuntimeFuzzEngine:
             deployed_contracts: Dict[str, Any] = {}
             trace_index = 0
 
+            # Execute dependencies
             for dep_scenario in scenario.dependencies:
                 self.runner._execute_dependency_scenario(dep_scenario)
 
+            # Execute deployment and setup traces
             for trace in scenario.traces:
                 if isinstance(trace, DeploymentTrace):
                     finalized_traces.append(trace)
@@ -156,33 +202,57 @@ class RuntimeFuzzEngine:
                     trace_results.append(trace_result)
                     trace_index += 1
 
-            ivy.env.reset_execution_metadata()
+            # Build function info with timeout tracking
+            all_functions: List[FunctionInfo] = []
+            for addr, contract in deployed_contracts.items():
+                for fn_name, func_t in self.call_generator.get_external_functions(
+                    contract
+                ):
+                    all_functions.append(FunctionInfo(addr, fn_name, func_t))
 
+            # Create corpus for mutation-based fuzzing
+            corpus = Corpus(
+                max_seeds_per_func=self.config.max_seeds_per_func,
+                max_seeds_total=self.config.max_seeds_total,
+            )
+
+            # Track total calls across all phases
+            total_calls = [0]  # Use list for mutable reference in closures
+
+            def calls_remaining() -> int:
+                return self.config.max_total_calls - total_calls[0]
+
+            # Phase 1: Enumeration
             self._seed_enumerate_externals(
-                deployed_contracts,
-                self.runner,
+                all_functions,
                 tracker,
                 finalized_traces,
                 trace_results,
                 stats,
+                corpus,
+                total_calls,
             )
 
+            # Phase 2: Replay parent traces (bounded, no deepcopy)
             self._seed_replay_parent_traces(
                 scenario,
-                self.runner,
                 tracker,
                 finalized_traces,
                 trace_results,
                 stats,
+                corpus,
+                total_calls,
             )
 
+            # Phase 3: Corpus-guided fuzzing with plateau escape
             self._fuzz_calls(
-                deployed_contracts,
-                self.runner,
+                all_functions,
                 tracker,
                 finalized_traces,
                 trace_results,
                 stats,
+                corpus,
+                total_calls,
             )
 
             ivy_result = ScenarioResult(results=trace_results)
@@ -199,134 +269,302 @@ class RuntimeFuzzEngine:
                 runtime_edge_ids=tracker._seen,
             )
 
-    def _execute_trace_with_timeout(
+    def _execute_call_and_measure(
         self,
-        runner: IvyScenarioRunner,
         trace: CallTrace,
         trace_index: int,
-        use_python_args: bool,
-    ) -> Optional[TraceResult]:
-        with call_with_timeout(self.config.call_timeout_s):
-            trace_result = runner.execute_trace(trace, trace_index, use_python_args)
+        tracker: RuntimeCoverageTracker,
+        use_python_args: bool = True,
+    ) -> CallOutcome:
+        """Execute a single call with per-call metadata reset and measurement."""
+        # Reset metadata BEFORE the call
+        ivy.env.reset_execution_metadata()
 
-        if isinstance(trace_result.result, CallResult):
-            if isinstance(trace_result.result.error, CallTimeout):
-                return None
+        # Execute with timeout
+        timed_out = False
+        trace_result: Optional[TraceResult] = None
 
-        return trace_result
+        try:
+            with call_with_timeout(self.config.call_timeout_s):
+                trace_result = self.runner.execute_trace(
+                    trace, trace_index, use_python_args
+                )
+        except Exception:
+            timed_out = True
 
-    def _get_coverage_delta(self, tracker: RuntimeCoverageTracker) -> int:
+        if trace_result is not None:
+            if isinstance(trace_result.result, CallResult):
+                if isinstance(trace_result.result.error, CallTimeout):
+                    timed_out = True
+                    trace_result = None
+
+        # Read per-call metadata (now represents only THIS call)
         metadata = ivy.env.execution_metadata
         edge_ids = self.edge_map.hash_metadata(metadata)
-        new_count = tracker.merge(edge_ids)
-        return new_count
+        new_cov = tracker.merge(edge_ids)
+        state_modified = metadata.state_modified
+
+        return CallOutcome(
+            new_cov=new_cov,
+            state_modified=state_modified,
+            timed_out=timed_out,
+            trace_result=trace_result,
+        )
 
     def _seed_enumerate_externals(
         self,
-        deployed_contracts: Dict[str, Any],
-        runner: IvyScenarioRunner,
+        all_functions: List[FunctionInfo],
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
         trace_results: List[TraceResult],
         stats: HarnessStats,
+        corpus: Corpus,
+        total_calls: List[int],
     ) -> None:
-        for addr, contract in deployed_contracts.items():
-            functions = self.call_generator.get_external_functions(contract)
-            for fn_name, func_t in functions:
-                generated = self.call_generator.generate_call_for_function(
-                    addr, fn_name, func_t
-                )
-                trace = self.call_generator.call_trace_from_generated(generated, addr)
+        """Phase 1: Touch each external function once to seed corpus."""
+        # Randomize order to avoid bias
+        shuffled = list(all_functions)
+        self.rng.shuffle(shuffled)
 
-                trace_result = self._execute_trace_with_timeout(
-                    runner, trace, len(finalized_traces), True
-                )
-                stats.enumeration_calls += 1
+        for func_info in shuffled:
+            if stats.enumeration_calls >= self.config.max_enumeration_calls:
+                break
+            if total_calls[0] >= self.config.max_total_calls:
+                break
 
-                if trace_result is not None:
+            generated = self.call_generator.generate_call_for_function(
+                func_info.addr, func_info.fn_name, func_info.func_t
+            )
+            trace = self.call_generator.call_trace_from_generated(
+                generated, func_info.addr
+            )
+
+            outcome = self._execute_call_and_measure(
+                trace, len(finalized_traces), tracker
+            )
+            stats.enumeration_calls += 1
+            total_calls[0] += 1
+
+            if outcome.timed_out:
+                stats.timeouts += 1
+                func_info.timeout_count += 1
+                # Still seed corpus with low weight for timeout functions
+                corpus.add_seed(generated, score=0, step=total_calls[0])
+            else:
+                # Calculate score: new_cov + bonus for state_modified
+                score = outcome.new_cov + (1 if outcome.state_modified else 0)
+
+                # Always seed corpus (even if not interesting) to ensure coverage
+                corpus.add_seed(generated, score=max(score, 1), step=total_calls[0])
+
+                if outcome.new_cov > 0:
+                    stats.new_coverage_calls += 1
+                if outcome.state_modified:
+                    stats.state_modified_calls += 1
+
+                # Only retain in finalized traces if interesting
+                if outcome.is_interesting and outcome.trace_result is not None:
                     finalized_traces.append(trace)
-                    trace_results.append(trace_result)
-                    new_cov = self._get_coverage_delta(tracker)
-                    if new_cov > 0:
-                        stats.new_coverage_calls += 1
-                else:
-                    stats.timeouts += 1
+                    trace_results.append(outcome.trace_result)
+                    stats.interesting_calls += 1
 
     def _seed_replay_parent_traces(
         self,
         scenario: Scenario,
-        runner: IvyScenarioRunner,
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
         trace_results: List[TraceResult],
         stats: HarnessStats,
+        corpus: Corpus,
+        total_calls: List[int],
     ) -> None:
-        for trace in scenario.traces:
-            if not isinstance(trace, CallTrace):
-                continue
+        """Phase 2: Replay parent CallTraces (bounded, no deepcopy)."""
+        call_traces = [t for t in scenario.traces if isinstance(t, CallTrace)]
 
-            trace_copy = deepcopy(trace)
-            trace_result = self._execute_trace_with_timeout(
-                runner, trace_copy, len(finalized_traces), scenario.use_python_args
+        # Cap replay to budget
+        max_replay = min(
+            len(call_traces),
+            self.config.max_replay_calls,
+            self.config.max_total_calls - total_calls[0],
+        )
+
+        # Replay from the beginning (prefix replay for state prerequisites)
+        for i, trace in enumerate(call_traces[:max_replay]):
+            if total_calls[0] >= self.config.max_total_calls:
+                break
+
+            # NO deepcopy - traces are not mutated during execution
+            outcome = self._execute_call_and_measure(
+                trace, len(finalized_traces), tracker, scenario.use_python_args
             )
             stats.replay_calls += 1
+            total_calls[0] += 1
 
-            if trace_result is not None:
-                finalized_traces.append(trace_copy)
-                trace_results.append(trace_result)
-                new_cov = self._get_coverage_delta(tracker)
-                if new_cov > 0:
-                    stats.new_coverage_calls += 1
-            else:
+            if outcome.timed_out:
                 stats.timeouts += 1
+                continue
+
+            if outcome.new_cov > 0:
+                stats.new_coverage_calls += 1
+            if outcome.state_modified:
+                stats.state_modified_calls += 1
+
+            # Only retain interesting replayed traces
+            if outcome.is_interesting and outcome.trace_result is not None:
+                finalized_traces.append(trace)
+                trace_results.append(outcome.trace_result)
+                stats.interesting_calls += 1
+
+                # Add to corpus if we have python_args to reconstruct GeneratedCall
+                if trace.python_args and trace.function_name:
+                    addr = trace.call_args.get("to", "")
+                    generated = GeneratedCall(
+                        contract_address=addr,
+                        function_name=trace.function_name,
+                        args=trace.python_args.get("args", []),
+                        kwargs={"value": trace.call_args.get("value", 0)},
+                        func_t=None,  # May not have type info from parent
+                    )
+                    score = outcome.new_cov + (1 if outcome.state_modified else 0)
+                    corpus.add_seed(generated, score=score, step=total_calls[0])
+            else:
+                stats.skipped_replay += 1
 
     def _fuzz_calls(
         self,
-        deployed_contracts: Dict[str, Any],
-        runner: IvyScenarioRunner,
+        all_functions: List[FunctionInfo],
         tracker: RuntimeCoverageTracker,
         finalized_traces: List[Any],
         trace_results: List[TraceResult],
         stats: HarnessStats,
+        corpus: Corpus,
+        total_calls: List[int],
     ) -> None:
-        if not deployed_contracts:
-            return
-
-        contract_list = list(deployed_contracts.items())
-        all_functions: List[tuple] = []
-        for addr, contract in contract_list:
-            for fn_name, func_t in self.call_generator.get_external_functions(contract):
-                all_functions.append((addr, fn_name, func_t))
-
+        """Phase 3: Corpus-guided fuzzing with tiered plateau escape."""
         if not all_functions:
             return
 
-        consecutive_no_coverage = 0
-        for _ in range(self.config.max_fuzz_calls):
-            if consecutive_no_coverage >= self.config.plateau_calls:
+        # Build lookup for function info
+        func_lookup: Dict[CallKey, FunctionInfo] = {}
+        for fi in all_functions:
+            func_lookup[(fi.addr, fi.fn_name)] = fi
+
+        # Filter to functions that haven't exceeded timeout threshold
+        def get_available_functions() -> List[FunctionInfo]:
+            return [
+                fi
+                for fi in all_functions
+                if fi.timeout_count < self.config.max_timeouts_per_func
+            ]
+
+        consecutive_no_progress = 0
+        plateau_level = 0  # 0=normal, 1=switch seed, 2=switch func, 3=havoc, 4=fresh
+
+        fuzz_step = 0
+        while (
+            stats.fuzz_calls < self.config.max_fuzz_calls
+            and total_calls[0] < self.config.max_total_calls
+        ):
+            fuzz_step += 1
+            available_funcs = get_available_functions()
+            if not available_funcs:
                 break
 
-            addr, fn_name, func_t = self.rng.choice(all_functions)
-            generated = self.call_generator.generate_call_for_function(
-                addr, fn_name, func_t
-            )
-            generated = self.call_generator.mutate_call(generated)
-            trace = self.call_generator.call_trace_from_generated(generated, addr)
+            # Plateau escape logic
+            if consecutive_no_progress >= self.config.plateau_calls:
+                plateau_level = min(plateau_level + 1, 4)
+                consecutive_no_progress = 0
 
-            trace_result = self._execute_trace_with_timeout(
-                runner, trace, len(finalized_traces), True
+            generated: Optional[GeneratedCall] = None
+            func_info: Optional[FunctionInfo] = None
+
+            if plateau_level == 0:
+                # Normal: pick seed from corpus and mutate single arg
+                seed = corpus.get_any_seed(self.rng)
+                if seed and seed.call.func_t is not None:
+                    seed.times_mutated += 1
+                    seed.last_used_step = fuzz_step
+                    generated = self.call_generator.mutate_single_arg(seed.call)
+                    key = (seed.call.contract_address, seed.call.function_name)
+                    func_info = func_lookup.get(key)
+            elif plateau_level == 1:
+                # Switch seed: try different seed from same function
+                seed = corpus.get_any_seed(self.rng)
+                if seed:
+                    key = (seed.call.contract_address, seed.call.function_name)
+                    other_seed = corpus.get_seed_for_func(key, self.rng)
+                    if other_seed and other_seed is not seed:
+                        other_seed.times_mutated += 1
+                        generated = self.call_generator.mutate_single_arg(other_seed.call)
+                    else:
+                        generated = self.call_generator.mutate_call(seed.call)
+                    func_info = func_lookup.get(key)
+            elif plateau_level == 2:
+                # Switch function: different function in corpus
+                keys = list(corpus.seeds_by_func.keys())
+                if keys:
+                    key = self.rng.choice(keys)
+                    seed = corpus.get_seed_for_func(key, self.rng)
+                    if seed:
+                        seed.times_mutated += 1
+                        generated = self.call_generator.mutate_single_arg(seed.call)
+                        func_info = func_lookup.get(key)
+            elif plateau_level == 3:
+                # Havoc: mutate multiple args aggressively
+                seed = corpus.get_any_seed(self.rng)
+                if seed and seed.call.func_t is not None:
+                    seed.times_mutated += 1
+                    generated = self.call_generator.mutate_havoc(seed.call)
+                    key = (seed.call.contract_address, seed.call.function_name)
+                    func_info = func_lookup.get(key)
+            else:
+                # Fresh random: generate entirely new call (reset plateau)
+                func_info = self.rng.choice(available_funcs)
+                generated = self.call_generator.generate_call_for_function(
+                    func_info.addr, func_info.fn_name, func_info.func_t
+                )
+                plateau_level = 0
+
+            # Fallback: generate fresh call if no corpus seed available
+            if generated is None or func_info is None:
+                func_info = self.rng.choice(available_funcs)
+                generated = self.call_generator.generate_call_for_function(
+                    func_info.addr, func_info.fn_name, func_info.func_t
+                )
+
+            trace = self.call_generator.call_trace_from_generated(
+                generated, func_info.addr
+            )
+
+            outcome = self._execute_call_and_measure(
+                trace, len(finalized_traces), tracker
             )
             stats.fuzz_calls += 1
+            total_calls[0] += 1
 
-            if trace_result is not None:
-                finalized_traces.append(trace)
-                trace_results.append(trace_result)
-                new_cov = self._get_coverage_delta(tracker)
-                if new_cov > 0:
-                    stats.new_coverage_calls += 1
-                    consecutive_no_coverage = 0
-                else:
-                    consecutive_no_coverage += 1
-            else:
+            if outcome.timed_out:
                 stats.timeouts += 1
-                consecutive_no_coverage += 1
+                func_info.timeout_count += 1
+                consecutive_no_progress += 1
+                continue
+
+            if outcome.new_cov > 0:
+                stats.new_coverage_calls += 1
+            if outcome.state_modified:
+                stats.state_modified_calls += 1
+
+            if outcome.is_progress:
+                consecutive_no_progress = 0
+                plateau_level = 0  # Reset plateau on progress
+
+                # Add successful call to corpus
+                score = outcome.new_cov + (1 if outcome.state_modified else 0)
+                corpus.add_seed(generated, score=score, step=fuzz_step)
+            else:
+                consecutive_no_progress += 1
+
+            # Only retain interesting traces
+            if outcome.is_interesting and outcome.trace_result is not None:
+                finalized_traces.append(trace)
+                trace_results.append(outcome.trace_result)
+                stats.interesting_calls += 1
