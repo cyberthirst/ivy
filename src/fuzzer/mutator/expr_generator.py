@@ -27,6 +27,7 @@ from fuzzer.mutator.literal_generator import LiteralGenerator
 from fuzzer.mutator.context import Context, ExprMutability
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
+from fuzzer.mutator import ast_builder
 from fuzzer.mutator.strategy import (
     Strategy,
     StrategyRegistry,
@@ -51,21 +52,6 @@ class ExprGenerator:
         self.function_registry = function_registry
         self.interface_registry = interface_registry
         self.type_generator = type_generator
-
-        # Build dispatch table for efficient type-to-AST conversion
-        self._ast_builders = {
-            IntegerT: self._int_to_ast,
-            BoolT: self._bool_to_ast,
-            AddressT: self._address_to_ast,
-            BytesM_T: self._bytesm_to_ast,
-            BytesT: self._bytes_to_ast,
-            StringT: self._string_to_ast,
-            SArrayT: self._array_to_ast,
-            DArrayT: self._array_to_ast,
-            TupleT: self._tuple_to_ast,
-            StructT: self._struct_to_ast,
-            DecimalT: self._decimal_to_ast,
-        }
 
         self._strategy_registry = StrategyRegistry()
         self._strategy_selector = StrategySelector(self.rng)
@@ -347,83 +333,7 @@ class ExprGenerator:
     ) -> ast.VyperNode:
         """Generate AST node for a literal value of the given type."""
         value = self.literal_generator.generate(target_type)
-        return self._value_to_ast(value, target_type)
-
-    def _value_to_ast(self, value, typ: VyperType) -> ast.VyperNode:
-        """Convert a Python value to an AST node"""
-        builder = self._ast_builders.get(type(typ))
-        if builder:
-            return builder(value, typ)
-        raise NotImplementedError(
-            f"Value to AST conversion not implemented for {type(typ).__name__}"
-        )
-
-    def _int_to_ast(self, value: int, typ: IntegerT) -> ast.Int:
-        node = ast.Int(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _bool_to_ast(self, value: bool, typ: BoolT) -> ast.NameConstant:
-        node = ast.NameConstant(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _address_to_ast(self, value: str, typ: AddressT) -> ast.Hex:
-        # Hex node expects string value
-        if not value.startswith("0x"):
-            value = f"0x{value}"
-        node = ast.Hex(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _bytesm_to_ast(self, value: bytes, typ: BytesM_T) -> ast.HexBytes:
-        # HexBytes expects bytes value
-        node = ast.HexBytes(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _bytes_to_ast(self, value: bytes, typ: BytesT) -> ast.Bytes:
-        # Bytes expects bytes value
-        node = ast.Bytes(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _string_to_ast(self, value: str, typ: StringT) -> ast.Str:
-        node = ast.Str(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _decimal_to_ast(self, value, typ: DecimalT) -> ast.Decimal:
-        node = ast.Decimal(value=value)
-        node._metadata["type"] = typ
-        return node
-
-    def _array_to_ast(self, value: list, typ) -> ast.List:
-        """Handle both SArrayT and DArrayT - elements must be AST nodes."""
-        elements = [self._value_to_ast(v, typ.value_type) for v in value]
-        node = ast.List(elements=elements)
-        node._metadata["type"] = typ
-        return node
-
-    def _tuple_to_ast(self, value: tuple, typ: TupleT) -> ast.Tuple:
-        """Handle TupleT - elements must be AST nodes."""
-        elements = [self._value_to_ast(v, t) for v, t in zip(value, typ.member_types)]
-        node = ast.Tuple(elements=elements)
-        node._metadata["type"] = typ
-        return node
-
-    def _struct_to_ast(self, value: dict, typ: StructT) -> ast.Call:
-        """Generate struct constructor call from dict value."""
-        call_node = ast.Call(func=ast.Name(id=typ._id), args=[], keywords=[])
-
-        for field_name, field_value in value.items():
-            field_type = typ.members[field_name]
-            field_expr = self._value_to_ast(field_value, field_type)
-            keyword = ast.keyword(arg=field_name, value=field_expr)
-            call_node.keywords.append(keyword)
-
-        call_node._metadata["type"] = typ
-        return call_node
+        return ast_builder.literal(value, target_type)
 
     def random_var_ref(
         self, target_type: VyperType, context: Context
@@ -582,7 +492,7 @@ class ExprGenerator:
         def _small_literal_for_dynarray():
             # very small indices [0..2]
             val = self.rng.randint(0, 2)
-            return self._int_to_ast(val, idx_t)
+            return ast_builder.literal(val, idx_t)
 
         # Helper: generate random uint256 index expression
         def _random_uint_index():
@@ -601,8 +511,8 @@ class ExprGenerator:
             len_call._metadata = getattr(len_call, "_metadata", {})
             len_call._metadata["type"] = IntegerT(False, 256)
 
-            zero = self._generate_uint256_literal(0)
-            one = self._generate_uint256_literal(1)
+            zero = ast_builder.uint256_literal(0)
+            one = ast_builder.uint256_literal(1)
 
             len_gt_zero = ast.Compare(
                 left=len_call,
@@ -643,7 +553,7 @@ class ExprGenerator:
                     reason="generated out-of-bounds array index",
                 )
             )
-            return self._int_to_ast(val, idx_t)
+            return ast_builder.literal(val, idx_t)
 
         if roll < p_guard:
             return _guarded_index()
@@ -720,7 +630,7 @@ class ExprGenerator:
                 if not choices:
                     break
                 idx, child_t = self.rng.choice(choices)
-                idx_expr = self._int_to_ast(idx, IntegerT(False, 256))
+                idx_expr = ast_builder.literal(idx, IntegerT(False, 256))
                 next_options.append((child_t, idx_expr))
 
             direct = [
@@ -766,7 +676,7 @@ class ExprGenerator:
                 if not mtypes:
                     break
                 idx = self.rng.randrange(len(mtypes))
-                idx_expr = self._int_to_ast(idx, IntegerT(False, 256))
+                idx_expr = ast_builder.literal(idx, IntegerT(False, 256))
                 cur_t = mtypes[idx]
             else:
                 break
@@ -1009,55 +919,6 @@ class ExprGenerator:
             return wrapped
         return call_node
 
-    def _generate_uint256_literal(self, value: int) -> ast.Int:
-        node = ast.Int(value=value)
-        node._metadata["type"] = IntegerT(False, 256)
-        return node
-
-    # ---------
-    # AST utils
-    # ---------
-    def _builtin_call_expr(self, name: str, args: list, ret_t: VyperType) -> ast.Call:
-        b = None
-        if self.function_registry and name in self.function_registry.builtins:
-            b = self.function_registry.builtins[name]
-        fn = ast.Name(id=name)
-        fn._metadata = getattr(fn, "_metadata", {})
-        if b is not None:
-            fn._metadata["type"] = b
-        call = ast.Call(func=fn, args=args, keywords=[])
-        call._metadata = getattr(call, "_metadata", {})
-        call._metadata["type"] = ret_t
-        return call
-
-    def _uint_binop_expr(
-        self, left: ast.VyperNode, op, right: ast.VyperNode
-    ) -> ast.BinOp:
-        node = ast.BinOp(left=left, op=op, right=right)
-        node._metadata = getattr(node, "_metadata", {})
-        node._metadata["type"] = IntegerT(False, 256)
-        return node
-
-    def _uint_cmp_expr(
-        self, left: ast.VyperNode, op, right: ast.VyperNode
-    ) -> ast.Compare:
-        node = ast.Compare(left=left, ops=[op], comparators=[right])
-        node._metadata = getattr(node, "_metadata", {})
-        node._metadata["type"] = BoolT()
-        return node
-
-    def _ifexp_typed(
-        self,
-        test: ast.VyperNode,
-        body: ast.VyperNode,
-        orelse: ast.VyperNode,
-        ret_t: VyperType,
-    ) -> ast.IfExp:
-        node = ast.IfExp(test=test, body=body, orelse=orelse)
-        node._metadata = getattr(node, "_metadata", {})
-        node._metadata["type"] = ret_t
-        return node
-
     def _generate_builtin_call(
         self,
         name: str,
@@ -1145,38 +1006,7 @@ class ExprGenerator:
             if not isinstance(target_type, (BytesT, StringT)):
                 return None
 
-            # Helper to build builtin calls directly (min/max/len)
-            def _builtin_call(bname: str, args, ret_t):
-                b = None
-                if self.function_registry and bname in self.function_registry.builtins:
-                    b = self.function_registry.builtins[bname]
-                fn = ast.Name(id=bname)
-                fn._metadata = getattr(fn, "_metadata", {})
-                if b is not None:
-                    fn._metadata["type"] = b
-                call = ast.Call(func=fn, args=args, keywords=[])
-                call._metadata = getattr(call, "_metadata", {})
-                call._metadata["type"] = ret_t
-                return call
-
-            def _uint_binop(a, op, b):
-                node = ast.BinOp(left=a, op=op, right=b)
-                node._metadata = getattr(node, "_metadata", {})
-                node._metadata["type"] = IntegerT(False, 256)
-                return node
-
-            def _uint_cmp(a, op, b):
-                node = ast.Compare(left=a, ops=[op], comparators=[b])
-                node._metadata = getattr(node, "_metadata", {})
-                node._metadata["type"] = BoolT()
-                return node
-
-            def _ifexp(test, body, orelse, ret_t):
-                node = ast.IfExp(test=test, body=body, orelse=orelse)
-                node._metadata = getattr(node, "_metadata", {})
-                node._metadata["type"] = ret_t
-                return node
-
+            builtins = self.function_registry.builtins if self.function_registry else {}
             ret_len = target_type.length
 
             # Choose source type:
@@ -1201,10 +1031,10 @@ class ExprGenerator:
             len_ret_t = IntegerT(False, 256)
             if isinstance(src_t, (BytesT, StringT)):
                 len_arg = arg0
-                len_call = _builtin_call("len", [len_arg], len_ret_t)
+                len_call = ast_builder.builtin_call("len", [len_arg], len_ret_t, builtins)
             else:
                 # bytes32 has fixed length 32
-                len_call = self._generate_uint256_literal(32)
+                len_call = ast_builder.uint256_literal(32)
 
             # Random uint expressions to feed into min/max
             rand_u = self.generate(IntegerT(False, 256), context, max(0, depth))
@@ -1215,33 +1045,33 @@ class ExprGenerator:
 
             if make_valid:
                 # Start: if len == 0 -> 0 else rand % len
-                one = self._generate_uint256_literal(1)
-                zero = self._generate_uint256_literal(0)
+                one = ast_builder.uint256_literal(1)
+                zero = ast_builder.uint256_literal(0)
 
-                len_is_zero = _uint_cmp(len_call, ast.Eq(), zero)
-                start_else = _uint_binop(rand_u, ast.Mod(), len_call)
-                a1 = _ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+                len_is_zero = ast_builder.compare(len_call, ast.Eq(), zero)
+                start_else = ast_builder.uint256_binop(rand_u, ast.Mod(), len_call)
+                a1 = ast_builder.ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
 
                 # remaining = len - start
-                remaining = _uint_binop(len_call, ast.Sub(), a1)
+                remaining = ast_builder.uint256_binop(len_call, ast.Sub(), a1)
 
                 # length: if remaining == 0 -> 1 (will be invalid but rare)
                 # else min((rand_v % bound)+1, remaining) where bound = ret_len (if >0) else remaining
-                rem_is_zero = _uint_cmp(remaining, ast.Eq(), zero)
+                rem_is_zero = ast_builder.compare(remaining, ast.Eq(), zero)
                 if ret_len > 0:
-                    bound = self._generate_uint256_literal(ret_len)
+                    bound = ast_builder.uint256_literal(ret_len)
                 else:
                     bound = remaining
                 # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
-                rand_mod = _uint_binop(rand_v, ast.Mod(), bound)
-                plus_one = _uint_binop(rand_mod, ast.Add(), one)
-                len_else = _builtin_call("min", [plus_one, remaining], len_ret_t)
-                a2 = _ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
+                rand_mod = ast_builder.uint256_binop(rand_v, ast.Mod(), bound)
+                plus_one = ast_builder.uint256_binop(rand_mod, ast.Add(), one)
+                len_else = ast_builder.builtin_call("min", [plus_one, remaining], len_ret_t, builtins)
+                a2 = ast_builder.ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
             else:
                 # Intentionally produce out-of-bounds in a dynamic way
-                one = self._generate_uint256_literal(1)
-                two = self._generate_uint256_literal(2)
-                ten = self._generate_uint256_literal(10)
+                one = ast_builder.uint256_literal(1)
+                two = ast_builder.uint256_literal(2)
+                ten = ast_builder.uint256_literal(10)
 
                 choice = self.rng.random()
                 if choice < 0.34:
@@ -1250,21 +1080,21 @@ class ExprGenerator:
                     a2 = one
                 elif choice < 0.67:
                     # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
-                    a1 = _uint_binop(
-                        len_call, ast.Add(), _uint_binop(rand_u, ast.Mod(), ten)
+                    a1 = ast_builder.uint256_binop(
+                        len_call, ast.Add(), ast_builder.uint256_binop(rand_u, ast.Mod(), ten)
                     )
-                    a2 = _uint_binop(
-                        _uint_binop(
+                    a2 = ast_builder.uint256_binop(
+                        ast_builder.uint256_binop(
                             rand_v,
                             ast.Mod(),
-                            self._generate_uint256_literal(max(1, ret_len + 1)),
+                            ast_builder.uint256_literal(max(1, ret_len + 1)),
                         ),
                         ast.Add(),
                         one,
                     )
                 else:
                     # start = (len(arg0) * 2); length = 1
-                    a1 = _uint_binop(len_call, ast.Mult(), two)
+                    a1 = ast_builder.uint256_binop(len_call, ast.Mult(), two)
                     a2 = one
 
             return self._finalize_call(func_node, [arg0, a1, a2], target_type)
