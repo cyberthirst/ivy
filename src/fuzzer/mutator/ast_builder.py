@@ -49,8 +49,10 @@ def _address_to_ast(value: str, typ: AddressT) -> ast.Hex:
     return node
 
 
-def _bytesm_to_ast(value: bytes, typ: BytesM_T) -> ast.HexBytes:
-    node = ast.HexBytes(value=value)
+def _bytesm_to_ast(value: bytes, typ: BytesM_T) -> ast.Hex:
+    # Use ast.Hex (0x... format) for fixed-size bytesN types.
+    # ast.HexBytes (x"..." format) only works for dynamic Bytes[N].
+    node = ast.Hex(value=f"0x{value.hex()}")
     node._metadata["type"] = typ
     return node
 
