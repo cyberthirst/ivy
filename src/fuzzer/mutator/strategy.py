@@ -101,10 +101,13 @@ def register_decorated(registry: "StrategyRegistry", obj: Any) -> None:
         attr = getattr(obj, name)
         spec = getattr(attr, "_strategy_spec", None)
         if spec is None and hasattr(attr, "__func__"):
+            # Bound methods store decorator metadata on the underlying function.
             spec = getattr(attr.__func__, "_strategy_spec", None)
         if spec is None:
+            # Skip attributes that aren't decorated strategies.
             continue
         if not callable(attr):
+            # Defensive: avoid non-callable attributes carrying metadata.
             continue
 
         resolved = dict(spec)
