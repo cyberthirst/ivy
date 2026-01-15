@@ -97,33 +97,6 @@ class StatementGenerator:
     def _weight_if(self, *, ctx: StmtGenCtx, **_) -> float:
         return float(self.statement_weights.get("if", 1.0))
 
-    @strategy(
-        name="stmt.vardecl",
-        tags=frozenset({"stmt", "terminal"}),
-        is_applicable="_is_vardecl_applicable",
-        weight="_weight_vardecl",
-    )
-    def _run_stmt_vardecl(self, *, ctx: StmtGenCtx, **_):
-        return self.create_vardecl_and_register(ctx.context, ctx.parent)
-
-    @strategy(
-        name="stmt.assign",
-        tags=frozenset({"stmt", "terminal"}),
-        is_applicable="_is_assign_applicable",
-        weight="_weight_assign",
-    )
-    def _run_stmt_assign(self, *, ctx: StmtGenCtx, **_):
-        return self.generate_assign(ctx.context, ctx.parent)
-
-    @strategy(
-        name="stmt.if",
-        tags=frozenset({"stmt", "recursive"}),
-        is_applicable="_is_if_applicable",
-        weight="_weight_if",
-    )
-    def _run_stmt_if(self, *, ctx: StmtGenCtx, **_):
-        return self.generate_if(ctx.context, ctx.parent, ctx.depth)
-
     def _create_var_info(
         self,
         typ: VyperType,
@@ -266,7 +239,16 @@ class StatementGenerator:
         # Generate variables first and insert at beginning
         num_vars = self.rng.randint(0, 2)
         for i in range(num_vars):
-            var_decl = self.create_vardecl_and_register(context, parent)
+            ctx = StmtGenCtx(
+                context=context,
+                parent=parent,
+                depth=depth,
+                return_type=None,
+                rng=self.rng,
+                nest_decay=self.nest_decay,
+                gen=self,
+            )
+            var_decl = self.create_vardecl_and_register(ctx=ctx)
             body.insert(i, var_decl)
 
         if context.is_module_scope:
@@ -343,27 +325,40 @@ class StatementGenerator:
         self, context, parent: Optional[ast.VyperNode]
     ) -> ast.VyperNode:
         if context.all_vars and self.rng.random() < 0.6:
-            assign = self.generate_assign(context, parent)
+            ctx = StmtGenCtx(
+                context=context,
+                parent=parent,
+                depth=0,
+                return_type=None,
+                rng=self.rng,
+                nest_decay=self.nest_decay,
+                gen=self,
+            )
+            assign = self.generate_assign(ctx=ctx)
             if assign is not None:
                 return assign
         return ast.Pass()
 
-    def generate_if(
-        self, context: GenerationContext, parent: Optional[ast.VyperNode], depth: int
-    ) -> ast.If:
-        test_expr = self.expr_generator.generate(BoolT(), context, depth=2)
+    @strategy(
+        name="stmt.if",
+        tags=frozenset({"stmt", "recursive"}),
+        is_applicable="_is_if_applicable",
+        weight="_weight_if",
+    )
+    def generate_if(self, *, ctx: StmtGenCtx, **_) -> ast.If:
+        test_expr = self.expr_generator.generate(BoolT(), ctx.context, depth=2)
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
 
-        with context.new_scope(ScopeType.IF):
-            self.inject_statements(if_node.body, context, if_node, depth + 1)
+        with ctx.context.new_scope(ScopeType.IF):
+            self.inject_statements(if_node.body, ctx.context, if_node, ctx.depth + 1)
 
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
-        if self.rng.random() < 0.4:
-            with context.new_scope(ScopeType.IF):
-                self.inject_statements(if_node.orelse, context, if_node, depth + 1)
+        if ctx.rng.random() < 0.4:
+            with ctx.context.new_scope(ScopeType.IF):
+                self.inject_statements(if_node.orelse, ctx.context, if_node, ctx.depth + 1)
 
         return if_node
 
@@ -379,14 +374,18 @@ class StatementGenerator:
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
 
-    def generate_assign(
-        self, context, parent: Optional[ast.VyperNode]
-    ) -> Optional[ast.Assign]:
-        writable_vars = self.get_writable_variables(context)
+    @strategy(
+        name="stmt.assign",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_assign_applicable",
+        weight="_weight_assign",
+    )
+    def generate_assign(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.Assign]:
+        writable_vars = self.get_writable_variables(ctx.context)
         if not writable_vars:
             return None
 
-        var_name, var_info = self.rng.choice(writable_vars)
+        var_name, var_info = ctx.rng.choice(writable_vars)
 
         # Build base reference (self.x or local)
         if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
@@ -404,12 +403,12 @@ class StatementGenerator:
         is_hashmap = isinstance(var_info.typ, HashMapT)
         if is_hashmap or (
             self.expr_generator.is_subscriptable_type(var_info.typ)
-            and self.rng.random() < 0.7
+            and ctx.rng.random() < 0.7
         ):
             cur_node, cur_t = self.expr_generator.build_random_chain(
                 base,
                 var_info.typ,
-                context,
+                ctx.context,
                 depth=2,
                 max_steps=2,
             )
@@ -421,22 +420,28 @@ class StatementGenerator:
                 cur_node, cur_t = self.expr_generator.build_random_chain(
                     target_node,
                     target_type,
-                    context,
+                    ctx.context,
                     depth=2,
                     max_steps=1,
                 )
                 target_node = cur_node
                 target_type = cur_t
 
-        value = self.expr_generator.generate(target_type, context, depth=3)
+        value = self.expr_generator.generate(target_type, ctx.context, depth=3)
 
         return ast.Assign(targets=[target_node], value=value)
 
+    @strategy(
+        name="stmt.vardecl",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_vardecl_applicable",
+        weight="_weight_vardecl",
+    )
     def create_vardecl_and_register(
-        self, context, parent: Optional[ast.VyperNode]
+        self, *, ctx: StmtGenCtx, **_
     ) -> Union[ast.VariableDecl, ast.AnnAssign]:
-        var_decl, var_name, var_info = self.generate_vardecl(context, parent)
-        self.add_variable(context, var_name, var_info)
+        var_decl, var_name, var_info = self.generate_vardecl(ctx.context, ctx.parent)
+        self.add_variable(ctx.context, var_name, var_info)
         return var_decl
 
     def generate_vardecl(
