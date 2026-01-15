@@ -555,17 +555,13 @@ class ExprGenerator:
         body = self.generate(target_type, context, depth)
         orelse = self.generate(target_type, context, depth)
 
+        # Empty DynArray in the body (true branch) of if-expressions causes a
+        # Vyper compiler panic. See: https://github.com/vyperlang/vyper/issues/3480
         if isinstance(target_type, DArrayT):
             if isinstance(body, ast.List) and not body.elements:
-                body = self._array_to_ast(
-                    [self.generate(target_type.value_type, context, depth)],
-                    target_type,
-                )
-            if isinstance(orelse, ast.List) and not orelse.elements:
-                orelse = self._array_to_ast(
-                    [self.generate(target_type.value_type, context, depth)],
-                    target_type,
-                )
+                element = self.generate(target_type.value_type, context, depth)
+                body = ast.List(elements=[element])
+                body._metadata["type"] = target_type
 
         if isinstance(target_type, TupleT):
             def _replace_tuple_literal(expr: ast.VyperNode) -> ast.VyperNode:
