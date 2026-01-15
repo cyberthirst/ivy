@@ -34,6 +34,12 @@ from fuzzer.mutator.strategy import (
     StrategySelector,
     StrategyExecutor,
 )
+from fuzzer.mutator.type_utils import (
+    is_subscriptable,
+    can_reach_type,
+    find_subscript_bases,
+    find_nested_subscript_bases,
+)
 from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
 
@@ -254,9 +260,8 @@ class ExprGenerator:
     def _is_subscript_applicable(self, **ctx) -> bool:
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
-        return bool(
-            self._find_nested_subscript_bases(target_type, context, max_steps=3)
-        )
+        vars_dict = dict(context.find_matching_vars(None))
+        return bool(find_nested_subscript_bases(target_type, vars_dict, max_steps=3))
 
     def _is_ifexp_applicable(self, **ctx) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
@@ -267,7 +272,8 @@ class ExprGenerator:
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
         # Slight bias based on number of available bases
-        n = len(self._find_subscript_bases(target_type, context))
+        vars_dict = dict(context.find_matching_vars(None))
+        n = len(find_subscript_bases(target_type, vars_dict))
         return 1.0 if n == 0 else min(2.5, 0.5 + 0.2 * n)
 
     # Runner helpers (consume context kwargs)
@@ -344,55 +350,6 @@ class ExprGenerator:
             return None
         return self._generate_variable_ref(self.rng.choice(matches), context)
 
-    def _find_subscript_bases(
-        self, target_type: VyperType, context: Context
-    ) -> list[tuple[str, VyperType]]:
-        """Return list of (var_name, var_type) that can be subscripted to yield target_type.
-
-        Supports HashMapT[key_type, value_type] and sequences (SArrayT, DArrayT, TupleT).
-        For TupleT, any element matching target_type is acceptable.
-        """
-        candidates: list[tuple[str, VyperType]] = []
-        # Use find_matching_vars to respect mutability constraints
-        allowed_vars = dict(context.find_matching_vars(None))
-        for name, var_info in allowed_vars.items():
-            var_t = var_info.typ
-            # HashMap[key->value]
-            # TODO nested hash maps
-            if isinstance(var_t, HashMapT):
-                if target_type.compare_type(var_t.value_type):
-                    candidates.append((name, var_t))
-                continue
-
-            # Static/Dynamic arrays
-            if isinstance(var_t, (SArrayT, DArrayT)):
-                if target_type.compare_type(var_t.value_type):
-                    candidates.append((name, var_t))
-                continue
-
-            # Tuples: allow if any member matches target_type
-            if isinstance(var_t, TupleT):
-                for mt in getattr(var_t, "member_types", []):
-                    if target_type.compare_type(mt):
-                        candidates.append((name, var_t))
-                        break
-
-        return candidates
-
-    def _find_nested_subscript_bases(
-        self, target_type: VyperType, context: Context, max_steps: int
-    ) -> list[tuple[str, VyperType]]:
-        result: list[tuple[str, VyperType]] = []
-        # Use find_matching_vars to respect mutability constraints
-        allowed_vars = dict(context.find_matching_vars(None))
-        for name, var_info in allowed_vars.items():
-            t = var_info.typ
-            if not self.is_subscriptable_type(t):
-                continue
-            if self.can_reach_via_subscript(t, target_type, max_steps):
-                result.append((name, t))
-        return result
-
     def _generate_variable_ref(
         self, target: Union[str, tuple[str, VarInfo]], context: Context
     ) -> Union[ast.Attribute, ast.Name]:
@@ -414,7 +371,8 @@ class ExprGenerator:
     def _generate_subscript(
         self, target_type: VyperType, context: Context, depth: int
     ) -> Optional[ast.Subscript]:
-        bases = self._find_nested_subscript_bases(target_type, context, max_steps=3)
+        vars_dict = dict(context.find_matching_vars(None))
+        bases = find_nested_subscript_bases(target_type, vars_dict, max_steps=3)
         if not bases:
             return None
 
@@ -450,9 +408,6 @@ class ExprGenerator:
     # ----------------------
     # Shared subscript utils
     # ----------------------
-
-    def is_subscriptable_type(self, t: VyperType) -> bool:
-        return isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT))
 
     def _random_integer_type(self) -> IntegerT:
         bits = self.rng.choice([8, 16, 32, 64, 128, 256])
@@ -566,30 +521,6 @@ class ExprGenerator:
             # Only makes sense for SArray where cap is static; still set xfail
             return _oob_literal()
 
-    def can_reach_via_subscript(
-        self, base_t: VyperType, target_t: VyperType, steps_left: int
-    ) -> bool:
-        if steps_left <= 0:
-            return False
-
-        def child_types(t: VyperType):
-            if isinstance(t, HashMapT):
-                yield t.value_type
-            elif isinstance(t, (SArrayT, DArrayT)):
-                yield t.value_type
-            elif isinstance(t, TupleT):
-                for mt in getattr(t, "member_types", []):
-                    yield mt
-
-        for ct in child_types(base_t):
-            if target_t.compare_type(ct):
-                return True
-            if self.is_subscriptable_type(ct) and self.can_reach_via_subscript(
-                ct, target_t, steps_left - 1
-            ):
-                return True
-        return False
-
     def build_chain_to_target(
         self,
         base_node: ast.VyperNode,
@@ -603,7 +534,7 @@ class ExprGenerator:
         node = base_node
         steps_remaining = max(1, min(max_steps, depth + 1))
 
-        while steps_remaining > 0 and self.is_subscriptable_type(cur_t):
+        while steps_remaining > 0 and is_subscriptable(cur_t):
             next_options: list[tuple[VyperType, ast.VyperNode]] = []
 
             if isinstance(cur_t, HashMapT):
@@ -621,10 +552,8 @@ class ExprGenerator:
                 choices = []
                 for i, mt in enumerate(mtypes):
                     if target_type.compare_type(mt) or (
-                        self.is_subscriptable_type(mt)
-                        and self.can_reach_via_subscript(
-                            mt, target_type, steps_left=steps_remaining - 1
-                        )
+                        is_subscriptable(mt)
+                        and can_reach_type(mt, target_type, steps_remaining - 1)
                     ):
                         choices.append((i, mt))
                 if not choices:
@@ -684,7 +613,7 @@ class ExprGenerator:
             node = ast.Subscript(value=node, slice=idx_expr)
             node._metadata = {"type": cur_t}
 
-            if not self.is_subscriptable_type(cur_t):
+            if not is_subscriptable(cur_t):
                 break
 
         return node, cur_t
