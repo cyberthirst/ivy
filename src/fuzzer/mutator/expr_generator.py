@@ -113,17 +113,12 @@ class ExprGenerator:
             context={"ctx": ctx},
         )
 
-        # Always include literal as a safe fallback if not already in the set
-        def _fallback_literal():
-            return self._generate_literal(target_type, context)
-
         # Recursive strategies consume depth
         ctx.depth -= 1
 
         return self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",  # TODO nested hash maps
-            fallback=_fallback_literal,
             context={"ctx": ctx},
         )
 
