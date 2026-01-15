@@ -79,21 +79,28 @@ def strategy(
     return decorator
 
 
-def _resolve_callable(obj: Any, value: Any) -> Any:
+def _resolve_callable(obj: Any, value: Any, *, label: str, strategy_name: str) -> Any:
     if value is None:
         return None
     if isinstance(value, str):
-        return getattr(obj, value)
+        resolved = getattr(obj, value)
+    else:
+        try:
+            candidate = getattr(obj, value.__name__)
+        except Exception:
+            resolved = value
+        else:
+            if getattr(candidate, "__func__", None) is value:
+                resolved = candidate
+            else:
+                resolved = value
 
-    try:
-        candidate = getattr(obj, value.__name__)
-    except Exception:
-        return value
-
-    if getattr(candidate, "__func__", None) is value:
-        return candidate
-
-    return value
+    if resolved is not None and not callable(resolved):
+        raise TypeError(
+            f"strategy {label} must be callable or None, "
+            f"got {type(resolved).__name__} for {strategy_name}"
+        )
+    return resolved
 
 
 def register_decorated(registry: "StrategyRegistry", obj: Any) -> None:
@@ -115,8 +122,18 @@ def register_decorated(registry: "StrategyRegistry", obj: Any) -> None:
         type_classes = resolved.get("type_classes")
         if type_classes is not None and not isinstance(type_classes, tuple):
             resolved["type_classes"] = tuple(type_classes)
-        resolved["is_applicable"] = _resolve_callable(obj, resolved.get("is_applicable"))
-        resolved["weight"] = _resolve_callable(obj, resolved.get("weight"))
+        resolved["is_applicable"] = _resolve_callable(
+            obj,
+            resolved.get("is_applicable"),
+            label="is_applicable",
+            strategy_name=resolved["name"],
+        )
+        resolved["weight"] = _resolve_callable(
+            obj,
+            resolved.get("weight"),
+            label="weight",
+            strategy_name=resolved["name"],
+        )
 
         registry.register(Strategy(run=attr, **resolved))
 
