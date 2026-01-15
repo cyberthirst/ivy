@@ -10,10 +10,11 @@ from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import Context, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.strategy import (
-    Strategy,
     StrategyRegistry,
     StrategySelector,
     StrategyExecutor,
+    register_decorated,
+    strategy,
 )
 
 
@@ -59,38 +60,7 @@ class StatementGenerator:
         self._register_strategies()
 
     def _register_strategies(self) -> None:
-        # Variable declaration: only applicable in module scope
-        self._strategy_registry.register(
-            Strategy(
-                name="stmt.vardecl",
-                tags=frozenset({"stmt", "terminal"}),
-                is_applicable=self._is_vardecl_applicable,
-                weight=self._weight_vardecl,
-                run=self._run_stmt_vardecl,
-            )
-        )
-
-        # Assignment: only inside functions/blocks and if there are modifiable vars.
-        self._strategy_registry.register(
-            Strategy(
-                name="stmt.assign",
-                tags=frozenset({"stmt", "terminal"}),
-                is_applicable=self._is_assign_applicable,
-                weight=self._weight_assign,
-                run=self._run_stmt_assign,
-            )
-        )
-
-        # If-statement: recursive; only inside functions/blocks.
-        self._strategy_registry.register(
-            Strategy(
-                name="stmt.if",
-                tags=frozenset({"stmt", "recursive"}),
-                is_applicable=self._is_if_applicable,
-                weight=self._weight_if,
-                run=self._run_stmt_if,
-            )
-        )
+        register_decorated(self._strategy_registry, self)
 
     def _is_vardecl_applicable(self, **ctx) -> bool:
         context: Context = ctx["context"]
@@ -115,12 +85,30 @@ class StatementGenerator:
     def _weight_if(self, **ctx) -> float:
         return float(self.statement_weights.get("if", 1.0))
 
+    @strategy(
+        name="stmt.vardecl",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_vardecl_applicable",
+        weight="_weight_vardecl",
+    )
     def _run_stmt_vardecl(self, **ctx):
         return self.create_vardecl_and_register(ctx["context"], ctx.get("parent"))
 
+    @strategy(
+        name="stmt.assign",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_assign_applicable",
+        weight="_weight_assign",
+    )
     def _run_stmt_assign(self, **ctx):
         return self.generate_assign(ctx["context"], ctx.get("parent"))
 
+    @strategy(
+        name="stmt.if",
+        tags=frozenset({"stmt", "recursive"}),
+        is_applicable="_is_if_applicable",
+        weight="_weight_if",
+    )
     def _run_stmt_if(self, **ctx):
         depth = ctx.get("depth", 0)
         return self.generate_if(ctx["context"], ctx.get("parent"), depth)

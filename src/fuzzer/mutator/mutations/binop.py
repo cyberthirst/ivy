@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from vyper.ast import nodes as ast
 
-from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
 
 
@@ -20,23 +20,16 @@ OP_SWAPS = {
 }
 
 
-def register(registry: StrategyRegistry) -> None:
-    registry.register(
-        Strategy(
-            name="binop.swap_operator",
-            type_classes=(ast.BinOp,),
-            tags=frozenset({"mutation", "binop"}),
-            is_applicable=_can_swap,
-            weight=lambda **_: 1.0,
-            run=_swap_operator,
-        )
-    )
-
-
 def _can_swap(*, ctx: MutationCtx, **_) -> bool:
     return type(ctx.node.op) in OP_SWAPS
 
 
+@strategy(
+    name="binop.swap_operator",
+    type_classes=(ast.BinOp,),
+    tags=frozenset({"mutation", "binop"}),
+    is_applicable="_can_swap",
+)
 def _swap_operator(*, ctx: MutationCtx, **_) -> ast.BinOp:
     op_type = type(ctx.node.op)
     ctx.node.op = OP_SWAPS[op_type]()

@@ -29,10 +29,11 @@ from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.strategy import (
-    Strategy,
     StrategyRegistry,
     StrategySelector,
     StrategyExecutor,
+    register_decorated,
+    strategy,
 )
 from fuzzer.mutator.type_utils import (
     is_subscriptable,
@@ -119,117 +120,7 @@ class ExprGenerator:
         )
 
     def _register_strategies(self) -> None:
-        # Base literal (terminal; always applicable)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.literal",
-                tags=frozenset({"expr", "terminal"}),
-                is_applicable=lambda **_: True,
-                # prefer non-literals; keep as low-weight but reliable fallback
-                weight=lambda **_: 0.15,
-                run=self._run_literal,
-            )
-        )
-
-        # Variable reference (terminal)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.var_ref",
-                tags=frozenset({"expr", "terminal"}),
-                is_applicable=self._is_var_ref_applicable,
-                weight=self._weight_var_ref,
-                run=self._run_var_ref,
-            )
-        )
-
-        # Integer arithmetic (recursive)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.arithmetic",
-                tags=frozenset({"expr", "recursive"}),
-                type_classes=(IntegerT,),
-                is_applicable=lambda **_: True,
-                weight=lambda **_: 1.0,
-                run=self._run_arithmetic,
-            )
-        )
-
-        # Unary minus for signed integers (recursive)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.unary_minus",
-                tags=frozenset({"expr", "recursive"}),
-                type_classes=(IntegerT,),
-                is_applicable=self._is_unary_minus_applicable,
-                weight=lambda **_: 1.0,
-                run=self._run_unary_minus,
-            )
-        )
-
-        # Boolean ops and comparisons (recursive targeting BoolT)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.comparison",
-                tags=frozenset({"expr", "recursive"}),
-                type_classes=(BoolT,),
-                is_applicable=lambda **_: True,
-                weight=lambda **_: 1.0,
-                run=self._run_comparison,
-            )
-        )
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.boolean_op",
-                tags=frozenset({"expr", "recursive"}),
-                type_classes=(BoolT,),
-                is_applicable=lambda **_: True,
-                weight=lambda **_: 1.0,
-                run=self._run_boolean_op,
-            )
-        )
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.not",
-                tags=frozenset({"expr", "recursive"}),
-                type_classes=(BoolT,),
-                is_applicable=lambda **_: True,
-                weight=lambda **_: 1.0,
-                run=self._run_not,
-            )
-        )
-
-        # If-expression (ternary) supporting any target type (recursive)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.ifexp",
-                tags=frozenset({"expr", "recursive"}),
-                is_applicable=self._is_ifexp_applicable,
-                weight=lambda **_: 0.3,
-                run=self._run_ifexp,
-            )
-        )
-
-        # Function calls (recursive)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.func_call",
-                tags=frozenset({"expr", "recursive"}),
-                is_applicable=self._is_func_call_applicable,
-                weight=lambda **_: 1.0,
-                run=self._run_func_call,
-            )
-        )
-
-        # Subscript expressions (recursive)
-        self._strategy_registry.register(
-            Strategy(
-                name="expr.subscript",
-                tags=frozenset({"expr", "recursive"}),
-                is_applicable=self._is_subscript_applicable,
-                weight=self._weight_subscript,
-                run=self._run_subscript,
-            )
-        )
+        register_decorated(self._strategy_registry, self)
 
     # Applicability/weight helpers
 
@@ -278,9 +169,20 @@ class ExprGenerator:
 
     # Runner helpers (consume context kwargs)
 
+    @strategy(
+        name="expr.literal",
+        tags=frozenset({"expr", "terminal"}),
+        weight=lambda **_: 0.15,
+    )
     def _run_literal(self, **ctx):
         return self._generate_literal(ctx["target_type"], ctx["context"])
 
+    @strategy(
+        name="expr.var_ref",
+        tags=frozenset({"expr", "terminal"}),
+        is_applicable="_is_var_ref_applicable",
+        weight="_weight_var_ref",
+    )
     def _run_var_ref(self, **ctx):
         target_type: VyperType = ctx["target_type"]
         context: Context = ctx["context"]
@@ -289,33 +191,76 @@ class ExprGenerator:
             return None
         return self._generate_variable_ref(self.rng.choice(matches), context)
 
+    @strategy(
+        name="expr.arithmetic",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(IntegerT,),
+    )
     def _run_arithmetic(self, **ctx):
         return self._generate_arithmetic(
             ctx["target_type"], ctx["context"], ctx["depth"]
         )
 
+    @strategy(
+        name="expr.unary_minus",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(IntegerT,),
+        is_applicable="_is_unary_minus_applicable",
+    )
     def _run_unary_minus(self, **ctx):
         return self._generate_unary_minus(
             ctx["target_type"], ctx["context"], ctx["depth"]
         )
 
+    @strategy(
+        name="expr.comparison",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(BoolT,),
+    )
     def _run_comparison(self, **ctx):
         return self._generate_comparison(ctx["context"], ctx["depth"])
 
+    @strategy(
+        name="expr.boolean_op",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(BoolT,),
+    )
     def _run_boolean_op(self, **ctx):
         return self._generate_boolean_op(ctx["context"], ctx["depth"])
 
+    @strategy(
+        name="expr.not",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(BoolT,),
+    )
     def _run_not(self, **ctx):
         return self._generate_not(ctx["context"], ctx["depth"])
 
+    @strategy(
+        name="expr.ifexp",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_ifexp_applicable",
+        weight=lambda **_: 0.3,
+    )
     def _run_ifexp(self, **ctx):
         return self._generate_ifexp(ctx["target_type"], ctx["context"], ctx["depth"])
 
+    @strategy(
+        name="expr.func_call",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_func_call_applicable",
+    )
     def _run_func_call(self, **ctx):
         return self._generate_func_call(
             ctx["target_type"], ctx["context"], ctx["depth"]
         )
 
+    @strategy(
+        name="expr.subscript",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_subscript_applicable",
+        weight="_weight_subscript",
+    )
     def _run_subscript(self, **ctx):
         return self._generate_subscript(
             ctx["target_type"], ctx["context"], ctx["depth"]

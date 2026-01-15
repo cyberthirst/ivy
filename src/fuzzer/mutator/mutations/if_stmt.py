@@ -3,41 +3,8 @@ from __future__ import annotations
 from vyper.ast import nodes as ast
 
 from fuzzer.mutator.context import ScopeType
-from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
-
-
-def register(registry: StrategyRegistry) -> None:
-    registry.register(
-        Strategy(
-            name="if.negate_condition",
-            type_classes=(ast.If,),
-            tags=frozenset({"mutation", "if"}),
-            is_applicable=lambda **_: True,
-            weight=lambda **_: 1.0,
-            run=_negate_condition,
-        )
-    )
-    registry.register(
-        Strategy(
-            name="if.swap_branches",
-            type_classes=(ast.If,),
-            tags=frozenset({"mutation", "if"}),
-            is_applicable=_has_both_branches,
-            weight=lambda **_: 1.0,
-            run=_swap_branches,
-        )
-    )
-    registry.register(
-        Strategy(
-            name="if.inject_statement",
-            type_classes=(ast.If,),
-            tags=frozenset({"mutation", "if"}),
-            is_applicable=lambda **_: True,
-            weight=lambda **_: 1.0,
-            run=_inject_statement,
-        )
-    )
 
 
 def _has_both_branches(*, ctx: MutationCtx, **_) -> bool:
@@ -64,17 +31,33 @@ def _negate_expr(expr: ast.VyperNode) -> ast.VyperNode:
     return ast.UnaryOp(op=ast.Not(), operand=expr)
 
 
+@strategy(
+    name="if.negate_condition",
+    type_classes=(ast.If,),
+    tags=frozenset({"mutation", "if"}),
+)
 def _negate_condition(*, ctx: MutationCtx, **_) -> ast.If:
     ctx.node.test = _negate_expr(ctx.node.test)
     return ctx.node
 
 
+@strategy(
+    name="if.swap_branches",
+    type_classes=(ast.If,),
+    tags=frozenset({"mutation", "if"}),
+    is_applicable="_has_both_branches",
+)
 def _swap_branches(*, ctx: MutationCtx, **_) -> ast.If:
     ctx.node.body, ctx.node.orelse = ctx.node.orelse, ctx.node.body
     ctx.node.test = _negate_expr(ctx.node.test)
     return ctx.node
 
 
+@strategy(
+    name="if.inject_statement",
+    type_classes=(ast.If,),
+    tags=frozenset({"mutation", "if"}),
+)
 def _inject_statement(*, ctx: MutationCtx, **_) -> ast.If:
     # Pick which branch to inject into
     if ctx.node.orelse and ctx.rng.random() < 0.5:

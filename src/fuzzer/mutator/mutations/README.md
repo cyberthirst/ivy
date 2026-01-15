@@ -13,26 +13,30 @@ Each mutation receives a `MutationCtx` containing:
 
 ## Adding a Mutation
 
-1. Create a new file with a `register(registry: StrategyRegistry)` function
-2. Define strategies with `type_classes` matching target AST node types
-3. Tag with `"mutation"` so the engine can find it
-4. Add to `__init__.py`
+1. Create a new file with `@strategy`-decorated run functions
+2. Tag each strategy with `"mutation"`
+3. Add the module to `__init__.py` so `register_all` picks it up
 
 ```python
 # Example: mutations/example.py
-from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from __future__ import annotations
+
+from vyper.ast import nodes as ast
+
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
 
-def register(registry: StrategyRegistry) -> None:
-    registry.register(Strategy(
-        name="example.my_mutation",
-        type_classes=(ast.SomeNode,),
-        tags=frozenset({"mutation"}),
-        is_applicable=lambda *, ctx, **_: some_check(ctx.node),
-        weight=lambda **_: 1.0,
-        run=_run_mutation,
-    ))
 
+def _is_applicable(*, ctx: MutationCtx, **_) -> bool:
+    return some_check(ctx.node)
+
+
+@strategy(
+    name="example.my_mutation",
+    type_classes=(ast.SomeNode,),
+    tags=frozenset({"mutation"}),
+    is_applicable="_is_applicable",
+)
 def _run_mutation(*, ctx: MutationCtx, **_) -> ast.VyperNode:
     # Transform ctx.node and return it
     ...
