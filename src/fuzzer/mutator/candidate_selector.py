@@ -3,7 +3,6 @@ from typing import Type
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import TupleT
-from vyper.semantics.types.base import TYPE_T
 
 
 class CandidateSelector:
@@ -89,8 +88,6 @@ class CandidateSelector:
         """Return True if node is a valid mutation candidate."""
         # Tuple subscript indices - changing index changes result type
         if isinstance(node, ast.Subscript):
-            if not isinstance(node.slice, ast.Int):
-                return False
             base_type = self._type_of(node.value)
             if isinstance(base_type, TupleT) and isinstance(node.slice, ast.Int):
                 return False
@@ -104,11 +101,6 @@ class CandidateSelector:
     def _walk(self, node: ast.VyperNode):
         """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""
         if node is None:
-            return
-
-        # Skip type expression subtrees (e.g. Bytes[32], DynArray[...]) to avoid
-        # mutating lengths that must remain consistent with surrounding types.
-        if isinstance(getattr(node, "_metadata", {}).get("type"), TYPE_T):
             return
 
         yield node
