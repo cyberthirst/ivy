@@ -13,6 +13,7 @@ from vyper.semantics.types import (
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.config import StmtGeneratorConfig
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -45,29 +46,18 @@ class FreshNameGenerator:
 
 
 class StatementGenerator:
-    # Probability of allowing recursive statements (if, for, etc.)
-    # Terminal statements (assign, vardecl) are always allowed.
-    # With 0.2: ~80% terminal only, ~20% may nest
-    CONTINUATION_PROB = 0.2
-
-    def __init__(self, expr_generator, type_generator, rng: random.Random):
+    def __init__(
+        self,
+        expr_generator,
+        type_generator,
+        rng: random.Random,
+        cfg: Optional[StmtGeneratorConfig] = None,
+    ):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
         self.rng = rng
+        self.cfg = cfg or StmtGeneratorConfig()
         self.name_generator = FreshNameGenerator()
-
-        self.max_depth = 5
-        self.nest_decay = 0.7
-
-        self.inject_prob = 0.3
-        self.min_stmts = 1
-        self.max_stmts = 3
-
-        self.statement_weights = {
-            "vardecl": 0.4,
-            "assign": 0.3,
-            "if": 0.3,
-        }
 
         self._strategy_registry = StrategyRegistry()
         self._strategy_selector = StrategySelector(self.rng)
@@ -88,14 +78,14 @@ class StatementGenerator:
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
-    def _weight_vardecl(self, *, ctx: StmtGenCtx, **_) -> float:
-        return float(self.statement_weights.get("vardecl", 1.0))
+    def _weight_vardecl(self, **_) -> float:
+        return self.cfg.vardecl_weight
 
-    def _weight_assign(self, *, ctx: StmtGenCtx, **_) -> float:
-        return float(self.statement_weights.get("assign", 1.0))
+    def _weight_assign(self, **_) -> float:
+        return self.cfg.assign_weight
 
-    def _weight_if(self, *, ctx: StmtGenCtx, **_) -> float:
-        return float(self.statement_weights.get("if", 1.0))
+    def _weight_if(self, **_) -> float:
+        return self.cfg.if_weight
 
     def _create_var_info(
         self,
@@ -130,7 +120,7 @@ class StatementGenerator:
         skip = skip or set()
 
         # Bias towards existing variable types to enable compatible expressions
-        if self.rng.random() < 0.4 and context.all_vars:
+        if self.rng.random() < self.cfg.existing_type_bias_prob and context.all_vars:
             valid_vars = []
             for var_info in context.all_vars.values():
                 if type(var_info.typ) not in skip:
@@ -153,15 +143,16 @@ class StatementGenerator:
         """
         # Generate a unique name
         var_name = self.name_generator.generate()
+        cfg = self.cfg
 
         # Determine location and modifiability based on scope
         if context.is_module_scope:
             # Module-level variables can be storage, transient, immutable, or constant
             location_choices = [
-                (DataLocation.STORAGE, Modifiability.MODIFIABLE, 0.4),
-                (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, 0.2),
-                (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, 0.2),  # immutable
-                (DataLocation.UNSET, Modifiability.CONSTANT, 0.2),  # constant
+                (DataLocation.STORAGE, Modifiability.MODIFIABLE, cfg.storage_location_weight),
+                (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, cfg.transient_location_weight),
+                (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, cfg.immutable_location_weight),
+                (DataLocation.UNSET, Modifiability.CONSTANT, cfg.constant_location_weight),
             ]
 
             # Choose location based on weights
@@ -229,11 +220,12 @@ class StatementGenerator:
         Inject statements into body. Doesn't inject functions, those are generated lazily
         based on call_expr demand.
         """
-        if depth > self.max_depth:
+        cfg = self.cfg
+        if depth > cfg.max_depth:
             return
 
         if n_stmts is None:
-            if self.rng.random() > self.inject_prob:
+            if self.rng.random() > cfg.inject_prob:
                 return
 
         # Generate variables first and insert at beginning
@@ -245,7 +237,7 @@ class StatementGenerator:
                 depth=depth,
                 return_type=None,
                 rng=self.rng,
-                nest_decay=self.nest_decay,
+                nest_decay=cfg.nest_decay,
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
@@ -258,7 +250,7 @@ class StatementGenerator:
         if n_stmts is not None:
             num_other_stmts = n_stmts
         else:
-            num_other_stmts = self.rng.randint(self.min_stmts, self.max_stmts)
+            num_other_stmts = self.rng.randint(cfg.min_stmts, cfg.max_stmts)
 
         for _ in range(num_other_stmts):
             stmt = self.generate_statement(context, parent, depth)
@@ -287,12 +279,12 @@ class StatementGenerator:
         depth: int = 0,
         return_type: Optional[VyperType] = None,
     ) -> ast.VyperNode:
-        if depth >= self.max_depth:
+        cfg = self.cfg
+        if depth >= cfg.max_depth:
             return self._generate_simple_statement(context, parent)
 
         # Decide whether to allow recursive (nesting) statements
-        # ~80% of the time, only terminal statements are considered
-        allow_recursive = self.rng.random() < self.CONTINUATION_PROB
+        allow_recursive = self.rng.random() < cfg.continuation_prob
         if allow_recursive:
             include_tags = ("stmt",)  # All statement strategies
         else:
@@ -304,7 +296,7 @@ class StatementGenerator:
             depth=depth,
             return_type=return_type,
             rng=self.rng,
-            nest_decay=self.nest_decay,
+            nest_decay=cfg.nest_decay,
             gen=self,
         )
 
@@ -324,14 +316,15 @@ class StatementGenerator:
     def _generate_simple_statement(
         self, context, parent: Optional[ast.VyperNode]
     ) -> ast.VyperNode:
-        if context.all_vars and self.rng.random() < 0.6:
+        cfg = self.cfg
+        if context.all_vars and self.rng.random() < cfg.simple_stmt_assign_prob:
             ctx = StmtGenCtx(
                 context=context,
                 parent=parent,
                 depth=0,
                 return_type=None,
                 rng=self.rng,
-                nest_decay=self.nest_decay,
+                nest_decay=cfg.nest_decay,
                 gen=self,
             )
             assign = self.generate_assign(ctx=ctx)
@@ -356,7 +349,7 @@ class StatementGenerator:
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
-        if ctx.rng.random() < 0.4:
+        if ctx.rng.random() < self.cfg.generate_else_branch_prob:
             with ctx.context.new_scope(ScopeType.IF):
                 self.inject_statements(if_node.orelse, ctx.context, if_node, ctx.depth + 1)
 
@@ -403,7 +396,7 @@ class StatementGenerator:
         is_hashmap = isinstance(var_info.typ, HashMapT)
         if is_hashmap or (
             self.expr_generator.is_subscriptable_type(var_info.typ)
-            and ctx.rng.random() < 0.7
+            and ctx.rng.random() < self.cfg.subscript_assignment_prob
         ):
             cur_node, cur_t = self.expr_generator.build_random_chain(
                 base,

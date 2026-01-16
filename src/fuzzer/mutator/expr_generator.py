@@ -30,6 +30,7 @@ from fuzzer.mutator.context import GenerationContext, ExprMutability
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.config import ExprGeneratorConfig
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -66,12 +67,14 @@ class ExprGenerator:
         interface_registry: InterfaceRegistry,
         function_registry: FunctionRegistry,
         type_generator: TypeGenerator,
+        cfg: Optional[ExprGeneratorConfig] = None,
     ):
         self.literal_generator = literal_generator
         self.rng = rng
         self.function_registry = function_registry
         self.interface_registry = interface_registry
         self.type_generator = type_generator
+        self.cfg = cfg or ExprGeneratorConfig()
 
         self._strategy_registry = StrategyRegistry()
         self._strategy_selector = StrategySelector(self.rng)
@@ -89,12 +92,6 @@ class ExprGenerator:
             "slice": self._builtin_slice,
         }
 
-    # Probability of continuing to build recursive expressions.
-    # At each level, only this fraction will attempt complex structures.
-    # P(reaching depth k) = continuation_prob^k
-    # With 0.2: depth1=20%, depth2=4%, depth3=0.8%
-    CONTINUATION_PROB = 0.2
-
     def generate(
         self, target_type: VyperType, context: GenerationContext, depth: int = 3
     ) -> ast.VyperNode:
@@ -103,7 +100,7 @@ class ExprGenerator:
             return self._generate_struct(target_type, context, depth)
 
         # Early termination: probabilistic + hard depth limit
-        if depth <= 0 or self.rng.random() > self.CONTINUATION_PROB:
+        if depth <= 0 or self.rng.random() > self.cfg.continuation_prob:
             return self._generate_terminal(target_type, context)
 
         ctx = ExprGenCtx(
@@ -143,7 +140,10 @@ class ExprGenerator:
     def _weight_var_ref(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slightly bias towards var refs when there are many
         n = len(ctx.context.find_matching_vars(ctx.target_type))
-        return 1.0 if n == 0 else min(2.0, 0.5 + 0.1 * n)
+        cfg = self.cfg
+        if n == 0:
+            return 1.0
+        return min(cfg.var_ref_weight_max, cfg.var_ref_weight_base + cfg.var_ref_weight_scale * n)
 
     def _is_unary_minus_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return isinstance(ctx.target_type, IntegerT) and ctx.target_type.is_signed
@@ -163,11 +163,20 @@ class ExprGenerator:
         # Disallow if-expressions in constant contexts due to compiler limitation
         return ctx.mutability != ExprMutability.CONST
 
+    def _weight_literal(self, **_) -> float:
+        return self.cfg.literal_weight
+
+    def _weight_ifexp(self, **_) -> float:
+        return self.cfg.ifexp_weight
+
     def _weight_subscript(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slight bias based on number of available bases
         vars_dict = dict(ctx.context.find_matching_vars(None))
         n = len(find_subscript_bases(ctx.target_type, vars_dict))
-        return 1.0 if n == 0 else min(2.5, 0.5 + 0.2 * n)
+        cfg = self.cfg
+        if n == 0:
+            return 1.0
+        return min(cfg.subscript_weight_max, cfg.subscript_weight_base + cfg.subscript_weight_scale * n)
 
     # Strategy methods
 
@@ -191,7 +200,7 @@ class ExprGenerator:
 
         matching_vars = context.find_matching_vars(target_type)
 
-        if matching_vars and self.rng.random() < 0.95:
+        if matching_vars and self.rng.random() < self.cfg.terminal_var_ref_prob:
             return self._generate_variable_ref(self.rng.choice(matching_vars), context)
         else:
             ctx = ExprGenCtx(
@@ -208,7 +217,7 @@ class ExprGenerator:
     @strategy(
         name="expr.literal",
         tags=frozenset({"expr", "terminal"}),
-        weight=lambda **_: 0.15,
+        weight="_weight_literal",
     )
     def _generate_literal(self, *, ctx: ExprGenCtx, **_) -> ast.VyperNode:
         value = self.literal_generator.generate(ctx.target_type)
@@ -274,7 +283,7 @@ class ExprGenerator:
         name="expr.ifexp",
         tags=frozenset({"expr", "recursive"}),
         is_applicable="_is_ifexp_applicable",
-        weight=lambda **_: 0.3,
+        weight="_weight_ifexp",
     )
     def _generate_ifexp(self, *, ctx: ExprGenCtx, **_) -> ast.IfExp:
         # Condition must be bool; branches must yield the same type
@@ -313,14 +322,10 @@ class ExprGenerator:
         - For SArray, guarding is still fine and semantically interesting.
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
+        cfg = self.cfg
 
         # Fixed unsigned 256-bit type for indices
         idx_t = IntegerT(False, 256)
-
-        # Strategy weights
-        p_guard = 0.60
-        p_rand = 0.35
-        # remaining 0.05 -> OOB literal
 
         roll = self.rng.random()
 
@@ -339,7 +344,7 @@ class ExprGenerator:
             # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
             i_expr = (
                 _small_literal_for_dynarray()
-                if isinstance(seq_t, DArrayT) and self.rng.random() < 0.75
+                if isinstance(seq_t, DArrayT) and self.rng.random() < cfg.dynarray_small_literal_in_guard_prob
                 else _random_uint_index()
             )
 
@@ -377,7 +382,7 @@ class ExprGenerator:
         def _oob_literal():
             cap = seq_t.length  # SArray: fixed size, DArray: max capacity
             # choose either cap (== length/capacity) or cap+1 as out-of-bounds
-            if self.rng.random() < 0.5:
+            if self.rng.random() < cfg.oob_cap_vs_cap_plus_one_prob:
                 val = cap if cap > 0 else 1
             else:
                 val = cap + 1 if cap > 0 else 1
@@ -391,11 +396,11 @@ class ExprGenerator:
             )
             return ast_builder.literal(val, idx_t)
 
-        if roll < p_guard:
+        if roll < cfg.index_guard_prob:
             return _guarded_index()
-        elif roll < p_guard + p_rand:
+        elif roll < cfg.index_guard_prob + cfg.index_random_prob:
             # Bias for DynArray to small literal sometimes
-            if isinstance(seq_t, DArrayT) and self.rng.random() < 0.6:
+            if isinstance(seq_t, DArrayT) and self.rng.random() < cfg.dynarray_small_literal_in_random_prob:
                 return _small_literal_for_dynarray()
             return _random_uint_index()
         else:
@@ -645,7 +650,7 @@ class ExprGenerator:
             if not compatible_func:
                 use_builtin = True
             else:
-                use_builtin = ctx.rng.random() < 0.4
+                use_builtin = ctx.rng.random() < self.cfg.use_builtin_when_both_available_prob
 
         if use_builtin:
             name, builtin = ctx.rng.choice(compatible_builtins)
@@ -654,7 +659,7 @@ class ExprGenerator:
             )
 
         # Fall back to user function (existing or create new)
-        if not compatible_func or ctx.rng.random() >= 0.9:
+        if not compatible_func or ctx.rng.random() < self.cfg.create_new_function_prob:
             # Create a new function (returns ast.FunctionDef or None)
             func_def = ctx.function_registry.create_new_function(
                 return_type=ctx.target_type,
@@ -896,11 +901,12 @@ class ExprGenerator:
         **_,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         # Generate slice with dynamic expressions for start/length.
-        # Bias towards valid slices (~70%), but still produce some invalid
+        # Bias towards valid slices, but still produce some invalid
         # ones to ensure compiler/runtime checks are exercised.
         if not isinstance(target_type, (BytesT, StringT)):
             return None
 
+        cfg = self.cfg
         builtins = self.function_registry.builtins if self.function_registry else {}
         ret_len = target_type.length
 
@@ -911,8 +917,7 @@ class ExprGenerator:
             arg_len = ret_len + self.rng.randint(0, 32)
             src_t = StringT(arg_len)
         else:
-            # 25% chance to slice bytes32
-            if self.rng.random() < 0.25:
+            if self.rng.random() < cfg.slice_use_bytes32_source_prob:
                 src_t = BytesM_T(32)
                 arg_len = 32
             else:
@@ -936,7 +941,7 @@ class ExprGenerator:
         rand_v = self.generate(IntegerT(False, 256), context, max(0, depth))
 
         # Valid vs invalid selection
-        make_valid = self.rng.random() < 0.7
+        make_valid = self.rng.random() < cfg.slice_valid_prob
 
         if make_valid:
             # Start: if len == 0 -> 0 else rand % len
@@ -971,11 +976,11 @@ class ExprGenerator:
             ten = ast_builder.uint256_literal(10)
 
             choice = self.rng.random()
-            if choice < 0.34:
+            if choice < cfg.slice_invalid_start_at_len_prob:
                 # start = len(arg0) (or more); length = 1
                 a1 = len_call
                 a2 = one
-            elif choice < 0.67:
+            elif choice < cfg.slice_invalid_start_plus_rand_prob:
                 # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
                 a1 = ast_builder.uint256_binop(
                     len_call, ast.Add(), ast_builder.uint256_binop(rand_u, ast.Mod(), ten)
