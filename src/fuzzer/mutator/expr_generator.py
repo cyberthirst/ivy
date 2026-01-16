@@ -44,6 +44,13 @@ from fuzzer.mutator.type_utils import (
     find_subscript_bases,
     find_nested_subscript_bases,
 )
+from fuzzer.mutator.indexing import (
+    small_literal_index,
+    build_len_call,
+    build_guarded_index,
+    pick_oob_value,
+    INDEX_TYPE,
+)
 from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
 
@@ -315,97 +322,75 @@ class ExprGenerator:
         - Guarded by len(base) (preferred)
         - Random expression (unconstrained)
         - OOB literal that forces compilation xfail (rare)
-
-        Notes:
-        - Use uint256-only indices (no signedness for now).
-        - Bias DynArray towards small literals because runtime len tends to be small.
-        - For SArray, guarding is still fine and semantically interesting.
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
         cfg = self.cfg
-
-        # Fixed unsigned 256-bit type for indices
-        idx_t = IntegerT(False, 256)
-
         roll = self.rng.random()
 
-        # Helper: literal small index for DArray bias
-        def _small_literal_for_dynarray():
-            # very small indices [0..2]
-            val = self.rng.randint(0, 2)
-            return ast_builder.literal(val, idx_t)
-
-        # Helper: generate random uint256 index expression
-        def _random_uint_index():
-            return self.generate(idx_t, context, max(0, depth))
-
-        # Helper: guarded index using len(base)
-        def _guarded_index():
-            # i if i < len(base) else (len(base)-1 if len(base) > 0 else 0)
-            i_expr = (
-                _small_literal_for_dynarray()
-                if isinstance(seq_t, DArrayT) and self.rng.random() < cfg.dynarray_small_literal_in_guard_prob
-                else _random_uint_index()
-            )
-
-            len_call = ast.Call(func=ast.Name(id="len"), args=[base_node], keywords=[])
-            len_call._metadata = getattr(len_call, "_metadata", {})
-            len_call._metadata["type"] = IntegerT(False, 256)
-
-            zero = ast_builder.uint256_literal(0)
-            one = ast_builder.uint256_literal(1)
-
-            len_gt_zero = ast.Compare(
-                left=len_call,
-                ops=[ast.Gt()],
-                comparators=[zero],
-            )
-            len_gt_zero._metadata = {"type": BoolT()}
-
-            len_minus_one = ast.BinOp(left=len_call, op=ast.Sub(), right=one)
-            len_minus_one._metadata = {"type": idx_t}
-
-            safe_fallback = ast.IfExp(
-                test=len_gt_zero,
-                body=len_minus_one,
-                orelse=zero,
-            )
-            safe_fallback._metadata = {"type": idx_t}
-
-            cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_call])
-            cond._metadata = {"type": BoolT()}
-
-            guarded = ast.IfExp(test=cond, body=i_expr, orelse=safe_fallback)
-            guarded._metadata = {"type": idx_t}
-            return guarded
-
-        def _oob_literal():
-            cap = seq_t.length  # SArray: fixed size, DArray: max capacity
-            # choose either cap (== length/capacity) or cap+1 as out-of-bounds
-            if self.rng.random() < cfg.oob_cap_vs_cap_plus_one_prob:
-                val = cap if cap > 0 else 1
-            else:
-                val = cap + 1 if cap > 0 else 1
-            # For both SArray and DArray, literal index >= declared length/capacity
-            # is detectable at compile time by Vyper
-            context.compilation_xfails.append(
-                XFailExpectation(
-                    kind="compilation",
-                    reason="generated out-of-bounds array index",
-                )
-            )
-            return ast_builder.literal(val, idx_t)
-
         if roll < cfg.index_guard_prob:
-            return _guarded_index()
+            return self._generate_guarded_index(base_node, seq_t, context, depth)
         elif roll < cfg.index_guard_prob + cfg.index_random_prob:
-            # Bias for DynArray to small literal sometimes
-            if isinstance(seq_t, DArrayT) and self.rng.random() < cfg.dynarray_small_literal_in_random_prob:
-                return _small_literal_for_dynarray()
-            return _random_uint_index()
+            return self._generate_random_index(seq_t, context, depth)
         else:
-            # Only makes sense for SArray where cap is static; still set xfail
-            return _oob_literal()
+            return self._generate_oob_index(seq_t, context)
+
+    def _generate_guarded_index(
+        self,
+        base_node: ast.VyperNode,
+        seq_t: _SequenceT,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.IfExp:
+        """Generate a bounds-guarded index expression."""
+        cfg = self.cfg
+
+        # Choose the raw index expression (biased towards small literals for DynArray)
+        use_small = (
+            isinstance(seq_t, DArrayT)
+            and self.rng.random() < cfg.dynarray_small_literal_in_guard_prob
+        )
+        if use_small:
+            i_expr = small_literal_index(self.rng)
+        else:
+            i_expr = self.generate(INDEX_TYPE, context, max(0, depth))
+
+        len_call = build_len_call(base_node)
+        return build_guarded_index(i_expr, len_call)
+
+    def _generate_random_index(
+        self,
+        seq_t: _SequenceT,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.VyperNode:
+        """Generate a random (unconstrained) index expression."""
+        cfg = self.cfg
+
+        # Bias DynArray towards small literals
+        use_small = (
+            isinstance(seq_t, DArrayT)
+            and self.rng.random() < cfg.dynarray_small_literal_in_random_prob
+        )
+        if use_small:
+            return small_literal_index(self.rng)
+        return self.generate(INDEX_TYPE, context, max(0, depth))
+
+    def _generate_oob_index(
+        self,
+        seq_t: _SequenceT,
+        context: GenerationContext,
+    ) -> ast.Int:
+        """Generate an out-of-bounds literal index (triggers compilation xfail)."""
+        cfg = self.cfg
+        val = pick_oob_value(seq_t.length, self.rng, cfg.oob_cap_vs_cap_plus_one_prob)
+
+        context.compilation_xfails.append(
+            XFailExpectation(
+                kind="compilation",
+                reason="generated out-of-bounds array index",
+            )
+        )
+        return ast_builder.literal(val, INDEX_TYPE)
 
     def build_chain_to_target(
         self,
