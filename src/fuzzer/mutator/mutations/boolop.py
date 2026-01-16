@@ -2,37 +2,20 @@ from __future__ import annotations
 
 from vyper.ast import nodes as ast
 
-from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
-
-
-def register(registry: StrategyRegistry) -> None:
-    registry.register(
-        Strategy(
-            name="boolop.duplicate_operand",
-            type_classes=(ast.BoolOp,),
-            tags=frozenset({"mutation", "boolop"}),
-            is_applicable=_has_multiple_values,
-            weight=lambda **_: 1.0,
-            run=_duplicate_operand,
-        )
-    )
-    registry.register(
-        Strategy(
-            name="boolop.swap_and_or",
-            type_classes=(ast.BoolOp,),
-            tags=frozenset({"mutation", "boolop"}),
-            is_applicable=lambda **_: True,
-            weight=lambda **_: 1.0,
-            run=_swap_and_or,
-        )
-    )
 
 
 def _has_multiple_values(*, ctx: MutationCtx, **_) -> bool:
     return len(ctx.node.values) >= 2
 
 
+@strategy(
+    name="boolop.duplicate_operand",
+    type_classes=(ast.BoolOp,),
+    tags=frozenset({"mutation", "boolop"}),
+    is_applicable="_has_multiple_values",
+)
 def _duplicate_operand(*, ctx: MutationCtx, **_) -> ast.BoolOp:
     """Duplicate one operand (a and b → a and a)."""
     idx = ctx.rng.randint(0, len(ctx.node.values) - 1)
@@ -41,6 +24,11 @@ def _duplicate_operand(*, ctx: MutationCtx, **_) -> ast.BoolOp:
     return ctx.node
 
 
+@strategy(
+    name="boolop.swap_and_or",
+    type_classes=(ast.BoolOp,),
+    tags=frozenset({"mutation", "boolop"}),
+)
 def _swap_and_or(*, ctx: MutationCtx, **_) -> ast.BoolOp:
     """Swap between And and Or."""
     if isinstance(ctx.node.op, ast.And):

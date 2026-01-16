@@ -55,6 +55,89 @@ class Strategy:
         return w if w > 0 else 0.0
 
 
+def strategy(
+    *,
+    name: Optional[str] = None,
+    tags: Optional[Iterable[str]] = None,
+    type_classes: Optional[tuple[type, ...]] = None,
+    priority: int = 0,
+    is_applicable: PredicateFn | str | None = None,
+    weight: WeightFn | str | None = None,
+) -> Callable[[Runner], Runner]:
+    def decorator(fn: Runner) -> Runner:
+        spec = {
+            "name": name or fn.__name__,
+            "tags": frozenset(tags or ()),
+            "type_classes": type_classes,
+            "priority": priority,
+            "is_applicable": is_applicable,
+            "weight": weight,
+        }
+        setattr(fn, "_strategy_spec", spec)
+        return fn
+
+    return decorator
+
+
+def _resolve_callable(obj: Any, value: Any, *, label: str, strategy_name: str) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        resolved = getattr(obj, value)
+    else:
+        try:
+            candidate = getattr(obj, value.__name__)
+        except Exception:
+            resolved = value
+        else:
+            if getattr(candidate, "__func__", None) is value:
+                resolved = candidate
+            else:
+                resolved = value
+
+    if resolved is not None and not callable(resolved):
+        raise TypeError(
+            f"strategy {label} must be callable or None, "
+            f"got {type(resolved).__name__} for {strategy_name}"
+        )
+    return resolved
+
+
+def register_decorated(registry: "StrategyRegistry", obj: Any) -> None:
+    for name in dir(obj):
+        attr = getattr(obj, name)
+        spec = getattr(attr, "_strategy_spec", None)
+        if spec is None and hasattr(attr, "__func__"):
+            # Bound methods store decorator metadata on the underlying function.
+            spec = getattr(attr.__func__, "_strategy_spec", None)
+        if spec is None:
+            # Skip attributes that aren't decorated strategies.
+            continue
+        if not callable(attr):
+            # Defensive: avoid non-callable attributes carrying metadata.
+            continue
+
+        resolved = dict(spec)
+        resolved["tags"] = frozenset(resolved.get("tags") or ())
+        type_classes = resolved.get("type_classes")
+        if type_classes is not None and not isinstance(type_classes, tuple):
+            resolved["type_classes"] = tuple(type_classes)
+        resolved["is_applicable"] = _resolve_callable(
+            obj,
+            resolved.get("is_applicable"),
+            label="is_applicable",
+            strategy_name=resolved["name"],
+        )
+        resolved["weight"] = _resolve_callable(
+            obj,
+            resolved.get("weight"),
+            label="weight",
+            strategy_name=resolved["name"],
+        )
+
+        registry.register(Strategy(run=attr, **resolved))
+
+
 class StrategyRegistry:
     """Simple registry with direct filtering.
 
