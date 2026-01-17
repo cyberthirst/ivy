@@ -15,6 +15,7 @@ from vyper.semantics.types import (
     BytesM_T,
     BytesT,
     DecimalT,
+    FlagT,
     IntegerT,
     InterfaceT,
     StringT,
@@ -63,6 +64,9 @@ class ValueMutator(BaseValueGenerator):
         if isinstance(vyper_type, BytesM_T):
             value = self._coerce_hex_bytes(value, vyper_type)
             return self._mutate_bytes_m(value, vyper_type.length)
+
+        if isinstance(vyper_type, FlagT):
+            return self._mutate_flag(value, vyper_type)
 
         # For complex types, regenerate
         return self.generate(vyper_type)
@@ -141,6 +145,13 @@ class ValueMutator(BaseValueGenerator):
                 b"\xff" * vyper_type.length,
                 self.rng.randbytes(vyper_type.length),
             ]
+
+        elif isinstance(vyper_type, FlagT):
+            n_members = len(vyper_type._flag_members)
+            # Boundary values: empty, all flags, single flags
+            values = [0, (1 << n_members) - 1]  # empty and all-set
+            values.extend(1 << i for i in range(n_members))  # individual flags
+            return values
 
         return [self.generate(vyper_type)]
 
@@ -322,6 +333,33 @@ class ValueMutator(BaseValueGenerator):
         int_part = self.rng.randint(-1000, 1000)
         frac_part = self.rng.randint(0, 9999999999)
         return Decimal(f"{int_part}.{frac_part:010d}")
+
+    def _generate_flag(self, vyper_type: FlagT) -> int:
+        """Generate a flag value (bitmask of flag members)."""
+        n_members = len(vyper_type._flag_members)
+        boundary_values = self.get_boundary_values(vyper_type)
+
+        if self.rng.random() < 0.7 and boundary_values:
+            return self.rng.choice(boundary_values)
+        else:
+            # Random combination of flags
+            return self.rng.randint(0, (1 << n_members) - 1)
+
+    def _mutate_flag(self, value: int, vyper_type: FlagT) -> int:
+        """Mutate a flag value."""
+        n_members = len(vyper_type._flag_members)
+        max_val = (1 << n_members) - 1
+
+        mutation_type = self.rng.choice(["boundary", "flip_bit", "random"])
+
+        if mutation_type == "boundary":
+            return self.rng.choice(self.get_boundary_values(vyper_type))
+        elif mutation_type == "flip_bit":
+            # Flip a random bit
+            bit = self.rng.randint(0, n_members - 1)
+            return (value ^ (1 << bit)) & max_val
+        else:
+            return self.rng.randint(0, max_val)
 
     def mutate_eth_value(self, call_value: int, is_payable: bool) -> int:
         """Mutate ETH value for payable functions."""

@@ -17,6 +17,7 @@ from vyper.semantics.types import (
     BytesT,
     DArrayT,
     DecimalT,
+    FlagT,
     IntegerT,
     StringT,
     VyperType,
@@ -109,3 +110,7 @@ class LiteralGenerator(BaseValueGenerator):
                 Decimal("1.5"),
             ]
         )
+
+    def _generate_flag(self, vyper_type: FlagT) -> int:
+        # Delegate to boundary generator for flag values
+        return self._boundary_generator._generate_flag(vyper_type)

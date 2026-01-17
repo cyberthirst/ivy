@@ -19,6 +19,7 @@ from vyper.semantics.types import (
     BytesT,
     DArrayT,
     DecimalT,
+    FlagT,
     IntegerT,
     InterfaceT,
     SArrayT,
@@ -48,6 +49,7 @@ class BaseValueGenerator(ABC):
             AddressT: self._generate_address,
             InterfaceT: self._generate_address,
             DecimalT: self._generate_decimal,
+            FlagT: self._generate_flag,
         }
 
     def generate(self, vyper_type: VyperType) -> Any:
@@ -94,3 +96,6 @@ class BaseValueGenerator(ABC):
 
     @abstractmethod
     def _generate_decimal(self, vyper_type: DecimalT) -> Decimal: ...
+
+    @abstractmethod
+    def _generate_flag(self, vyper_type: FlagT) -> int: ...

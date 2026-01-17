@@ -21,6 +21,7 @@ from vyper.semantics.types import (
     DArrayT,
     TupleT,
     StructT,
+    FlagT,
 )
 
 
@@ -104,6 +105,45 @@ def _struct_to_ast(value: dict, typ: StructT) -> ast.Call:
     return call_node
 
 
+def _flag_to_ast(value: int, typ: FlagT) -> ast.VyperNode:
+    """Convert an integer bitmask to flag member AST (e.g., Roles.ADMIN | Roles.USER)."""
+    flag_name = typ._id
+    members = typ._flag_members  # dict: member_name -> index
+
+    # Find which bits are set
+    set_members = []
+    for member_name, index in members.items():
+        if value & (1 << index):
+            set_members.append(member_name)
+
+    # Handle empty flag (value == 0): use first member XOR'd with itself
+    if not set_members:
+        first_member = next(iter(members.keys()))
+        member_node = ast.Attribute(value=ast.Name(id=flag_name), attr=first_member)
+        member_node._metadata["type"] = typ
+        node = ast.BinOp(left=member_node, op=ast.BitXor(), right=member_node)
+        node._metadata["type"] = typ
+        return node
+
+    # Build AST nodes for each set member
+    member_nodes = []
+    for member_name in set_members:
+        attr_node = ast.Attribute(value=ast.Name(id=flag_name), attr=member_name)
+        attr_node._metadata["type"] = typ
+        member_nodes.append(attr_node)
+
+    # Single member: return directly
+    if len(member_nodes) == 1:
+        return member_nodes[0]
+
+    # Multiple members: chain with BitOr
+    result = member_nodes[0]
+    for node in member_nodes[1:]:
+        result = ast.BinOp(left=result, op=ast.BitOr(), right=node)
+        result._metadata["type"] = typ
+    return result
+
+
 _LITERAL_BUILDERS = {
     IntegerT: _int_to_ast,
     BoolT: _bool_to_ast,
@@ -116,6 +156,7 @@ _LITERAL_BUILDERS = {
     DArrayT: _array_to_ast,
     TupleT: _tuple_to_ast,
     StructT: _struct_to_ast,
+    FlagT: _flag_to_ast,
 }
 
 
