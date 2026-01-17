@@ -196,12 +196,19 @@ class ExprVisitor(BaseVisitor):
 
         return value, value_refresher
 
-    def visit_Subscript(self, node: ast.Subscript):
-        container, refresh = self._eval_with_refresh(node.value)
+    def _eval_subscript_location(self, node: ast.Subscript):
+        """
+        Evaluate a subscript, returning (container, index, current_value).
+        Refreshes container after index evaluation to handle side effects.
+        """
+        _, refresh = self._eval_with_refresh(node.value)
         index = self.visit(node.slice)
-
         container = refresh()
-        return container[index]
+        return container, index, container[index]
+
+    def visit_Subscript(self, node: ast.Subscript):
+        _, _, value = self._eval_subscript_location(node)
+        return value
 
     def _eval_op(self, node, *args):
         handler = get_operator_handler(node.op)
