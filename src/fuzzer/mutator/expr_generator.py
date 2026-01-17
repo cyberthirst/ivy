@@ -134,6 +134,7 @@ class ExprGenerator:
             strategies,
             policy="weighted_random",  # TODO nested hash maps
             context={"ctx": ctx},
+            fallback=lambda: self._generate_terminal(target_type, context),
         )
 
     def _register_strategies(self) -> None:
