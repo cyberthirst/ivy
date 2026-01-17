@@ -1,8 +1,10 @@
 # ivy/evaluator/operators.py
 from typing import Any, Callable, Type
 from vyper.ast import nodes as ast
+from vyper.semantics.types.primitives import IntegerT, BytesM_T
+from vyper.semantics.types.user import FlagT
 from vyper.utils import unsigned_to_signed
-from ivy.types import VyperDecimal, Flag
+from ivy.types import VyperDecimal
 
 
 OPERATOR_REGISTRY: dict[Type[ast.VyperNode], Callable[..., Any]] = {}
@@ -193,11 +195,18 @@ def usub_op(operand: Any) -> Any:
 
 @register_operator(ast.Invert)
 def invert_op(operand: Any, *, typ) -> Any:
-    if isinstance(operand, Flag):
+    assert isinstance(typ, (IntegerT, BytesM_T, FlagT)), f"Invert not supported for {typ}"
+
+    if isinstance(typ, FlagT):
         return ~operand
 
-    bits = typ.bits
-    mask = (1 << bits) - 1
+    if isinstance(typ, BytesM_T):
+        val = int.from_bytes(operand, "big")
+        mask = (1 << typ.m_bits) - 1
+        inverted = mask ^ val
+        return inverted.to_bytes(typ.length, "big")
+
+    mask = (1 << typ.bits) - 1
     return mask ^ operand
 
 

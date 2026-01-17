@@ -4,6 +4,9 @@ from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
 from vyper.codegen.core import calculate_type_for_external_return
 from vyper.semantics.types import VyperType
+from vyper.semantics.types.module import ModuleT
+from vyper.semantics.types.user import StructT
+from vyper.semantics.types.primitives import SelfT
 from vyper.utils import method_id
 
 from ivy.abi import abi_encode
@@ -57,11 +60,13 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def _revert_with_msg(self, msg_node, is_assert=False):
-        msg_string = self.visit(msg_node)
-
-        assert isinstance(msg_string, str)
-        if msg_string == "UNREACHABLE":
+        # Check for UNREACHABLE before evaluating - it's a special AST node
+        # without _expr_info metadata, so visit() would fail
+        if isinstance(msg_node, ast.Name) and msg_node.id == "UNREACHABLE":
             raise Invalid()
+
+        msg_string = self.visit(msg_node)
+        assert isinstance(msg_string, str)
 
         # encode the msg and raise Revert
         error_method_id = method_id("Error(string)")
@@ -123,13 +128,31 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def visit_AugAssign(self, node: ast.AugAssign):
-        target_val = self.visit(node.target)
-        rhs_val = self.visit(node.value)
+        target = node.target
 
-        handler = get_operator_handler(node.op)
-        new_val = handler(target_val, rhs_val)
-        new_val = box_value_from_node(node.target, new_val)
-        self._assign_target(node.target, new_val)
+        # Evaluate target once, caching location info for reuse
+        container = index = obj = None
+        if isinstance(target, ast.Subscript):
+            container, index, target_val = self._eval_subscript_location(target)
+        elif isinstance(target, ast.Attribute):
+            typ = target.value._metadata["type"]
+            if isinstance(typ, (SelfT, ModuleT)):
+                target_val = self.visit(target)
+            else:
+                # Struct attribute - base might have side effects
+                _, refresh = self._eval_with_refresh(target.value)
+                obj = refresh()
+                target_val = obj[target.attr]
+        else:
+            target_val = self.visit(target)
+
+        # Compute new value
+        rhs_val = self.visit(node.value)
+        new_val = get_operator_handler(node.op)(target_val, rhs_val)
+        new_val = box_value_from_node(target, new_val)
+
+        # Assign with cached location info
+        self._assign_target(target, new_val, _container=container, _index=index, _obj=obj)
         return None
 
     def visit_Continue(self, node: ast.Continue):

@@ -434,11 +434,15 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def _new_local(self, identifier: str, typ: VyperType):
         self.memory.new_variable(identifier, typ)
 
-    def _assign_target(self, target, value):
+    def _assign_target(self, target, value, _container=None, _index=None, _obj=None):
+        """
+        Assign value to target. For augmented assignment, pass pre-evaluated
+        _container/_index (for Subscript) or _obj (for Attribute) to avoid
+        re-evaluating expressions with side effects.
+        """
         if isinstance(target, ast.Tuple):
             if not isinstance(value, (tuple, IvyTuple)):
                 raise TypeError("Cannot unpack non-iterable to tuple")
-            # Normalize IvyTuple to a sequence of values
             seq = tuple(value) if isinstance(value, IvyTuple) else value
             if len(target.elements) != len(seq):
                 raise ValueError("Mismatch in number of items to unpack")
@@ -447,8 +451,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         elif isinstance(target, ast.Name):
             self.set_variable(target.id, value, target)
         elif isinstance(target, ast.Subscript):
-            container = self.visit(target.value)
-            index = self.visit(target.slice)
+            if _container is not None and _index is not None:
+                container, index = _container, _index
+            else:
+                container = self.visit(target.value)
+                index = self.visit(target.slice)
             loc = target._expr_info.location
             if isinstance(container, (Map, StaticArray, DynamicArray)):
                 container.__setitem__(index, value, loc)
@@ -461,7 +468,10 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
                 self.set_variable(target.attr, value, target)
             else:
                 assert isinstance(typ, StructT)
-                obj = self.visit(target.value)
+                if _obj is not None:
+                    obj = _obj
+                else:
+                    obj = self.visit(target.value)
                 loc = target._expr_info.location
                 assert isinstance(obj, Struct)
                 obj.__setitem__(target.attr, value, loc)

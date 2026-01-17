@@ -527,11 +527,16 @@ def builtin_uint256_mulmod(a: int, b: int, c: int) -> int:
 
 def builtin_shift(x: int, shift: int) -> int:
     """Shift x by shift bits. Positive = left shift, negative = right shift.
-    Always returns uint256.
+    For signed types, converts the result to signed representation when >= 2^255.
     """
     if shift >= 0:
-        return (x << shift) % 2**256
-    return x >> (-shift)
+        result = (x << shift) % 2**256
+    else:
+        result = x >> (-shift)
+
+    if x.typ.is_signed and result >= 2**255:
+        result -= 2**256
+    return result
 
 
 def builtin_keccak256(value: Union[str, bytes]) -> bytes:

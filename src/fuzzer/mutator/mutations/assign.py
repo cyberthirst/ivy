@@ -2,31 +2,8 @@ from __future__ import annotations
 
 from vyper.ast import nodes as ast
 
-from fuzzer.mutator.strategy import Strategy, StrategyRegistry
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
-
-
-def register(registry: StrategyRegistry) -> None:
-    registry.register(
-        Strategy(
-            name="assign.use_var_as_rhs",
-            type_classes=(ast.Assign,),
-            tags=frozenset({"mutation", "assign"}),
-            is_applicable=_has_matching_var,
-            weight=lambda **_: 1.0,
-            run=_use_var_as_rhs,
-        )
-    )
-    registry.register(
-        Strategy(
-            name="assign.generate_new_expr",
-            type_classes=(ast.Assign,),
-            tags=frozenset({"mutation", "assign"}),
-            is_applicable=_has_rhs_type,
-            weight=lambda **_: 1.0,
-            run=_generate_new_expr,
-        )
-    )
 
 
 def _has_rhs_type(*, ctx: MutationCtx, **_) -> bool:
@@ -39,6 +16,12 @@ def _has_matching_var(*, ctx: MutationCtx, **_) -> bool:
     )
 
 
+@strategy(
+    name="assign.use_var_as_rhs",
+    type_classes=(ast.Assign,),
+    tags=frozenset({"mutation", "assign"}),
+    is_applicable="_has_matching_var",
+)
 def _use_var_as_rhs(*, ctx: MutationCtx, **_) -> ast.Assign:
     assert ctx.inferred_type is not None
     other_var = ctx.expr_gen.random_var_ref(ctx.inferred_type, ctx.context)
@@ -47,6 +30,12 @@ def _use_var_as_rhs(*, ctx: MutationCtx, **_) -> ast.Assign:
     return ctx.node
 
 
+@strategy(
+    name="assign.generate_new_expr",
+    type_classes=(ast.Assign,),
+    tags=frozenset({"mutation", "assign"}),
+    is_applicable="_has_rhs_type",
+)
 def _generate_new_expr(*, ctx: MutationCtx, **_) -> ast.Assign:
     new_expr = ctx.expr_gen.generate(ctx.inferred_type, ctx.context, depth=2)
     ctx.node.value = new_expr
