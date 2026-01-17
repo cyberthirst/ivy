@@ -16,6 +16,7 @@ from vyper.semantics.types import (
     BytesT,
     DecimalT,
     IntegerT,
+    InterfaceT,
     StringT,
     VyperType,
 )
@@ -46,7 +47,7 @@ class ValueMutator(BaseValueGenerator):
         if isinstance(vyper_type, IntegerT):
             return self._mutate_integer(value, vyper_type)
 
-        if isinstance(vyper_type, AddressT):
+        if isinstance(vyper_type, (AddressT, InterfaceT)):
             return self._mutate_address(value)
 
         if isinstance(vyper_type, BoolT):
@@ -108,6 +109,7 @@ class ValueMutator(BaseValueGenerator):
                 to_checksum_address("0x0000000000000000000000000000000000000001"),
                 to_checksum_address("0x0000000000000000000000000000000000000002"),
                 to_checksum_address("0x0000000000000000000000000000000000000003"),
+                to_checksum_address("0x0000000000000000000000000000000000000004"),
                 to_checksum_address("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
                 to_checksum_address("0xdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeF"),
             ]

@@ -20,6 +20,7 @@ from vyper.semantics.types import (
     DArrayT,
     DecimalT,
     IntegerT,
+    InterfaceT,
     SArrayT,
     StringT,
     StructT,
@@ -45,6 +46,7 @@ class BaseValueGenerator(ABC):
             BytesM_T: self._generate_bytes_m,
             BoolT: self._generate_bool,
             AddressT: self._generate_address,
+            InterfaceT: self._generate_address,
             DecimalT: self._generate_decimal,
         }
 
