@@ -57,11 +57,13 @@ class StmtVisitor(BaseVisitor):
         return None
 
     def _revert_with_msg(self, msg_node, is_assert=False):
-        msg_string = self.visit(msg_node)
-
-        assert isinstance(msg_string, str)
-        if msg_string == "UNREACHABLE":
+        # Check for UNREACHABLE before evaluating - it's a special AST node
+        # without _expr_info metadata, so visit() would fail
+        if isinstance(msg_node, ast.Name) and msg_node.id == "UNREACHABLE":
             raise Invalid()
+
+        msg_string = self.visit(msg_node)
+        assert isinstance(msg_string, str)
 
         # encode the msg and raise Revert
         error_method_id = method_id("Error(string)")
