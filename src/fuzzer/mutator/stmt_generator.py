@@ -9,6 +9,9 @@ from vyper.semantics.types import (
     VyperType,
     BoolT,
     HashMapT,
+    SArrayT,
+    DArrayT,
+    IntegerT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
@@ -78,6 +81,11 @@ class StatementGenerator:
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
+    def _is_for_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
+            return False
+        return ctx.depth < self.cfg.max_depth
+
     def _weight_vardecl(self, **_) -> float:
         return self.cfg.vardecl_weight
 
@@ -86,6 +94,17 @@ class StatementGenerator:
 
     def _weight_if(self, **_) -> float:
         return self.cfg.if_weight
+
+    def _weight_for(self, **_) -> float:
+        return self.cfg.for_weight
+
+    def _build_var_ref(
+        self, var_name: str, var_info: VarInfo
+    ) -> ast.VyperNode:
+        """Build an AST reference to a variable (self.x for storage/transient, x for local)."""
+        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
+            return ast.Attribute(value=ast.Name(id="self"), attr=var_name)
+        return ast.Name(id=var_name)
 
     def _create_var_info(
         self,
@@ -381,10 +400,7 @@ class StatementGenerator:
         var_name, var_info = ctx.rng.choice(writable_vars)
 
         # Build base reference (self.x or local)
-        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
-            base = ast.Attribute(value=ast.Name(id="self"), attr=var_name)
-        else:
-            base = ast.Name(id=var_name)
+        base = self._build_var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
         # Decide if we target a subscript (for arrays/hashmaps/tuples) and allow nesting
@@ -496,10 +512,127 @@ class StatementGenerator:
 
         return var_decl, var_name, var_info
 
-    def generate_for(
-        self, context, parent: Optional[ast.VyperNode], depth: int
-    ) -> ast.For:
-        pass
+    def _generate_range_iter(
+        self, ctx: StmtGenCtx
+    ) -> tuple[ast.Call, IntegerT]:
+        """Generate a range(N) iteration with literal N.
+
+        Returns (iter_node, element_type).
+        """
+        # For now, always use uint256 for the loop variable
+        target_type = IntegerT(False, 256)  # uint256
+
+        # Generate a random stop value between 1 and max_range_stop
+        stop_val = ctx.rng.randint(1, self.cfg.for_max_range_stop)
+
+        iter_node = ast.Call(
+            func=ast.Name(id="range"),
+            args=[ast.Int(value=stop_val)],
+            keywords=[],
+        )
+
+        return iter_node, target_type
+
+    def _generate_array_iter(
+        self, ctx: StmtGenCtx
+    ) -> tuple[ast.VyperNode, VyperType, Optional[str], Optional[VarInfo]]:
+        """Generate array iteration (over existing variable or literal).
+
+        Returns (iter_node, element_type, iterated_var_name, iterated_var_info).
+        iterated_var_name/info are None if iterating over a literal array.
+        """
+        iterable_arrays = ctx.context.find_iterable_arrays()
+
+        # Prefer existing array if available and probability check passes
+        if iterable_arrays and ctx.rng.random() < self.cfg.for_prefer_existing_array_prob:
+            var_name, var_info = ctx.rng.choice(iterable_arrays)
+            element_type = var_info.typ.value_type
+            iter_node = self._build_var_ref(var_name, var_info)
+            return iter_node, element_type, var_name, var_info
+
+        # Fall back to generating a literal array
+        # Generate a base type for elements (leaf type, nesting=0)
+        element_type = self.type_generator.generate_simple_type()
+
+        # Generate 1-5 elements
+        num_elements = ctx.rng.randint(1, 5)
+        elements = []
+        for _ in range(num_elements):
+            elem = self.expr_generator.generate(element_type, ctx.context, depth=2)
+            elements.append(elem)
+
+        iter_node = ast.List(elements=elements)
+        return iter_node, element_type, None, None
+
+    @strategy(
+        name="stmt.for",
+        tags=frozenset({"stmt", "recursive"}),
+        is_applicable="_is_for_applicable",
+        weight="_weight_for",
+    )
+    def generate_for(self, *, ctx: StmtGenCtx, **_) -> ast.For:
+        """Generate a for loop statement.
+
+        Supports:
+        - range(N) iteration with literal N
+        - Array iteration over existing SArrayT/DArrayT variables
+        - Literal array iteration as fallback
+        """
+        # Decide: range vs array iteration
+        use_range = ctx.rng.random() < self.cfg.for_use_range_prob
+
+        iterated_var_name: Optional[str] = None
+        iterated_var_info: Optional[VarInfo] = None
+
+        if use_range:
+            iter_node, target_type = self._generate_range_iter(ctx)
+        else:
+            iter_node, target_type, iterated_var_name, iterated_var_info = (
+                self._generate_array_iter(ctx)
+            )
+
+        # Generate loop variable name
+        loop_var_name = self.name_generator.generate()
+
+        # Build target (AnnAssign structure as expected by Vyper)
+        target = ast.AnnAssign(
+            target=ast.Name(id=loop_var_name),
+            annotation=ast.Name(id=str(target_type)),
+            value=None,
+        )
+
+        # Create For node
+        for_node = ast.For(target=target, iter=iter_node, body=[])
+
+        # Enter FOR scope and generate body
+        with ctx.context.new_scope(ScopeType.FOR):
+            # Register loop variable as RUNTIME_CONSTANT (cannot be reassigned)
+            loop_var_info = self._create_var_info(
+                typ=target_type,
+                location=DataLocation.MEMORY,
+                modifiability=Modifiability.RUNTIME_CONSTANT,
+            )
+            self.add_variable(ctx.context, loop_var_name, loop_var_info)
+
+            # Shadow the iterated array variable as read-only to prevent direct writes.
+            # Note: This doesn't prevent indirect modifications via function calls;
+            # the Vyper compiler will catch those cases.
+            if iterated_var_name is not None and iterated_var_info is not None:
+                readonly_var_info = self._create_var_info(
+                    typ=iterated_var_info.typ,
+                    location=iterated_var_info.location,
+                    modifiability=Modifiability.RUNTIME_CONSTANT,
+                )
+                self.add_variable(ctx.context, iterated_var_name, readonly_var_info)
+
+            # Generate body statements
+            self.inject_statements(for_node.body, ctx.context, for_node, ctx.depth + 1)
+
+            # Ensure body is not empty
+            if not for_node.body:
+                for_node.body.append(ast.Pass())
+
+        return for_node
 
     def generate_augassign(
         self, context, parent: Optional[ast.VyperNode]

@@ -91,6 +91,12 @@ class StmtGeneratorConfig:
     # Assignment
     subscript_assignment_prob: float = 0.7
 
+    # For loop generation
+    for_weight: float = 0.25
+    for_use_range_prob: float = 0.5  # vs array iteration
+    for_prefer_existing_array_prob: float = 0.8  # vs literal array
+    for_max_range_stop: int = 10  # cap for range(STOP)
+
 
 @dataclass
 class MutatorConfig:

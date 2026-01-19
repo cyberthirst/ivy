@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from enum import Enum, auto
 
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
-from vyper.semantics.types import VyperType
+from vyper.semantics.types import VyperType, SArrayT, DArrayT
 from vyper.semantics.types.function import StateMutability
 
 from fuzzer.xfail import XFailExpectation
@@ -63,6 +63,11 @@ class GenerationContext:
         for var_name in self.current_scope.vars:
             if var_name in self.all_vars:
                 del self.all_vars[var_name]
+                # Restore shadowed variable from outer scope if it exists
+                for outer_scope in reversed(self.scope_stack):
+                    if var_name in outer_scope.vars:
+                        self.all_vars[var_name] = outer_scope.vars[var_name]
+                        break
         self.current_scope = self.scope_stack.pop()
 
     def add_variable(self, name: str, var_info: VarInfo) -> None:
@@ -152,3 +157,11 @@ class GenerationContext:
 
             candidates.append((name, var_info))
         return candidates
+
+    def find_iterable_arrays(self) -> list[tuple[str, VarInfo]]:
+        """Find arrays (SArrayT or DArrayT) that can be iterated over."""
+        return [
+            (name, var_info)
+            for name, var_info in self.all_vars.items()
+            if isinstance(var_info.typ, (SArrayT, DArrayT))
+        ]
