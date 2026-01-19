@@ -227,28 +227,24 @@ class StatementGenerator:
 
         return var_name, var_info
 
-    def inject_statements(
+    def inject_variable_decls(
         self,
         body: list,
         context: GenerationContext,
         parent: Optional[ast.VyperNode] = None,
         depth: int = 0,
-        n_stmts: Optional[int] = None,
-    ) -> None:
-        """
-        Inject statements into body. Doesn't inject functions, those are generated lazily
-        based on call_expr demand.
-        """
+        min_stmts: int = 0,
+        max_stmts: int = 2,
+    ) -> int:
+        """Inject variable declarations into body."""
         cfg = self.cfg
         if depth > cfg.max_depth:
-            return
+            return 0
 
-        if n_stmts is None:
-            if self.rng.random() > cfg.inject_prob:
-                return
+        if max_stmts < min_stmts:
+            max_stmts = min_stmts
 
-        # Generate variables first and insert at beginning
-        num_vars = self.rng.randint(0, 2)
+        num_vars = self.rng.randint(min_stmts, max_stmts)
         for i in range(num_vars):
             ctx = StmtGenCtx(
                 context=context,
@@ -262,15 +258,56 @@ class StatementGenerator:
             var_decl = self.create_vardecl_and_register(ctx=ctx)
             body.insert(i, var_decl)
 
+        return num_vars
+
+    def inject_random_statements(
+        self,
+        body: list,
+        context: GenerationContext,
+        parent: Optional[ast.VyperNode] = None,
+        depth: int = 0,
+        min_stmts: Optional[int] = None,
+        max_stmts: Optional[int] = None,
+        min_vardecls: int = 0,
+        max_vardecls: int = 2,
+        *,
+        inject_prob: Optional[float] = None,
+        include_vardecls: bool = True,
+        leading_vars: int = 0,
+    ) -> None:
+        """
+        Inject random statements into body.
+
+        min_stmts/max_stmts apply to non-variable statements.
+        include_vardecls controls whether variable declarations are injected.
+        """
+        cfg = self.cfg
+        if depth > cfg.max_depth:
+            return
+
+        if inject_prob is not None and self.rng.random() > inject_prob:
+            return
+
+        min_count = cfg.min_stmts if min_stmts is None else min_stmts
+        max_count = cfg.max_stmts if max_stmts is None else max_stmts
+        if max_count < min_count:
+            max_count = min_count
+
+        num_vars = max(0, min(leading_vars, len(body)))
+        if include_vardecls:
+            num_vars = self.inject_variable_decls(
+                body,
+                context,
+                parent=parent,
+                depth=depth,
+                min_stmts=min_vardecls,
+                max_stmts=max_vardecls,
+            )
+
         if context.is_module_scope:
             return
 
-        # Generate other statements
-        if n_stmts is not None:
-            num_other_stmts = n_stmts
-        else:
-            num_other_stmts = self.rng.randint(cfg.min_stmts, cfg.max_stmts)
-
+        num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate_statement(context, parent, depth)
             # Insert before the last statement to avoid inserting after return
@@ -290,6 +327,47 @@ class StatementGenerator:
             if return_type is not None and not self.scope_is_terminated(body):
                 ret_expr = self.expr_generator.generate(return_type, context, depth=2)
                 body.append(ast.Return(value=ret_expr))
+
+    def inject_statements(
+        self,
+        body: list,
+        context: GenerationContext,
+        parent: Optional[ast.VyperNode] = None,
+        depth: int = 0,
+        min_stmts: Optional[int] = None,
+        max_stmts: Optional[int] = None,
+        min_vardecls: int = 0,
+        max_vardecls: int = 2,
+        *,
+        inject_prob: Optional[float] = None,
+    ) -> None:
+        """Inject variable declarations, then random statements (legacy behavior)."""
+        cfg = self.cfg
+        if depth > cfg.max_depth:
+            return
+
+        if inject_prob is not None and self.rng.random() > inject_prob:
+            return
+
+        num_vars = self.inject_variable_decls(
+            body,
+            context,
+            parent=parent,
+            depth=depth,
+            min_stmts=min_vardecls,
+            max_stmts=max_vardecls,
+        )
+        self.inject_random_statements(
+            body,
+            context,
+            parent=parent,
+            depth=depth,
+            min_stmts=min_stmts,
+            max_stmts=max_stmts,
+            inject_prob=None,
+            include_vardecls=False,
+            leading_vars=num_vars,
+        )
 
     def generate_statement(
         self,
@@ -363,14 +441,30 @@ class StatementGenerator:
         if_node = ast.If(test=test_expr, body=[], orelse=[])
 
         with ctx.context.new_scope(ScopeType.IF):
-            self.inject_statements(if_node.body, ctx.context, if_node, ctx.depth + 1)
+            self.inject_statements(
+                if_node.body,
+                ctx.context,
+                if_node,
+                ctx.depth + 1,
+                min_stmts=self.cfg.min_stmts,
+                max_stmts=self.cfg.max_stmts,
+                inject_prob=self.cfg.inject_prob,
+            )
 
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
         if ctx.rng.random() < self.cfg.generate_else_branch_prob:
             with ctx.context.new_scope(ScopeType.IF):
-                self.inject_statements(if_node.orelse, ctx.context, if_node, ctx.depth + 1)
+                self.inject_statements(
+                    if_node.orelse,
+                    ctx.context,
+                    if_node,
+                    ctx.depth + 1,
+                    min_stmts=self.cfg.min_stmts,
+                    max_stmts=self.cfg.max_stmts,
+                    inject_prob=self.cfg.inject_prob,
+                )
 
         return if_node
 
@@ -626,7 +720,15 @@ class StatementGenerator:
                 self.add_variable(ctx.context, iterated_var_name, readonly_var_info)
 
             # Generate body statements
-            self.inject_statements(for_node.body, ctx.context, for_node, ctx.depth + 1)
+            self.inject_statements(
+                for_node.body,
+                ctx.context,
+                for_node,
+                ctx.depth + 1,
+                min_stmts=self.cfg.min_stmts,
+                max_stmts=self.cfg.max_stmts,
+                inject_prob=self.cfg.inject_prob,
+            )
 
             # Ensure body is not empty
             if not for_node.body:

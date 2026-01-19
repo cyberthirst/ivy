@@ -15,6 +15,11 @@ def _inject_statement(*, ctx: MutationCtx, **_) -> ast.For:
     """Inject a statement into the for loop body."""
     # Scope is already created by the visitor before mutation
     ctx.stmt_gen.inject_statements(
-        ctx.node.body, ctx.context, ctx.node, depth=1, n_stmts=1
+        ctx.node.body,
+        ctx.context,
+        ctx.node,
+        depth=1,
+        min_stmts=1,
+        max_stmts=1,
     )
     return ctx.node

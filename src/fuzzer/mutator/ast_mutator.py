@@ -183,12 +183,13 @@ class AstMutator(VyperNodeTransformer):
         module = ast.Module(body=[])
 
         # Module scope only supports variable declarations.
-        self.stmt_generator.inject_statements(
+        self.stmt_generator.inject_variable_decls(
             module.body,
             self.context,
             parent=module,
             depth=0,
-            n_stmts=0,
+            min_stmts=0,
+            max_stmts=2,
         )
 
         max_funcs = self.function_registry.max_generated_functions
@@ -351,9 +352,13 @@ class AstMutator(VyperNodeTransformer):
 
                 # Generated functions with empty bodies need statements
                 if not node.body:
-                    n_stmts = self.rng.randint(2, 5)
                     self.stmt_generator.inject_statements(
-                        node.body, self.context, node, depth=0, n_stmts=n_stmts
+                        node.body,
+                        self.context,
+                        node,
+                        depth=0,
+                        min_stmts=2,
+                        max_stmts=5,
                     )
                 else:
                     node = self._try_mutate(node)

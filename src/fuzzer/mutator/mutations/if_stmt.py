@@ -67,6 +67,11 @@ def _inject_statement(*, ctx: MutationCtx, **_) -> ast.If:
 
     with ctx.context.new_scope(ScopeType.IF):
         ctx.stmt_gen.inject_statements(
-            target, ctx.context, ctx.node, depth=1, n_stmts=1
+            target,
+            ctx.context,
+            ctx.node,
+            depth=1,
+            min_stmts=1,
+            max_stmts=1,
         )
     return ctx.node

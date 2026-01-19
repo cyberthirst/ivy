@@ -18,6 +18,11 @@ def _has_body(*, ctx: MutationCtx, **_) -> bool:
 )
 def _inject_statement(*, ctx: MutationCtx, **_) -> ast.FunctionDef:
     ctx.stmt_gen.inject_statements(
-        ctx.node.body, ctx.context, ctx.node, depth=0, n_stmts=1
+        ctx.node.body,
+        ctx.context,
+        ctx.node,
+        depth=0,
+        min_stmts=1,
+        max_stmts=1,
     )
     return ctx.node
