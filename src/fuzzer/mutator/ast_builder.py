@@ -5,9 +5,10 @@ Provides functions for:
 - Building composite AST nodes (calls, binops, comparisons, etc.)
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 from vyper.ast import nodes as ast
+from vyper.semantics.analysis.base import DataLocation, VarInfo
 from vyper.semantics.types import (
     VyperType,
     IntegerT,
@@ -226,3 +227,10 @@ def ifexp(
     node = ast.IfExp(test=test, body=body, orelse=orelse)
     node._metadata = {"type": typ}
     return node
+
+
+def var_ref(var_name: str, var_info: VarInfo) -> Union[ast.Attribute, ast.Name]:
+    """Build AST reference to a variable (self.x for storage/transient, x for local)."""
+    if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
+        return ast.Attribute(value=ast.Name(id="self"), attr=var_name)
+    return ast.Name(id=var_name)

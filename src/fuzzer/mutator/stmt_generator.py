@@ -17,6 +17,7 @@ from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.config import StmtGeneratorConfig
+from fuzzer.mutator import ast_builder
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -98,13 +99,6 @@ class StatementGenerator:
     def _weight_for(self, **_) -> float:
         return self.cfg.for_weight
 
-    def _build_var_ref(
-        self, var_name: str, var_info: VarInfo
-    ) -> ast.VyperNode:
-        """Build an AST reference to a variable (self.x for storage/transient, x for local)."""
-        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
-            return ast.Attribute(value=ast.Name(id="self"), attr=var_name)
-        return ast.Name(id=var_name)
 
     def _create_var_info(
         self,
@@ -494,7 +488,7 @@ class StatementGenerator:
         var_name, var_info = ctx.rng.choice(writable_vars)
 
         # Build base reference (self.x or local)
-        base = self._build_var_ref(var_name, var_info)
+        base = ast_builder.var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
         # Decide if we target a subscript (for arrays/hashmaps/tuples) and allow nesting
@@ -641,7 +635,7 @@ class StatementGenerator:
         if iterable_arrays and ctx.rng.random() < self.cfg.for_prefer_existing_array_prob:
             var_name, var_info = ctx.rng.choice(iterable_arrays)
             element_type = var_info.typ.value_type
-            iter_node = self._build_var_ref(var_name, var_info)
+            iter_node = ast_builder.var_ref(var_name, var_info)
             return iter_node, element_type, var_name, var_info
 
         # Fall back to generating a literal array

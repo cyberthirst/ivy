@@ -249,11 +249,7 @@ class ExprGenerator:
         else:
             name, var_info = target
 
-        if var_info.location in (DataLocation.STORAGE, DataLocation.TRANSIENT):
-            node = ast.Attribute(value=ast.Name(id="self"), attr=name)
-        else:
-            node = ast.Name(id=name)
-
+        node = ast_builder.var_ref(name, var_info)
         node._metadata["type"] = var_info.typ
         node._metadata["varinfo"] = var_info
         return node
