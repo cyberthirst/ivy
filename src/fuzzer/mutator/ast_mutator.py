@@ -4,7 +4,7 @@ from typing import List, Optional
 from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT
+from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -104,9 +104,11 @@ class AstMutator(VyperNodeTransformer):
         self,
         rng: random.Random,
         max_mutations: int = 5,
+        generate: bool = False,
     ):
         self.rng = rng
         self.max_mutations = max_mutations
+        self.generate = generate
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
         self.context = GenerationContext()
@@ -157,13 +159,16 @@ class AstMutator(VyperNodeTransformer):
     def mutate(self, root: ast.Module) -> ast.Module:
         self.reset_state()
 
-        # Deep copy the root to avoid modifying the original
-        new_root = copy.deepcopy(root)
+        if self.generate:
+            new_root = self._generate_module()
+        else:
+            # Deep copy the root to avoid modifying the original
+            new_root = copy.deepcopy(root)
 
-        # Pass 1: select mutation targets
-        self._mutation_targets = self._candidate_selector.select(
-            new_root, self.max_mutations
-        )
+            # Pass 1: select mutation targets
+            self._mutation_targets = self._candidate_selector.select(
+                new_root, self.max_mutations
+            )
 
         # Pass 2: visit and mutate selected nodes
         new_root = self.visit(new_root)
@@ -173,6 +178,37 @@ class AstMutator(VyperNodeTransformer):
         self._ensure_init_with_immutables(new_root)
 
         return new_root
+
+    def _generate_module(self) -> ast.Module:
+        module = ast.Module(body=[])
+
+        # Module scope only supports variable declarations.
+        self.stmt_generator.inject_statements(
+            module.body,
+            self.context,
+            parent=module,
+            depth=0,
+            n_stmts=0,
+        )
+
+        max_funcs = self.function_registry.max_generated_functions
+        if max_funcs <= 0:
+            return module
+
+        num_funcs = self.rng.randint(1, max_funcs)
+        for _ in range(num_funcs):
+            return_type = self.type_generator.generate_type(
+                nesting=2, skip={HashMapT}
+            )
+            func_def = self.function_registry.create_new_function(
+                return_type=return_type,
+                type_generator=self.type_generator,
+                max_args=2,
+            )
+            if func_def is not None:
+                module.body.append(func_def)
+
+        return module
 
     def reset_state(self) -> None:
         """Reset all per-mutation internal state to a clean baseline."""
