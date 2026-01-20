@@ -31,14 +31,8 @@ from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
-from fuzzer.mutator.depth_control import DepthControlMixin
-from fuzzer.mutator.strategy import (
-    StrategyRegistry,
-    StrategySelector,
-    StrategyExecutor,
-    register_decorated,
-    strategy,
-)
+from fuzzer.mutator.base_generator import BaseGenerator
+from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_subscriptable,
     can_reach_type,
@@ -67,7 +61,7 @@ class ExprGenCtx:
     gen: ExprGenerator
 
 
-class ExprGenerator(DepthControlMixin):
+class ExprGenerator(BaseGenerator):
     def __init__(
         self,
         literal_generator: LiteralGenerator,
@@ -79,18 +73,13 @@ class ExprGenerator(DepthControlMixin):
         depth_cfg: Optional[DepthConfig] = None,
     ):
         self.literal_generator = literal_generator
-        self.rng = rng
         self.function_registry = function_registry
         self.interface_registry = interface_registry
         self.type_generator = type_generator
         self.cfg = cfg or ExprGeneratorConfig()
-        self.depth_cfg = depth_cfg or DepthConfig()
 
-        self._strategy_registry = StrategyRegistry()
-        self._strategy_selector = StrategySelector(self.rng)
-        self._strategy_executor = StrategyExecutor(self._strategy_selector)
+        super().__init__(rng, depth_cfg)
 
-        self._register_strategies()
         self._builtin_handlers = {
             "min": self._builtin_min_max,
             "max": self._builtin_min_max,
@@ -139,9 +128,6 @@ class ExprGenerator(DepthControlMixin):
             context={"ctx": ctx},
             fallback=lambda: self._generate_terminal(target_type, context),
         )
-
-    def _register_strategies(self) -> None:
-        register_decorated(self._strategy_registry, self)
 
     # Applicability/weight helpers
 

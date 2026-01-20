@@ -15,15 +15,9 @@ from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
-from fuzzer.mutator.depth_control import DepthControlMixin
+from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.strategy import (
-    StrategyRegistry,
-    StrategySelector,
-    StrategyExecutor,
-    register_decorated,
-    strategy,
-)
+from fuzzer.mutator.strategy import strategy
 
 
 @dataclass
@@ -47,7 +41,7 @@ class FreshNameGenerator:
         return name
 
 
-class StatementGenerator(DepthControlMixin):
+class StatementGenerator(BaseGenerator):
     def __init__(
         self,
         expr_generator,
@@ -58,18 +52,10 @@ class StatementGenerator(DepthControlMixin):
     ):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
-        self.rng = rng
         self.cfg = cfg or StmtGeneratorConfig()
-        self.depth_cfg = depth_cfg or DepthConfig()
         self.name_generator = FreshNameGenerator()
 
-        self._strategy_registry = StrategyRegistry()
-        self._strategy_selector = StrategySelector(self.rng)
-        self._strategy_executor = StrategyExecutor(self._strategy_selector)
-        self._register_strategies()
-
-    def _register_strategies(self) -> None:
-        register_decorated(self._strategy_registry, self)
+        super().__init__(rng, depth_cfg)
 
     def _is_vardecl_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return bool(ctx.context.is_module_scope)
@@ -301,7 +287,7 @@ class StatementGenerator(DepthControlMixin):
 
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
-            stmt = self.generate_statement(context, parent, depth)
+            stmt = self.generate(context, parent, depth)
             # Insert before the last statement to avoid inserting after return
             # If body is empty or only has vars, append at the end
             max_pos = max(num_vars, len(body) - 1)
@@ -360,7 +346,7 @@ class StatementGenerator(DepthControlMixin):
             leading_vars=num_vars,
         )
 
-    def generate_statement(
+    def generate(
         self,
         context,
         parent: Optional[ast.VyperNode] = None,
