@@ -20,6 +20,7 @@ from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.mutation_engine import MutationEngine
 from fuzzer.mutator.mutations import register_all as register_all_mutations
 from fuzzer.mutator.mutations.base import MutationCtx
+from fuzzer.mutator.config import MutatorConfig
 from unparser.unparser import unparse
 from fuzzer.type_generator import TypeGenerator
 from fuzzer.xfail import XFailExpectation
@@ -105,10 +106,12 @@ class AstMutator(VyperNodeTransformer):
         rng: random.Random,
         max_mutations: int = 5,
         generate: bool = False,
+        cfg: Optional[MutatorConfig] = None,
     ):
         self.rng = rng
         self.max_mutations = max_mutations
         self.generate = generate
+        self.cfg = cfg or MutatorConfig()
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
         self.context = GenerationContext()
@@ -128,10 +131,16 @@ class AstMutator(VyperNodeTransformer):
             self.interface_registry,
             self.function_registry,
             self.type_generator,
+            cfg=self.cfg.expr,
+            depth_cfg=self.cfg.depth,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
-            self.expr_generator, self.type_generator, self.rng
+            self.expr_generator,
+            self.type_generator,
+            self.rng,
+            cfg=self.cfg.stmt,
+            depth_cfg=self.cfg.depth,
         )
 
         # Mutation engine

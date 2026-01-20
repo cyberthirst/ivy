@@ -9,14 +9,13 @@ from vyper.semantics.types import (
     VyperType,
     BoolT,
     HashMapT,
-    SArrayT,
-    DArrayT,
     IntegerT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
-from fuzzer.mutator.config import StmtGeneratorConfig
+from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
+from fuzzer.mutator.depth_control import DepthControlMixin
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
@@ -34,7 +33,6 @@ class StmtGenCtx:
     depth: int
     return_type: Optional[VyperType]
     rng: random.Random
-    nest_decay: float
     gen: StatementGenerator
 
 
@@ -49,18 +47,20 @@ class FreshNameGenerator:
         return name
 
 
-class StatementGenerator:
+class StatementGenerator(DepthControlMixin):
     def __init__(
         self,
         expr_generator,
         type_generator,
         rng: random.Random,
         cfg: Optional[StmtGeneratorConfig] = None,
+        depth_cfg: Optional[DepthConfig] = None,
     ):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
         self.rng = rng
         self.cfg = cfg or StmtGeneratorConfig()
+        self.depth_cfg = depth_cfg or DepthConfig()
         self.name_generator = FreshNameGenerator()
 
         self._strategy_registry = StrategyRegistry()
@@ -85,7 +85,7 @@ class StatementGenerator:
     def _is_for_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         if ctx.context.is_module_scope:
             return False
-        return ctx.depth < self.cfg.max_depth
+        return ctx.depth < self.depth_cfg.max_depth
 
     def _weight_vardecl(self, **_) -> float:
         return self.cfg.vardecl_weight
@@ -231,8 +231,7 @@ class StatementGenerator:
         max_stmts: int = 2,
     ) -> int:
         """Inject variable declarations into body."""
-        cfg = self.cfg
-        if depth > cfg.max_depth:
+        if depth >= self.depth_cfg.max_depth:
             return 0
 
         if max_stmts < min_stmts:
@@ -246,7 +245,6 @@ class StatementGenerator:
                 depth=depth,
                 return_type=None,
                 rng=self.rng,
-                nest_decay=cfg.nest_decay,
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
@@ -276,7 +274,7 @@ class StatementGenerator:
         include_vardecls controls whether variable declarations are injected.
         """
         cfg = self.cfg
-        if depth > cfg.max_depth:
+        if depth >= self.depth_cfg.max_depth:
             return
 
         if inject_prob is not None and self.rng.random() > inject_prob:
@@ -336,8 +334,7 @@ class StatementGenerator:
         inject_prob: Optional[float] = None,
     ) -> None:
         """Inject variable declarations, then random statements (legacy behavior)."""
-        cfg = self.cfg
-        if depth > cfg.max_depth:
+        if depth >= self.depth_cfg.max_depth:
             return
 
         if inject_prob is not None and self.rng.random() > inject_prob:
@@ -370,16 +367,12 @@ class StatementGenerator:
         depth: int = 0,
         return_type: Optional[VyperType] = None,
     ) -> ast.VyperNode:
-        cfg = self.cfg
-        if depth >= cfg.max_depth:
+        # Use exponential decay + hard depth limit
+        if not self.should_continue(depth):
             return self._generate_simple_statement(context, parent)
 
-        # Decide whether to allow recursive (nesting) statements
-        allow_recursive = self.rng.random() < cfg.continuation_prob
-        if allow_recursive:
-            include_tags = ("stmt",)  # All statement strategies
-        else:
-            include_tags = ("terminal",)  # Only terminal (assign, vardecl)
+        # Recursive strategies include all statement types
+        include_tags = ("stmt",)
 
         ctx = StmtGenCtx(
             context=context,
@@ -387,7 +380,6 @@ class StatementGenerator:
             depth=depth,
             return_type=return_type,
             rng=self.rng,
-            nest_decay=cfg.nest_decay,
             gen=self,
         )
 
@@ -415,7 +407,6 @@ class StatementGenerator:
                 depth=0,
                 return_type=None,
                 rng=self.rng,
-                nest_decay=cfg.nest_decay,
                 gen=self,
             )
             assign = self.generate_assign(ctx=ctx)

@@ -230,16 +230,6 @@ class StrategySelector:
         weights = []
         for s in strategies:
             w = max(0.0, s.score(**ctx))
-            # Simple, generic depth-aware scaling to avoid per-strategy depth wiring
-            depth = ctx.get("depth")
-            nest_decay = ctx.get("nest_decay")
-            if depth is not None and nest_decay is not None and "recursive" in s.tags:
-                try:
-                    w *= float(nest_decay) ** int(depth)
-                except Exception:
-                    pass
-            if depth == 0 and "terminal" in s.tags:
-                w *= 2.0
             weights.append(w)
         total = sum(weights)
         if total <= 0:

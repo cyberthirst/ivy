@@ -4,13 +4,16 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class DepthConfig:
+    """Shared depth control configuration for generators."""
+
+    decay_base: float = 0.3  # P(continue) = decay_base ^ depth
+    max_depth: int = 5  # Hard cap, always terminate at this depth
+
+
+@dataclass
 class ExprGeneratorConfig:
     """Configuration for expression generation probabilities and weights."""
-
-    # Recursion control
-    # P(reaching depth k) = continuation_prob^k
-    # With 0.2: depth1=20%, depth2=4%, depth3=0.8%
-    continuation_prob: float = 0.2
 
     # Terminal generation
     terminal_var_ref_prob: float = 0.95  # Prefer var refs over literals
@@ -58,11 +61,6 @@ class ExprGeneratorConfig:
 class StmtGeneratorConfig:
     """Configuration for statement generation probabilities and weights."""
 
-    # Recursion control
-    continuation_prob: float = 0.2  # Allow recursive statements
-    nest_decay: float = 0.7  # Decay factor for nested statements
-    max_depth: int = 5
-
     # Statement injection
     inject_prob: float = 0.3
     min_stmts: int = 1
@@ -102,6 +100,7 @@ class StmtGeneratorConfig:
 class MutatorConfig:
     """Top-level configuration bundling all mutator settings."""
 
+    depth: DepthConfig = field(default_factory=DepthConfig)
     expr: ExprGeneratorConfig = field(default_factory=ExprGeneratorConfig)
     stmt: StmtGeneratorConfig = field(default_factory=StmtGeneratorConfig)
 

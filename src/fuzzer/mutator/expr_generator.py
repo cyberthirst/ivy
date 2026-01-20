@@ -22,7 +22,7 @@ from vyper.semantics.types import (
     TYPE_T,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
-from vyper.semantics.analysis.base import DataLocation, VarInfo
+from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator.literal_generator import LiteralGenerator
@@ -30,7 +30,8 @@ from fuzzer.mutator.context import GenerationContext, ExprMutability
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.config import ExprGeneratorConfig
+from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
+from fuzzer.mutator.depth_control import DepthControlMixin
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -66,7 +67,7 @@ class ExprGenCtx:
     gen: ExprGenerator
 
 
-class ExprGenerator:
+class ExprGenerator(DepthControlMixin):
     def __init__(
         self,
         literal_generator: LiteralGenerator,
@@ -75,6 +76,7 @@ class ExprGenerator:
         function_registry: FunctionRegistry,
         type_generator: TypeGenerator,
         cfg: Optional[ExprGeneratorConfig] = None,
+        depth_cfg: Optional[DepthConfig] = None,
     ):
         self.literal_generator = literal_generator
         self.rng = rng
@@ -82,6 +84,7 @@ class ExprGenerator:
         self.interface_registry = interface_registry
         self.type_generator = type_generator
         self.cfg = cfg or ExprGeneratorConfig()
+        self.depth_cfg = depth_cfg or DepthConfig()
 
         self._strategy_registry = StrategyRegistry()
         self._strategy_selector = StrategySelector(self.rng)
@@ -100,14 +103,14 @@ class ExprGenerator:
         }
 
     def generate(
-        self, target_type: VyperType, context: GenerationContext, depth: int = 3
+        self, target_type: VyperType, context: GenerationContext, depth: int = 0
     ) -> ast.VyperNode:
         # TODO we probably need a special case also for tuples
         if isinstance(target_type, StructT):
             return self._generate_struct(target_type, context, depth)
 
-        # Early termination: probabilistic + hard depth limit
-        if depth <= 0 or self.rng.random() > self.cfg.continuation_prob:
+        # Early termination: exponential decay + hard depth limit
+        if not self.should_continue(depth):
             return self._generate_terminal(target_type, context)
 
         ctx = ExprGenCtx(
@@ -127,8 +130,8 @@ class ExprGenerator:
             context={"ctx": ctx},
         )
 
-        # Recursive strategies consume depth
-        ctx.depth -= 1
+        # Recursive strategies increase depth
+        ctx.depth += 1
 
         return self._strategy_executor.execute_with_retry(
             strategies,
@@ -591,7 +594,7 @@ class ExprGenerator:
         call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
 
         for field_name, field_type in target_type.members.items():
-            field_expr = self.generate(field_type, context, max(0, depth - 1))
+            field_expr = self.generate(field_type, context, depth + 1)
 
             keyword = ast.keyword(arg=field_name, value=field_expr)
             call_node.keywords.append(keyword)
@@ -868,7 +871,7 @@ class ExprGenerator:
             return StringT(n) if isinstance(target_type, StringT) else BytesT(n)
 
         arg_types = [make_typ(n) for n in parts]
-        args = [self.generate(t, context, max(0, depth - 1)) for t in arg_types]
+        args = [self.generate(t, context, depth + 1) for t in arg_types]
 
         # The concat return length is sum(parts) which is <= target length by design
         return self._finalize_call(func_node, args, make_typ(sum(parts)))
