@@ -94,14 +94,6 @@ class ExprGenerator(BaseGenerator):
     def generate(
         self, target_type: VyperType, context: GenerationContext, depth: int = 0
     ) -> ast.VyperNode:
-        # TODO we probably need a special case also for tuples
-        if isinstance(target_type, StructT):
-            return self._generate_struct(target_type, context, depth)
-
-        # Early termination: exponential decay + hard depth limit
-        if not self.should_continue(depth):
-            return self._generate_terminal(target_type, context)
-
         ctx = ExprGenCtx(
             target_type=target_type,
             context=context,
@@ -112,21 +104,25 @@ class ExprGenerator(BaseGenerator):
             gen=self,
         )
 
+        # Use tag-based filtering for terminal vs recursive strategies
+        if self.should_continue(depth):
+            include_tags = ("expr",)
+            ctx.depth += 1  # Only increment for recursive path
+        else:
+            include_tags = ("expr", "terminal")
+
         # Collect strategies via registry
         strategies = self._strategy_registry.collect(
             type_class=type(target_type),
-            include_tags=("expr",),
+            include_tags=include_tags,
             context={"ctx": ctx},
         )
-
-        # Recursive strategies increase depth
-        ctx.depth += 1
 
         return self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",  # TODO nested hash maps
             context={"ctx": ctx},
-            fallback=lambda: self._generate_terminal(target_type, context),
+            fallback=lambda: self._generate_literal(ctx=ctx),
         )
 
     # Applicability/weight helpers
@@ -188,28 +184,6 @@ class ExprGenerator(BaseGenerator):
         if not matches:
             return None
         return self._generate_variable_ref(ctx.rng.choice(matches), ctx.context)
-
-    def _generate_terminal(
-        self, target_type: VyperType, context: GenerationContext
-    ) -> ast.VyperNode:
-        if isinstance(target_type, StructT):
-            return self._generate_struct(target_type, context, depth=0)
-
-        matching_vars = context.find_matching_vars(target_type)
-
-        if matching_vars and self.rng.random() < self.cfg.terminal_var_ref_prob:
-            return self._generate_variable_ref(self.rng.choice(matching_vars), context)
-        else:
-            ctx = ExprGenCtx(
-                target_type=target_type,
-                context=context,
-                depth=0,
-                rng=self.rng,
-                function_registry=self.function_registry,
-                mutability=context.current_mutability,
-                gen=self,
-            )
-            return self._generate_literal(ctx=ctx)
 
     @strategy(
         name="expr.literal",
@@ -573,14 +547,20 @@ class ExprGenerator(BaseGenerator):
         node._metadata["type"] = ctx.target_type
         return node
 
-    def _generate_struct(self, target_type, context: GenerationContext, depth: int) -> ast.Call:
+    @strategy(
+        name="expr.struct",
+        tags=frozenset({"expr", "terminal"}),
+        type_classes=(StructT,),
+    )
+    def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
+        target_type = ctx.target_type
         assert isinstance(target_type, StructT)
 
         # Create the struct constructor call
         call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
 
         for field_name, field_type in target_type.members.items():
-            field_expr = self.generate(field_type, context, depth + 1)
+            field_expr = self.generate(field_type, ctx.context, ctx.depth + 1)
 
             keyword = ast.keyword(arg=field_name, value=field_expr)
             call_node.keywords.append(keyword)

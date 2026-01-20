@@ -353,13 +353,6 @@ class StatementGenerator(BaseGenerator):
         depth: int = 0,
         return_type: Optional[VyperType] = None,
     ) -> ast.VyperNode:
-        # Use exponential decay + hard depth limit
-        if not self.should_continue(depth):
-            return self._generate_simple_statement(context, parent)
-
-        # Recursive strategies include all statement types
-        include_tags = ("stmt",)
-
         ctx = StmtGenCtx(
             context=context,
             parent=parent,
@@ -368,6 +361,12 @@ class StatementGenerator(BaseGenerator):
             rng=self.rng,
             gen=self,
         )
+
+        # Use tag-based filtering for terminal vs recursive strategies
+        if self.should_continue(depth):
+            include_tags = ("stmt",)
+        else:
+            include_tags = ("stmt", "terminal")
 
         # Collect available statement strategies
         strategies = self._strategy_registry.collect(
@@ -381,24 +380,6 @@ class StatementGenerator(BaseGenerator):
             fallback=lambda: ast.Pass(),
             context={"ctx": ctx},
         )
-
-    def _generate_simple_statement(
-        self, context, parent: Optional[ast.VyperNode]
-    ) -> ast.VyperNode:
-        cfg = self.cfg
-        if context.all_vars and self.rng.random() < cfg.simple_stmt_assign_prob:
-            ctx = StmtGenCtx(
-                context=context,
-                parent=parent,
-                depth=0,
-                return_type=None,
-                rng=self.rng,
-                gen=self,
-            )
-            assign = self.generate_assign(ctx=ctx)
-            if assign is not None:
-                return assign
-        return ast.Pass()
 
     @strategy(
         name="stmt.if",
