@@ -57,7 +57,7 @@ class StatementGenerator(BaseGenerator):
         super().__init__(rng, depth_cfg)
 
     def _is_vardecl_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
-        return bool(ctx.context.is_module_scope)
+        return True
 
     def _is_assign_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         if ctx.context.is_module_scope:
@@ -246,7 +246,6 @@ class StatementGenerator(BaseGenerator):
         min_vardecls: int = 0,
         max_vardecls: int = 2,
         *,
-        inject_prob: Optional[float] = None,
         include_vardecls: bool = True,
         leading_vars: int = 0,
     ) -> None:
@@ -258,9 +257,6 @@ class StatementGenerator(BaseGenerator):
         """
         cfg = self.cfg
         if self.at_max_depth(depth):
-            return
-
-        if inject_prob is not None and self.rng.random() > inject_prob:
             return
 
         min_count = cfg.min_stmts if min_stmts is None else min_stmts
@@ -285,6 +281,10 @@ class StatementGenerator(BaseGenerator):
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate(context, parent, depth)
+            if isinstance(stmt, ast.AnnAssign):
+                body.insert(num_vars, stmt)
+                num_vars += 1
+                continue
             # Insert before the last statement to avoid inserting after return
             # If body is empty or only has vars, append at the end
             max_pos = max(num_vars, len(body) - 1)
@@ -315,14 +315,9 @@ class StatementGenerator(BaseGenerator):
         max_stmts: Optional[int] = None,
         min_vardecls: int = 0,
         max_vardecls: int = 2,
-        *,
-        inject_prob: Optional[float] = None,
     ) -> None:
         """Inject variable declarations, then random statements (legacy behavior)."""
         if self.at_max_depth(depth):
-            return
-
-        if inject_prob is not None and self.rng.random() > inject_prob:
             return
 
         num_vars = self.inject_variable_decls(
@@ -340,7 +335,6 @@ class StatementGenerator(BaseGenerator):
             depth=depth,
             min_stmts=min_stmts,
             max_stmts=max_stmts,
-            inject_prob=None,
             include_vardecls=False,
             leading_vars=num_vars,
         )
@@ -400,7 +394,6 @@ class StatementGenerator(BaseGenerator):
                 self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
-                inject_prob=self.cfg.inject_prob,
             )
 
             if not if_node.body:
@@ -415,7 +408,6 @@ class StatementGenerator(BaseGenerator):
                     self.child_depth(ctx.depth),
                     min_stmts=self.cfg.min_stmts,
                     max_stmts=self.cfg.max_stmts,
-                    inject_prob=self.cfg.inject_prob,
                 )
 
         return if_node
@@ -688,7 +680,6 @@ class StatementGenerator(BaseGenerator):
                 self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
-                inject_prob=self.cfg.inject_prob,
             )
 
             # Ensure body is not empty

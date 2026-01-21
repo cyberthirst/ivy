@@ -73,9 +73,9 @@ class StmtGeneratorConfig:
     max_stmts: int = 3
 
     # Statement weights
-    vardecl_weight: float = 0.4
-    assign_weight: float = 0.3
-    if_weight: float = 0.3
+    vardecl_weight: float = 1.0
+    assign_weight: float = 1.0
+    if_weight: float = 0.2
 
     # Type generation bias
     existing_type_bias_prob: float = 0.4
@@ -96,7 +96,7 @@ class StmtGeneratorConfig:
     subscript_assignment_prob: float = 0.7
 
     # For loop generation
-    for_weight: float = 0.25
+    for_weight: float = 0.1
     for_use_range_prob: float = 0.5  # vs array iteration
     for_prefer_existing_array_prob: float = 0.8  # vs literal array
     for_max_range_stop: int = 10  # cap for range(STOP)
