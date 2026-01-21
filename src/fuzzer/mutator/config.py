@@ -73,8 +73,8 @@ class StmtGeneratorConfig:
     max_stmts: int = 3
 
     # Statement weights
-    vardecl_weight: float = 1.0
-    assign_weight: float = 1.0
+    vardecl_weight: float = 0.3
+    assign_weight: float = 2.0
     if_weight: float = 0.2
 
     # Type generation bias

@@ -17,6 +17,7 @@ from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability,
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.type_utils import is_subscriptable
 from fuzzer.mutator.strategy import strategy
 
 
@@ -449,7 +450,7 @@ class StatementGenerator(BaseGenerator):
         # For other subscriptable types, bias towards subscripting
         is_hashmap = isinstance(var_info.typ, HashMapT)
         if is_hashmap or (
-            self.expr_generator.is_subscriptable_type(var_info.typ)
+            is_subscriptable(var_info.typ)
             and ctx.gen.rng.random() < self.cfg.subscript_assignment_prob
         ):
             cur_node, cur_t = self.expr_generator.build_random_chain(
