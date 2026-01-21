@@ -26,7 +26,6 @@ class StmtGenCtx:
     parent: Optional[ast.VyperNode]
     depth: int
     return_type: Optional[VyperType]
-    rng: random.Random
     gen: StatementGenerator
 
 
@@ -71,7 +70,7 @@ class StatementGenerator(BaseGenerator):
     def _is_for_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         if ctx.context.is_module_scope:
             return False
-        return ctx.depth < self.depth_cfg.max_depth
+        return not self.at_max_depth(ctx.depth)
 
     def _weight_vardecl(self, **_) -> float:
         return self.cfg.vardecl_weight
@@ -84,7 +83,6 @@ class StatementGenerator(BaseGenerator):
 
     def _weight_for(self, **_) -> float:
         return self.cfg.for_weight
-
 
     def _create_var_info(
         self,
@@ -217,7 +215,7 @@ class StatementGenerator(BaseGenerator):
         max_stmts: int = 2,
     ) -> int:
         """Inject variable declarations into body."""
-        if depth >= self.depth_cfg.max_depth:
+        if self.at_max_depth(depth):
             return 0
 
         if max_stmts < min_stmts:
@@ -230,7 +228,6 @@ class StatementGenerator(BaseGenerator):
                 parent=parent,
                 depth=depth,
                 return_type=None,
-                rng=self.rng,
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
@@ -260,7 +257,7 @@ class StatementGenerator(BaseGenerator):
         include_vardecls controls whether variable declarations are injected.
         """
         cfg = self.cfg
-        if depth >= self.depth_cfg.max_depth:
+        if self.at_max_depth(depth):
             return
 
         if inject_prob is not None and self.rng.random() > inject_prob:
@@ -303,7 +300,9 @@ class StatementGenerator(BaseGenerator):
             return_type = getattr(func_type, "return_type", None)
 
             if return_type is not None and not self.scope_is_terminated(body):
-                ret_expr = self.expr_generator.generate(return_type, context, depth=2)
+                ret_expr = self.expr_generator.generate(
+                    return_type, context, depth=self.expr_generator.root_depth()
+                )
                 body.append(ast.Return(value=ret_expr))
 
     def inject_statements(
@@ -320,7 +319,7 @@ class StatementGenerator(BaseGenerator):
         inject_prob: Optional[float] = None,
     ) -> None:
         """Inject variable declarations, then random statements (legacy behavior)."""
-        if depth >= self.depth_cfg.max_depth:
+        if self.at_max_depth(depth):
             return
 
         if inject_prob is not None and self.rng.random() > inject_prob:
@@ -358,7 +357,6 @@ class StatementGenerator(BaseGenerator):
             parent=parent,
             depth=depth,
             return_type=return_type,
-            rng=self.rng,
             gen=self,
         )
 
@@ -388,7 +386,9 @@ class StatementGenerator(BaseGenerator):
         weight="_weight_if",
     )
     def generate_if(self, *, ctx: StmtGenCtx, **_) -> ast.If:
-        test_expr = self.expr_generator.generate(BoolT(), ctx.context, depth=2)
+        test_expr = self.expr_generator.generate(
+            BoolT(), ctx.context, depth=self.expr_generator.root_depth()
+        )
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
 
@@ -397,7 +397,7 @@ class StatementGenerator(BaseGenerator):
                 if_node.body,
                 ctx.context,
                 if_node,
-                ctx.depth + 1,
+                self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
                 inject_prob=self.cfg.inject_prob,
@@ -406,13 +406,13 @@ class StatementGenerator(BaseGenerator):
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
-        if ctx.rng.random() < self.cfg.generate_else_branch_prob:
+        if ctx.gen.rng.random() < self.cfg.generate_else_branch_prob:
             with ctx.context.new_scope(ScopeType.IF):
                 self.inject_statements(
                     if_node.orelse,
                     ctx.context,
                     if_node,
-                    ctx.depth + 1,
+                    self.child_depth(ctx.depth),
                     min_stmts=self.cfg.min_stmts,
                     max_stmts=self.cfg.max_stmts,
                     inject_prob=self.cfg.inject_prob,
@@ -443,7 +443,7 @@ class StatementGenerator(BaseGenerator):
         if not writable_vars:
             return None
 
-        var_name, var_info = ctx.rng.choice(writable_vars)
+        var_name, var_info = ctx.gen.rng.choice(writable_vars)
 
         # Build base reference (self.x or local)
         base = ast_builder.var_ref(var_name, var_info)
@@ -458,14 +458,14 @@ class StatementGenerator(BaseGenerator):
         is_hashmap = isinstance(var_info.typ, HashMapT)
         if is_hashmap or (
             self.expr_generator.is_subscriptable_type(var_info.typ)
-            and ctx.rng.random() < self.cfg.subscript_assignment_prob
+            and ctx.gen.rng.random() < self.cfg.subscript_assignment_prob
         ):
             cur_node, cur_t = self.expr_generator.build_random_chain(
                 base,
                 var_info.typ,
                 ctx.context,
-                depth=2,
-                max_steps=2,
+                depth=self.expr_generator.root_depth(),
+                max_steps=self.expr_generator.cfg.subscript_random_chain_max_steps,
             )
             target_node = cur_node
             target_type = cur_t
@@ -476,13 +476,15 @@ class StatementGenerator(BaseGenerator):
                     target_node,
                     target_type,
                     ctx.context,
-                    depth=2,
-                    max_steps=1,
+                    depth=self.expr_generator.root_depth(),
+                    max_steps=self.expr_generator.cfg.subscript_hashmap_chain_max_steps,
                 )
                 target_node = cur_node
                 target_type = cur_t
 
-        value = self.expr_generator.generate(target_type, ctx.context, depth=3)
+        value = self.expr_generator.generate(
+            target_type, ctx.context, depth=self.expr_generator.root_depth()
+        )
 
         return ast.Assign(targets=[target_node], value=value)
 
@@ -535,10 +537,12 @@ class StatementGenerator(BaseGenerator):
             ):
                 with context.mutability(ExprMutability.CONST):
                     init_val = self.expr_generator.generate(
-                        var_info.typ, context, depth=3
+                        var_info.typ, context, depth=self.expr_generator.root_depth()
                     )
             else:
-                init_val = self.expr_generator.generate(var_info.typ, context, depth=3)
+                init_val = self.expr_generator.generate(
+                    var_info.typ, context, depth=self.expr_generator.root_depth()
+                )
         else:
             init_val = None
 
@@ -569,7 +573,7 @@ class StatementGenerator(BaseGenerator):
         target_type = IntegerT(False, 256)  # uint256
 
         # Generate a random stop value between 1 and max_range_stop
-        stop_val = ctx.rng.randint(1, self.cfg.for_max_range_stop)
+        stop_val = ctx.gen.rng.randint(1, self.cfg.for_max_range_stop)
 
         iter_node = ast.Call(
             func=ast.Name(id="range"),
@@ -590,8 +594,11 @@ class StatementGenerator(BaseGenerator):
         iterable_arrays = ctx.context.find_iterable_arrays()
 
         # Prefer existing array if available and probability check passes
-        if iterable_arrays and ctx.rng.random() < self.cfg.for_prefer_existing_array_prob:
-            var_name, var_info = ctx.rng.choice(iterable_arrays)
+        if (
+            iterable_arrays
+            and ctx.gen.rng.random() < self.cfg.for_prefer_existing_array_prob
+        ):
+            var_name, var_info = ctx.gen.rng.choice(iterable_arrays)
             element_type = var_info.typ.value_type
             iter_node = ast_builder.var_ref(var_name, var_info)
             return iter_node, element_type, var_name, var_info
@@ -601,10 +608,12 @@ class StatementGenerator(BaseGenerator):
         element_type = self.type_generator.generate_simple_type()
 
         # Generate 1-5 elements
-        num_elements = ctx.rng.randint(1, 5)
+        num_elements = ctx.gen.rng.randint(1, 5)
         elements = []
         for _ in range(num_elements):
-            elem = self.expr_generator.generate(element_type, ctx.context, depth=2)
+            elem = self.expr_generator.generate(
+                element_type, ctx.context, depth=self.expr_generator.root_depth()
+            )
             elements.append(elem)
 
         iter_node = ast.List(elements=elements)
@@ -625,7 +634,7 @@ class StatementGenerator(BaseGenerator):
         - Literal array iteration as fallback
         """
         # Decide: range vs array iteration
-        use_range = ctx.rng.random() < self.cfg.for_use_range_prob
+        use_range = ctx.gen.rng.random() < self.cfg.for_use_range_prob
 
         iterated_var_name: Optional[str] = None
         iterated_var_info: Optional[VarInfo] = None
@@ -676,7 +685,7 @@ class StatementGenerator(BaseGenerator):
                 for_node.body,
                 ctx.context,
                 for_node,
-                ctx.depth + 1,
+                self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
                 inject_prob=self.cfg.inject_prob,

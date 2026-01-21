@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 class DepthConfig:
     """Shared depth control configuration for generators."""
 
+    root_depth: int = 0  # Starting depth for new generation
     decay_base: float = 0.3  # P(continue) = decay_base ^ depth
     max_depth: int = 5  # Hard cap, always terminate at this depth
 
@@ -31,6 +32,11 @@ class ExprGeneratorConfig:
     subscript_weight_base: float = 0.5
     subscript_weight_scale: float = 0.2
     subscript_weight_max: float = 2.5
+
+    # Subscript chain length controls (separate from depth)
+    subscript_chain_max_steps: int = 3
+    subscript_random_chain_max_steps: int = 2
+    subscript_hashmap_chain_max_steps: int = 1
 
     # Index generation for sequences
     index_guard_prob: float = 0.60  # Use len()-guarded index
@@ -100,7 +106,10 @@ class StmtGeneratorConfig:
 class MutatorConfig:
     """Top-level configuration bundling all mutator settings."""
 
-    depth: DepthConfig = field(default_factory=DepthConfig)
+    expr_depth: DepthConfig = field(
+        default_factory=lambda: DepthConfig(root_depth=2)
+    )
+    stmt_depth: DepthConfig = field(default_factory=DepthConfig)
     expr: ExprGeneratorConfig = field(default_factory=ExprGeneratorConfig)
     stmt: StmtGeneratorConfig = field(default_factory=StmtGeneratorConfig)
 

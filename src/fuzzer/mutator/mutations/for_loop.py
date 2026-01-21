@@ -18,7 +18,7 @@ def _inject_statement(*, ctx: MutationCtx, **_) -> ast.For:
         ctx.node.body,
         ctx.context,
         ctx.node,
-        depth=1,
+        depth=ctx.stmt_gen.child_depth(ctx.stmt_gen.root_depth()),
         min_stmts=1,
         max_stmts=1,
     )

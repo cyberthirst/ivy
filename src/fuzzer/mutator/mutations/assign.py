@@ -37,6 +37,8 @@ def _use_var_as_rhs(*, ctx: MutationCtx, **_) -> ast.Assign:
     is_applicable="_has_rhs_type",
 )
 def _generate_new_expr(*, ctx: MutationCtx, **_) -> ast.Assign:
-    new_expr = ctx.expr_gen.generate(ctx.inferred_type, ctx.context, depth=2)
+    new_expr = ctx.expr_gen.generate(
+        ctx.inferred_type, ctx.context, depth=ctx.expr_gen.root_depth()
+    )
     ctx.node.value = new_expr
     return ctx.node

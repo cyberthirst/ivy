@@ -132,7 +132,7 @@ class AstMutator(VyperNodeTransformer):
             self.function_registry,
             self.type_generator,
             cfg=self.cfg.expr,
-            depth_cfg=self.cfg.depth,
+            depth_cfg=self.cfg.expr_depth,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
@@ -140,7 +140,7 @@ class AstMutator(VyperNodeTransformer):
             self.type_generator,
             self.rng,
             cfg=self.cfg.stmt,
-            depth_cfg=self.cfg.depth,
+            depth_cfg=self.cfg.stmt_depth,
         )
 
         # Mutation engine
@@ -196,7 +196,7 @@ class AstMutator(VyperNodeTransformer):
             module.body,
             self.context,
             parent=module,
-            depth=0,
+            depth=self.stmt_generator.root_depth(),
             min_stmts=0,
             max_stmts=2,
         )
@@ -248,7 +248,9 @@ class AstMutator(VyperNodeTransformer):
         return getattr(node, "_metadata", {}).get("type")
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
-        return self.expr_generator.generate(target_type, self.context, depth=4)
+        return self.expr_generator.generate(
+            target_type, self.context, depth=self.expr_generator.root_depth()
+        )
 
     def visit_Module(self, node: ast.Module):
         self._preprocess_module(node)
@@ -365,7 +367,7 @@ class AstMutator(VyperNodeTransformer):
                         node.body,
                         self.context,
                         node,
-                        depth=0,
+                        depth=self.stmt_generator.root_depth(),
                         min_stmts=2,
                         max_stmts=5,
                     )
@@ -487,7 +489,7 @@ class AstMutator(VyperNodeTransformer):
         # Generate assignment statements for each immutable
         for name, var_info in self.context.immutables_to_init:
             value_expr = self.expr_generator.generate(
-                var_info.typ, self.context, depth=3
+                var_info.typ, self.context, depth=self.expr_generator.root_depth()
             )
 
             assign = ast.Assign(targets=[ast.Name(id=name)], value=value_expr)

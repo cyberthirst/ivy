@@ -7,7 +7,6 @@ from typing import Optional
 from vyper.ast import nodes as ast
 
 from fuzzer.mutator.config import DepthConfig
-from fuzzer.mutator.depth_control import DepthControlMixin
 from fuzzer.mutator.strategy import (
     StrategyRegistry,
     StrategySelector,
@@ -16,7 +15,7 @@ from fuzzer.mutator.strategy import (
 )
 
 
-class BaseGenerator(DepthControlMixin, ABC):
+class BaseGenerator(ABC):
     def __init__(
         self,
         rng: random.Random,
@@ -33,6 +32,20 @@ class BaseGenerator(DepthControlMixin, ABC):
 
     def _register_strategies(self) -> None:
         register_decorated(self._strategy_registry, self)
+
+    def root_depth(self) -> int:
+        return self.depth_cfg.root_depth
+
+    def child_depth(self, depth: int) -> int:
+        return depth + 1
+
+    def at_max_depth(self, depth: int) -> bool:
+        return depth >= self.depth_cfg.max_depth
+
+    def should_continue(self, depth: int) -> bool:
+        if self.at_max_depth(depth):
+            return False
+        return self.rng.random() < self.depth_cfg.decay_base ** depth
 
     @abstractmethod
     def generate(self, *args, **kwargs) -> ast.VyperNode:

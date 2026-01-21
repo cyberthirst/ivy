@@ -55,9 +55,6 @@ class ExprGenCtx:
     target_type: VyperType
     context: GenerationContext
     depth: int
-    rng: random.Random
-    function_registry: FunctionRegistry
-    mutability: ExprMutability
     gen: ExprGenerator
 
 
@@ -98,16 +95,12 @@ class ExprGenerator(BaseGenerator):
             target_type=target_type,
             context=context,
             depth=depth,
-            rng=self.rng,
-            function_registry=self.function_registry,
-            mutability=context.current_mutability,
             gen=self,
         )
 
         # Use tag-based filtering for terminal vs recursive strategies
         if self.should_continue(depth):
             include_tags = ("expr",)
-            ctx.depth += 1  # Only increment for recursive path
         else:
             include_tags = ("expr", "terminal")
 
@@ -144,17 +137,21 @@ class ExprGenerator(BaseGenerator):
     def _is_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
-        if ctx.mutability == ExprMutability.CONST:
+        if ctx.context.current_mutability == ExprMutability.CONST:
             return False
         return not ctx.context.is_module_scope
 
     def _is_subscript_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         vars_dict = dict(ctx.context.find_matching_vars(None))
-        return bool(find_nested_subscript_bases(ctx.target_type, vars_dict, max_steps=3))
+        return bool(
+            find_nested_subscript_bases(
+                ctx.target_type, vars_dict, max_steps=self.cfg.subscript_chain_max_steps
+            )
+        )
 
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
-        return ctx.mutability != ExprMutability.CONST
+        return ctx.context.current_mutability != ExprMutability.CONST
 
     def _weight_literal(self, **_) -> float:
         return self.cfg.literal_weight
@@ -183,7 +180,7 @@ class ExprGenerator(BaseGenerator):
         matches = ctx.context.find_matching_vars(ctx.target_type)
         if not matches:
             return None
-        return self._generate_variable_ref(ctx.rng.choice(matches), ctx.context)
+        return self._generate_variable_ref(ctx.gen.rng.choice(matches), ctx.context)
 
     @strategy(
         name="expr.literal",
@@ -225,19 +222,21 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_subscript(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Subscript]:
         vars_dict = dict(ctx.context.find_matching_vars(None))
-        bases = find_nested_subscript_bases(ctx.target_type, vars_dict, max_steps=3)
+        bases = find_nested_subscript_bases(
+            ctx.target_type, vars_dict, max_steps=self.cfg.subscript_chain_max_steps
+        )
         if not bases:
             return None
 
-        name, base_t = ctx.rng.choice(bases)
+        name, base_t = ctx.gen.rng.choice(bases)
         base_node: ast.VyperNode = self._generate_variable_ref(name, ctx.context)
         built = self.build_chain_to_target(
             base_node,
             base_t,
             ctx.target_type,
             ctx.context,
-            ctx.depth,
-            max_steps=3,
+            self.child_depth(ctx.depth),
+            max_steps=self.cfg.subscript_chain_max_steps,
         )
         if not built:
             return None
@@ -254,9 +253,10 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_ifexp(self, *, ctx: ExprGenCtx, **_) -> ast.IfExp:
         # Condition must be bool; branches must yield the same type
-        test = self.generate(BoolT(), ctx.context, ctx.depth)
-        body = self.generate(ctx.target_type, ctx.context, ctx.depth)
-        orelse = self.generate(ctx.target_type, ctx.context, ctx.depth)
+        next_depth = self.child_depth(ctx.depth)
+        test = self.generate(BoolT(), ctx.context, next_depth)
+        body = self.generate(ctx.target_type, ctx.context, next_depth)
+        orelse = self.generate(ctx.target_type, ctx.context, next_depth)
 
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = ctx.target_type
@@ -312,7 +312,7 @@ class ExprGenerator(BaseGenerator):
         if use_small:
             i_expr = small_literal_index(self.rng)
         else:
-            i_expr = self.generate(INDEX_TYPE, context, max(0, depth))
+            i_expr = self.generate(INDEX_TYPE, context, depth)
 
         len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
@@ -333,7 +333,7 @@ class ExprGenerator(BaseGenerator):
         )
         if use_small:
             return small_literal_index(self.rng)
-        return self.generate(INDEX_TYPE, context, max(0, depth))
+        return self.generate(INDEX_TYPE, context, depth)
 
     def _generate_oob_index(
         self,
@@ -363,13 +363,13 @@ class ExprGenerator(BaseGenerator):
     ) -> Optional[tuple[ast.VyperNode, VyperType]]:
         cur_t = base_type
         node = base_node
-        steps_remaining = max(1, min(max_steps, depth + 1))
+        steps_remaining = max(1, max_steps)
 
         while steps_remaining > 0 and is_subscriptable(cur_t):
             next_options: list[tuple[VyperType, ast.VyperNode]] = []
 
             if isinstance(cur_t, HashMapT):
-                key_expr = self.generate(cur_t.key_type, context, max(0, depth))
+                key_expr = self.generate(cur_t.key_type, context, depth)
                 next_options.append((cur_t.value_type, key_expr))
 
             elif isinstance(cur_t, (SArrayT, DArrayT)):
@@ -424,7 +424,7 @@ class ExprGenerator(BaseGenerator):
 
         for _ in range(steps):
             if isinstance(cur_t, HashMapT):
-                idx_expr = self.generate(cur_t.key_type, context, max(0, depth))
+                idx_expr = self.generate(cur_t.key_type, context, depth)
                 cur_t = cur_t.value_type
             elif isinstance(cur_t, (SArrayT, DArrayT)):
                 idx_expr = self._generate_index_for_sequence(
@@ -456,10 +456,11 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_arithmetic(self, *, ctx: ExprGenCtx, **_) -> ast.BinOp:
         op_classes = [ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod]
-        op_class = ctx.rng.choice(op_classes)
+        op_class = ctx.gen.rng.choice(op_classes)
 
-        left = self.generate(ctx.target_type, ctx.context, ctx.depth)
-        right = self.generate(ctx.target_type, ctx.context, ctx.depth)
+        next_depth = self.child_depth(ctx.depth)
+        left = self.generate(ctx.target_type, ctx.context, next_depth)
+        right = self.generate(ctx.target_type, ctx.context, next_depth)
 
         node = ast.BinOp(left=left, op=op_class(), right=right)
 
@@ -482,7 +483,7 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_comparison(self, *, ctx: ExprGenCtx, **_) -> ast.Compare:
         op_classes = [ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq]
-        op_class = ctx.rng.choice(op_classes)
+        op_class = ctx.gen.rng.choice(op_classes)
 
         # For equality/inequality, we can use more types
         # TODO parametrize typeclasses so we don't always get the same size
@@ -500,10 +501,11 @@ class ExprGenerator(BaseGenerator):
             # For ordering comparisons, only use numeric
             comparable_types = [IntegerT(True, 256), IntegerT(True, 128)]
 
-        comparable_type = ctx.rng.choice(comparable_types)
+        comparable_type = ctx.gen.rng.choice(comparable_types)
 
-        left = self.generate(comparable_type, ctx.context, ctx.depth)
-        right = self.generate(comparable_type, ctx.context, ctx.depth)
+        next_depth = self.child_depth(ctx.depth)
+        left = self.generate(comparable_type, ctx.context, next_depth)
+        right = self.generate(comparable_type, ctx.context, next_depth)
 
         node = ast.Compare(left=left, ops=[op_class()], comparators=[right])
         node._metadata["type"] = BoolT()
@@ -516,9 +518,10 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_boolean_op(self, *, ctx: ExprGenCtx, **_) -> ast.BoolOp:
         op_classes = [ast.And, ast.Or]
-        op_class = ctx.rng.choice(op_classes)
+        op_class = ctx.gen.rng.choice(op_classes)
 
-        values = [self.generate(BoolT(), ctx.context, ctx.depth) for _ in range(2)]
+        next_depth = self.child_depth(ctx.depth)
+        values = [self.generate(BoolT(), ctx.context, next_depth) for _ in range(2)]
 
         node = ast.BoolOp(op=op_class(), values=values)
         node._metadata["type"] = BoolT()
@@ -530,7 +533,7 @@ class ExprGenerator(BaseGenerator):
         type_classes=(BoolT,),
     )
     def _generate_not(self, *, ctx: ExprGenCtx, **_) -> ast.UnaryOp:
-        operand = self.generate(BoolT(), ctx.context, ctx.depth)
+        operand = self.generate(BoolT(), ctx.context, self.child_depth(ctx.depth))
         node = ast.UnaryOp(op=ast.Not(), operand=operand)
         node._metadata["type"] = BoolT()
         return node
@@ -542,7 +545,9 @@ class ExprGenerator(BaseGenerator):
         is_applicable="_is_unary_minus_applicable",
     )
     def _generate_unary_minus(self, *, ctx: ExprGenCtx, **_) -> ast.UnaryOp:
-        operand = self.generate(ctx.target_type, ctx.context, ctx.depth)
+        operand = self.generate(
+            ctx.target_type, ctx.context, self.child_depth(ctx.depth)
+        )
         node = ast.UnaryOp(op=ast.USub(), operand=operand)
         node._metadata["type"] = ctx.target_type
         return node
@@ -560,7 +565,9 @@ class ExprGenerator(BaseGenerator):
         call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
 
         for field_name, field_type in target_type.members.items():
-            field_expr = self.generate(field_type, ctx.context, ctx.depth + 1)
+            field_expr = self.generate(
+                field_type, ctx.context, self.child_depth(ctx.depth)
+            )
 
             keyword = ast.keyword(arg=field_name, value=field_expr)
             call_node.keywords.append(keyword)
@@ -576,21 +583,21 @@ class ExprGenerator(BaseGenerator):
     def _generate_func_call(
         self, *, ctx: ExprGenCtx, **_
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        if not ctx.function_registry:
+        if not self.function_registry:
             return None
 
-        current_func = ctx.function_registry.current_function
+        current_func = self.function_registry.current_function
         assert current_func is not None
 
         caller_mutability = ctx.context.current_function_mutability
 
         # Gather candidates
-        compatible_func = ctx.function_registry.get_compatible_function(
+        compatible_func = self.function_registry.get_compatible_function(
             ctx.target_type,
             current_func,
             caller_mutability=caller_mutability,
         )
-        compatible_builtins = ctx.function_registry.get_compatible_builtins(
+        compatible_builtins = self.function_registry.get_compatible_builtins(
             ctx.target_type,
             caller_mutability=caller_mutability,
         )
@@ -601,18 +608,24 @@ class ExprGenerator(BaseGenerator):
             if not compatible_func:
                 use_builtin = True
             else:
-                use_builtin = ctx.rng.random() < self.cfg.use_builtin_when_both_available_prob
+                use_builtin = (
+                    ctx.gen.rng.random()
+                    < self.cfg.use_builtin_when_both_available_prob
+                )
 
         if use_builtin:
-            name, builtin = ctx.rng.choice(compatible_builtins)
+            name, builtin = ctx.gen.rng.choice(compatible_builtins)
             return self._generate_builtin_call(
                 name, builtin, ctx.target_type, ctx.context, ctx.depth
             )
 
         # Fall back to user function (existing or create new)
-        if not compatible_func or ctx.rng.random() < self.cfg.create_new_function_prob:
+        if (
+            not compatible_func
+            or ctx.gen.rng.random() < self.cfg.create_new_function_prob
+        ):
             # Create a new function (returns ast.FunctionDef or None)
-            func_def = ctx.function_registry.create_new_function(
+            func_def = self.function_registry.create_new_function(
                 return_type=ctx.target_type,
                 type_generator=self.type_generator,
                 max_args=2,
@@ -621,7 +634,7 @@ class ExprGenerator(BaseGenerator):
             if func_def is None:
                 # Can't create more functions; try builtin if available
                 if compatible_builtins:
-                    name, builtin = ctx.rng.choice(compatible_builtins)
+                    name, builtin = ctx.gen.rng.choice(compatible_builtins)
                     return self._generate_builtin_call(
                         name, builtin, ctx.target_type, ctx.context, ctx.depth
                     )
@@ -633,10 +646,11 @@ class ExprGenerator(BaseGenerator):
         func_name = func_t.name
 
         # Generate arguments
+        arg_depth = self.child_depth(ctx.depth)
         args = []
         for pos_arg in func_t.positional_args:
             if pos_arg.typ:
-                arg_expr = self.generate(pos_arg.typ, ctx.context, max(0, ctx.depth))
+                arg_expr = self.generate(pos_arg.typ, ctx.context, arg_depth)
                 args.append(arg_expr)
 
         if func_t.is_external:
@@ -657,9 +671,9 @@ class ExprGenerator(BaseGenerator):
             result_node = self._finalize_call(func_node, args, func_t.return_type)
 
         # Record the call in the call graph
-        if ctx.function_registry.current_function:
-            ctx.function_registry.add_call(
-                ctx.function_registry.current_function, func_name
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function, func_name
             )
 
         return result_node
@@ -749,8 +763,9 @@ class ExprGenerator(BaseGenerator):
         if not isinstance(target_type, (IntegerT, DecimalT)):
             return None
         arg_t = target_type
-        a0 = self.generate(arg_t, context, max(0, depth))
-        a1 = self.generate(arg_t, context, max(0, depth))
+        arg_depth = self.child_depth(depth)
+        a0 = self.generate(arg_t, context, arg_depth)
+        a1 = self.generate(arg_t, context, arg_depth)
         call_node = ast.Call(func=func_node, args=[a0, a1], keywords=[])
         call_node._metadata = {"type": arg_t}
         return call_node
@@ -769,7 +784,7 @@ class ExprGenerator(BaseGenerator):
         if not isinstance(target_type, (IntegerT, DecimalT)):
             return None
         arg_t = target_type
-        a0 = self.generate(arg_t, context, max(0, depth))
+        a0 = self.generate(arg_t, context, self.child_depth(depth))
         return self._finalize_call(func_node, [a0], arg_t)
 
     def _builtin_floor_ceil(
@@ -782,7 +797,7 @@ class ExprGenerator(BaseGenerator):
         **_,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         # Expect decimal arg, return concrete integer type from builtin
-        a0 = self.generate(DecimalT(), context, max(0, depth))
+        a0 = self.generate(DecimalT(), context, self.child_depth(depth))
         ret_t = getattr(builtin, "_return_type", None) or IntegerT(True, 256)
         return self._finalize_call(func_node, [a0], ret_t)
 
@@ -799,7 +814,7 @@ class ExprGenerator(BaseGenerator):
         max_len = self.rng.randint(1, 128)
 
         arg_t = self.rng.choice([BytesT(max_len), StringT(max_len)])
-        a0 = self.generate(arg_t, context, max(0, depth))
+        a0 = self.generate(arg_t, context, self.child_depth(depth))
         ret_t = getattr(builtin, "_return_type", IntegerT(False, 256))
         return self._finalize_call(func_node, [a0], ret_t)
 
@@ -837,7 +852,8 @@ class ExprGenerator(BaseGenerator):
             return StringT(n) if isinstance(target_type, StringT) else BytesT(n)
 
         arg_types = [make_typ(n) for n in parts]
-        args = [self.generate(t, context, depth + 1) for t in arg_types]
+        arg_depth = self.child_depth(depth)
+        args = [self.generate(t, context, arg_depth) for t in arg_types]
 
         # The concat return length is sum(parts) which is <= target length by design
         return self._finalize_call(func_node, args, make_typ(sum(parts)))
@@ -876,7 +892,8 @@ class ExprGenerator(BaseGenerator):
                 src_t = BytesT(arg_len)
 
         # Generate the source expression
-        arg0 = self.generate(src_t, context, max(0, depth))
+        arg_depth = self.child_depth(depth)
+        arg0 = self.generate(src_t, context, arg_depth)
 
         # Build len(arg0) where applicable (Bytes/String only)
         len_ret_t = IntegerT(False, 256)
@@ -888,8 +905,8 @@ class ExprGenerator(BaseGenerator):
             len_call = ast_builder.uint256_literal(32)
 
         # Random uint expressions to feed into min/max
-        rand_u = self.generate(IntegerT(False, 256), context, max(0, depth))
-        rand_v = self.generate(IntegerT(False, 256), context, max(0, depth))
+        rand_u = self.generate(IntegerT(False, 256), context, arg_depth)
+        rand_v = self.generate(IntegerT(False, 256), context, arg_depth)
 
         # Valid vs invalid selection
         make_valid = self.rng.random() < cfg.slice_valid_prob
