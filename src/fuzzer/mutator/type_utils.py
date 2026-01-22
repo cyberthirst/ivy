@@ -12,6 +12,7 @@ from vyper.semantics.types import (
     SArrayT,
     DArrayT,
     TupleT,
+    StructT,
 )
 from vyper.semantics.analysis.base import VarInfo
 
@@ -19,6 +20,20 @@ from vyper.semantics.analysis.base import VarInfo
 def is_subscriptable(t: VyperType) -> bool:
     """Check if type supports subscript access."""
     return isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT))
+
+
+def is_dereferenceable(
+    t: VyperType,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> bool:
+    """Check if type supports attribute or subscript dereferencing."""
+    if allow_subscript and isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT)):
+        return True
+    if allow_attribute and isinstance(t, StructT):
+        return True
+    return False
 
 
 def child_types(t: VyperType) -> Generator[VyperType, None, None]:
@@ -29,6 +44,19 @@ def child_types(t: VyperType) -> Generator[VyperType, None, None]:
         yield t.value_type
     elif isinstance(t, TupleT):
         yield from getattr(t, "member_types", [])
+
+
+def dereference_child_types(
+    t: VyperType,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> Generator[VyperType, None, None]:
+    """Yield child types accessible via attribute or subscript dereference."""
+    if allow_subscript:
+        yield from child_types(t)
+    if allow_attribute and isinstance(t, StructT):
+        yield from t.members.values()
 
 
 def can_reach_type(base_t: VyperType, target_t: VyperType, max_depth: int) -> bool:
@@ -43,6 +71,38 @@ def can_reach_type(base_t: VyperType, target_t: VyperType, max_depth: int) -> bo
         if target_t.compare_type(ct):
             return True
         if is_subscriptable(ct) and can_reach_type(ct, target_t, max_depth - 1):
+            return True
+    return False
+
+
+def can_reach_type_via_deref(
+    base_t: VyperType,
+    target_t: VyperType,
+    max_depth: int,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> bool:
+    """Check if target_t is reachable via attribute/subscript dereferencing."""
+    if max_depth <= 0:
+        return False
+
+    for ct in dereference_child_types(
+        base_t,
+        allow_attribute=allow_attribute,
+        allow_subscript=allow_subscript,
+    ):
+        if target_t.compare_type(ct):
+            return True
+        if is_dereferenceable(
+            ct, allow_attribute=allow_attribute, allow_subscript=allow_subscript
+        ) and can_reach_type_via_deref(
+            ct,
+            target_t,
+            max_depth - 1,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        ):
             return True
     return False
 
@@ -115,6 +175,35 @@ def find_nested_subscript_bases(
         if not is_subscriptable(t):
             continue
         if can_reach_type(t, target_type, max_steps):
+            result.append((name, t))
+
+    return result
+
+
+def find_dereference_bases(
+    target_type: VyperType,
+    vars_dict: dict[str, VarInfo],
+    max_steps: int,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> list[tuple[str, VyperType]]:
+    """Find variables that can reach target_type via dereferencing."""
+    result: list[tuple[str, VyperType]] = []
+
+    for name, var_info in vars_dict.items():
+        t = var_info.typ
+        if not is_dereferenceable(
+            t, allow_attribute=allow_attribute, allow_subscript=allow_subscript
+        ):
+            continue
+        if can_reach_type_via_deref(
+            t,
+            target_type,
+            max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        ):
             result.append((name, t))
 
     return result

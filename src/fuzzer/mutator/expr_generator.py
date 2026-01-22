@@ -35,9 +35,9 @@ from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_subscriptable,
-    can_reach_type,
-    find_subscript_bases,
-    find_nested_subscript_bases,
+    is_dereferenceable,
+    can_reach_type_via_deref,
+    find_dereference_bases,
 )
 from fuzzer.mutator.indexing import (
     small_literal_index,
@@ -56,6 +56,14 @@ class ExprGenCtx:
     context: GenerationContext
     depth: int
     gen: ExprGenerator
+
+
+@dataclass(frozen=True)
+class DerefCandidate:
+    kind: str
+    child_type: VyperType
+    attr_name: Optional[str] = None
+    tuple_index: Optional[int] = None
 
 
 class ExprGenerator(BaseGenerator):
@@ -141,11 +149,49 @@ class ExprGenerator(BaseGenerator):
             return False
         return not ctx.context.is_module_scope
 
-    def _is_subscript_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+    def _find_deref_bases(
+        self,
+        *,
+        ctx: ExprGenCtx,
+        allow_attribute: bool,
+        allow_subscript: bool,
+    ) -> list[tuple[str, VyperType]]:
         vars_dict = dict(ctx.context.find_matching_vars(None))
+        return find_dereference_bases(
+            ctx.target_type,
+            vars_dict,
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+
+    def _weight_deref_like(self, n: int) -> float:
+        cfg = self.cfg
+        if n == 0:
+            return 1.0
+        return min(
+            cfg.subscript_weight_max,
+            cfg.subscript_weight_base + cfg.subscript_weight_scale * n,
+        )
+
+    def _is_attribute_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return bool(
-            find_nested_subscript_bases(
-                ctx.target_type, vars_dict, max_steps=self.cfg.subscript_chain_max_steps
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=False
+            )
+        )
+
+    def _is_subscript_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return bool(
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=False, allow_subscript=True
+            )
+        )
+
+    def _is_dereference_var_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return bool(
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=True
             )
         )
 
@@ -159,14 +205,29 @@ class ExprGenerator(BaseGenerator):
     def _weight_ifexp(self, **_) -> float:
         return self.cfg.ifexp_weight
 
+    def _weight_attribute(self, *, ctx: ExprGenCtx, **_) -> float:
+        n = len(
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=False
+            )
+        )
+        return self._weight_deref_like(n)
+
     def _weight_subscript(self, *, ctx: ExprGenCtx, **_) -> float:
-        # Slight bias based on number of available bases
-        vars_dict = dict(ctx.context.find_matching_vars(None))
-        n = len(find_subscript_bases(ctx.target_type, vars_dict))
-        cfg = self.cfg
-        if n == 0:
-            return 1.0
-        return min(cfg.subscript_weight_max, cfg.subscript_weight_base + cfg.subscript_weight_scale * n)
+        n = len(
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=False, allow_subscript=True
+            )
+        )
+        return self._weight_deref_like(n)
+
+    def _weight_dereference_var(self, *, ctx: ExprGenCtx, **_) -> float:
+        n = len(
+            self._find_deref_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=True
+            )
+        )
+        return self._weight_deref_like(n)
 
     # Strategy methods
 
@@ -215,33 +276,99 @@ class ExprGenerator(BaseGenerator):
         return node
 
     @strategy(
-        name="expr.subscript",
+        name="expr.attribute",
         tags=frozenset({"expr", "recursive"}),
-        is_applicable="_is_subscript_applicable",
-        weight="_weight_subscript",
+        is_applicable="_is_attribute_applicable",
+        weight="_weight_attribute",
     )
-    def _generate_subscript(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Subscript]:
-        vars_dict = dict(ctx.context.find_matching_vars(None))
-        bases = find_nested_subscript_bases(
-            ctx.target_type, vars_dict, max_steps=self.cfg.subscript_chain_max_steps
+    def _generate_attribute(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Attribute]:
+        bases = self._find_deref_bases(
+            ctx=ctx, allow_attribute=True, allow_subscript=False
         )
         if not bases:
             return None
 
         name, base_t = ctx.gen.rng.choice(bases)
         base_node: ast.VyperNode = self._generate_variable_ref(name, ctx.context)
-        built = self.build_chain_to_target(
+        built = self.build_dereference_chain_to_target(
             base_node,
             base_t,
             ctx.target_type,
             ctx.context,
             self.child_depth(ctx.depth),
             max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=False,
+        )
+        if not built:
+            return None
+        node, _ = built
+        assert isinstance(node, ast.Attribute)
+        node._metadata["type"] = ctx.target_type
+        return node
+
+    @strategy(
+        name="expr.subscript",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_subscript_applicable",
+        weight="_weight_subscript",
+    )
+    def _generate_subscript(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Subscript]:
+        bases = self._find_deref_bases(
+            ctx=ctx, allow_attribute=False, allow_subscript=True
+        )
+        if not bases:
+            return None
+
+        name, base_t = ctx.gen.rng.choice(bases)
+        base_node: ast.VyperNode = self._generate_variable_ref(name, ctx.context)
+        built = self.build_dereference_chain_to_target(
+            base_node,
+            base_t,
+            ctx.target_type,
+            ctx.context,
+            self.child_depth(ctx.depth),
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=False,
+            allow_subscript=True,
         )
         if not built:
             return None
         node, _ = built
         assert isinstance(node, ast.Subscript)
+        node._metadata["type"] = ctx.target_type
+        return node
+
+    @strategy(
+        name="expr.dereference_var",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_dereference_var_applicable",
+        weight="_weight_dereference_var",
+    )
+    def _generate_dereference_var(
+        self, *, ctx: ExprGenCtx, **_
+    ) -> Optional[ast.VyperNode]:
+        bases = self._find_deref_bases(
+            ctx=ctx, allow_attribute=True, allow_subscript=True
+        )
+        if not bases:
+            return None
+
+        name, base_t = ctx.gen.rng.choice(bases)
+        base_node: ast.VyperNode = self._generate_variable_ref(name, ctx.context)
+        built = self.build_dereference_chain_to_target(
+            base_node,
+            base_t,
+            ctx.target_type,
+            ctx.context,
+            self.child_depth(ctx.depth),
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=True,
+        )
+        if not built:
+            return None
+        node, _ = built
         node._metadata["type"] = ctx.target_type
         return node
 
@@ -262,9 +389,9 @@ class ExprGenerator(BaseGenerator):
         node._metadata["type"] = ctx.target_type
         return node
 
-    # ----------------------
-    # Shared subscript utils
-    # ----------------------
+    # -------------------------
+    # Shared dereference utils
+    # -------------------------
 
     def _random_integer_type(self) -> IntegerT:
         bits = self.rng.choice([8, 16, 32, 64, 128, 256])
@@ -352,6 +479,296 @@ class ExprGenerator(BaseGenerator):
         )
         return ast_builder.literal(val, INDEX_TYPE)
 
+    def _allow_deref_candidate(
+        self,
+        child_t: VyperType,
+        *,
+        target_type: Optional[VyperType],
+        max_steps_remaining: int,
+        allow_attribute: bool,
+        allow_subscript: bool,
+    ) -> bool:
+        if target_type is None:
+            return True
+        if target_type.compare_type(child_t):
+            return True
+        if max_steps_remaining <= 0:
+            return False
+        if not is_dereferenceable(
+            child_t,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        ):
+            return False
+        return can_reach_type_via_deref(
+            child_t,
+            target_type,
+            max_steps_remaining,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+
+    def _dereference_candidates(
+        self,
+        cur_t: VyperType,
+        *,
+        target_type: Optional[VyperType],
+        max_steps_remaining: int,
+        allow_attribute: bool,
+        allow_subscript: bool,
+    ) -> list[DerefCandidate]:
+        candidates: list[DerefCandidate] = []
+
+        if allow_attribute and isinstance(cur_t, StructT):
+            for field_name, field_type in cur_t.members.items():
+                if not self._allow_deref_candidate(
+                    field_type,
+                    target_type=target_type,
+                    max_steps_remaining=max_steps_remaining,
+                    allow_attribute=allow_attribute,
+                    allow_subscript=allow_subscript,
+                ):
+                    continue
+                candidates.append(
+                    DerefCandidate(
+                        kind="attribute",
+                        child_type=field_type,
+                        attr_name=field_name,
+                    )
+                )
+
+        if allow_subscript and is_subscriptable(cur_t):
+            if isinstance(cur_t, HashMapT):
+                child_t = cur_t.value_type
+                if self._allow_deref_candidate(
+                    child_t,
+                    target_type=target_type,
+                    max_steps_remaining=max_steps_remaining,
+                    allow_attribute=allow_attribute,
+                    allow_subscript=allow_subscript,
+                ):
+                    candidates.append(
+                        DerefCandidate(kind="subscript", child_type=child_t)
+                    )
+
+            elif isinstance(cur_t, (SArrayT, DArrayT)):
+                child_t = cur_t.value_type
+                if self._allow_deref_candidate(
+                    child_t,
+                    target_type=target_type,
+                    max_steps_remaining=max_steps_remaining,
+                    allow_attribute=allow_attribute,
+                    allow_subscript=allow_subscript,
+                ):
+                    candidates.append(
+                        DerefCandidate(kind="subscript", child_type=child_t)
+                    )
+
+            elif isinstance(cur_t, TupleT):
+                mtypes = list(getattr(cur_t, "member_types", []))
+                for i, mt in enumerate(mtypes):
+                    if not self._allow_deref_candidate(
+                        mt,
+                        target_type=target_type,
+                        max_steps_remaining=max_steps_remaining,
+                        allow_attribute=allow_attribute,
+                        allow_subscript=allow_subscript,
+                    ):
+                        continue
+                    candidates.append(
+                        DerefCandidate(
+                            kind="subscript",
+                            child_type=mt,
+                            tuple_index=i,
+                        )
+                    )
+
+        return candidates
+
+    def _apply_dereference_step(
+        self,
+        node: ast.VyperNode,
+        cur_t: VyperType,
+        candidate: DerefCandidate,
+        context: GenerationContext,
+        depth: int,
+    ) -> tuple[ast.VyperNode, VyperType, str]:
+        if candidate.kind == "attribute":
+            assert candidate.attr_name is not None
+            attr_node = ast.Attribute(value=node, attr=candidate.attr_name)
+            attr_node._metadata = {"type": candidate.child_type}
+            return attr_node, candidate.child_type, "attribute"
+
+        if isinstance(cur_t, HashMapT):
+            idx_expr = self.generate(cur_t.key_type, context, depth)
+        elif isinstance(cur_t, (SArrayT, DArrayT)):
+            idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
+        elif isinstance(cur_t, TupleT):
+            assert candidate.tuple_index is not None
+            idx_expr = ast_builder.literal(
+                candidate.tuple_index, IntegerT(False, 256)
+            )
+        else:
+            raise ValueError(f"unsupported deref type: {type(cur_t).__name__}")
+
+        sub_node = ast.Subscript(value=node, slice=idx_expr)
+        sub_node._metadata = {"type": candidate.child_type}
+        return sub_node, candidate.child_type, "subscript"
+
+    def dereference_once(
+        self,
+        node: ast.VyperNode,
+        cur_t: VyperType,
+        context: GenerationContext,
+        depth: int,
+        *,
+        target_type: Optional[VyperType] = None,
+        max_steps_remaining: int = 0,
+        allow_attribute: bool = True,
+        allow_subscript: bool = True,
+    ) -> Optional[tuple[ast.VyperNode, VyperType, str]]:
+        candidates = self._dereference_candidates(
+            cur_t,
+            target_type=target_type,
+            max_steps_remaining=max_steps_remaining,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+        if not candidates:
+            return None
+        candidate = self.rng.choice(candidates)
+        return self._apply_dereference_step(
+            node, cur_t, candidate, context, depth
+        )
+
+    def build_dereference_chain_to_target(
+        self,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        *,
+        max_steps: int = 3,
+        allow_attribute: bool = True,
+        allow_subscript: bool = True,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        cur_t = base_type
+        node = base_node
+        steps_remaining = max(1, max_steps)
+
+        while steps_remaining > 0:
+            candidates = self._dereference_candidates(
+                cur_t,
+                target_type=target_type,
+                max_steps_remaining=steps_remaining - 1,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            )
+            if not candidates:
+                break
+
+            direct = [
+                c for c in candidates if target_type.compare_type(c.child_type)
+            ]
+            candidate = self.rng.choice(direct or candidates)
+            node, cur_t, _ = self._apply_dereference_step(
+                node, cur_t, candidate, context, depth
+            )
+            steps_remaining -= 1
+
+            if target_type.compare_type(cur_t):
+                return node, cur_t
+
+            if not is_dereferenceable(
+                cur_t,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            ):
+                break
+
+        return None
+
+    def build_random_dereference_chain(
+        self,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        *,
+        max_steps: int = 2,
+        allow_attribute: bool = True,
+        allow_subscript: bool = True,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        if not is_dereferenceable(
+            base_type,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        ):
+            return None
+
+        cur_t = base_type
+        node = base_node
+        steps = self.rng.randint(1, max(1, max_steps))
+
+        for i in range(steps):
+            step = self.dereference_once(
+                node,
+                cur_t,
+                context,
+                depth,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            )
+            if step is None:
+                break
+            node, cur_t, _ = step
+
+            if not is_dereferenceable(
+                cur_t,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            ):
+                break
+
+            if i == steps - 1:
+                break
+
+        return node, cur_t
+
+    def build_dereference_chain(
+        self,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        *,
+        target_type: Optional[VyperType] = None,
+        max_steps: int = 3,
+        allow_attribute: bool = True,
+        allow_subscript: bool = True,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        if target_type is None:
+            return self.build_random_dereference_chain(
+                base_node,
+                base_type,
+                context,
+                depth,
+                max_steps=max_steps,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            )
+        return self.build_dereference_chain_to_target(
+            base_node,
+            base_type,
+            target_type,
+            context,
+            depth,
+            max_steps=max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+
     def build_chain_to_target(
         self,
         base_node: ast.VyperNode,
@@ -361,54 +778,16 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         max_steps: int = 3,
     ) -> Optional[tuple[ast.VyperNode, VyperType]]:
-        cur_t = base_type
-        node = base_node
-        steps_remaining = max(1, max_steps)
-
-        while steps_remaining > 0 and is_subscriptable(cur_t):
-            next_options: list[tuple[VyperType, ast.VyperNode]] = []
-
-            if isinstance(cur_t, HashMapT):
-                key_expr = self.generate(cur_t.key_type, context, depth)
-                next_options.append((cur_t.value_type, key_expr))
-
-            elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(
-                    node, cur_t, context, depth
-                )
-                next_options.append((cur_t.value_type, idx_expr))
-
-            elif isinstance(cur_t, TupleT):
-                mtypes = list(getattr(cur_t, "member_types", []))
-                choices = []
-                for i, mt in enumerate(mtypes):
-                    if target_type.compare_type(mt) or (
-                        is_subscriptable(mt)
-                        and can_reach_type(mt, target_type, steps_remaining - 1)
-                    ):
-                        choices.append((i, mt))
-                if not choices:
-                    break
-                idx, child_t = self.rng.choice(choices)
-                idx_expr = ast_builder.literal(idx, IntegerT(False, 256))
-                next_options.append((child_t, idx_expr))
-
-            direct = [
-                (ct, idx) for (ct, idx) in next_options if target_type.compare_type(ct)
-            ]
-            chosen_ct, idx_expr = self.rng.choice(direct or next_options)
-
-            node = ast.Subscript(value=node, slice=idx_expr)
-            node._metadata = {"type": chosen_ct}
-            cur_t = chosen_ct
-            steps_remaining -= 1
-
-            if target_type.compare_type(cur_t):
-                return node, cur_t
-
-        if target_type.compare_type(cur_t):
-            return node, cur_t
-        return None
+        return self.build_dereference_chain_to_target(
+            base_node,
+            base_type,
+            target_type,
+            context,
+            depth,
+            max_steps=max_steps,
+            allow_attribute=False,
+            allow_subscript=True,
+        )
 
     def build_random_chain(
         self,
@@ -418,36 +797,18 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         max_steps: int = 2,
     ) -> tuple[ast.VyperNode, VyperType]:
-        cur_t = base_type
-        node = base_node
-        steps = self.rng.randint(1, max_steps)
-
-        for _ in range(steps):
-            if isinstance(cur_t, HashMapT):
-                idx_expr = self.generate(cur_t.key_type, context, depth)
-                cur_t = cur_t.value_type
-            elif isinstance(cur_t, (SArrayT, DArrayT)):
-                idx_expr = self._generate_index_for_sequence(
-                    node, cur_t, context, depth
-                )
-                cur_t = cur_t.value_type
-            elif isinstance(cur_t, TupleT):
-                mtypes = list(getattr(cur_t, "member_types", []))
-                if not mtypes:
-                    break
-                idx = self.rng.randrange(len(mtypes))
-                idx_expr = ast_builder.literal(idx, IntegerT(False, 256))
-                cur_t = mtypes[idx]
-            else:
-                break
-
-            node = ast.Subscript(value=node, slice=idx_expr)
-            node._metadata = {"type": cur_t}
-
-            if not is_subscriptable(cur_t):
-                break
-
-        return node, cur_t
+        built = self.build_random_dereference_chain(
+            base_node,
+            base_type,
+            context,
+            depth,
+            max_steps=max_steps,
+            allow_attribute=False,
+            allow_subscript=True,
+        )
+        if built is None:
+            return base_node, base_type
+        return built
 
     @strategy(
         name="expr.arithmetic",
