@@ -34,10 +34,12 @@ from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
-    is_subscriptable,
     is_dereferenceable,
-    can_reach_type_via_deref,
     find_dereference_bases,
+)
+from fuzzer.mutator.dereference_utils import (
+    DerefCandidate,
+    dereference_candidates,
 )
 from fuzzer.mutator.indexing import (
     small_literal_index,
@@ -56,14 +58,6 @@ class ExprGenCtx:
     context: GenerationContext
     depth: int
     gen: ExprGenerator
-
-
-@dataclass(frozen=True)
-class DerefCandidate:
-    kind: str
-    child_type: VyperType
-    attr_name: Optional[str] = None
-    tuple_index: Optional[int] = None
 
 
 class ExprGenerator(BaseGenerator):
@@ -479,112 +473,6 @@ class ExprGenerator(BaseGenerator):
         )
         return ast_builder.literal(val, INDEX_TYPE)
 
-    def _allow_deref_candidate(
-        self,
-        child_t: VyperType,
-        *,
-        target_type: Optional[VyperType],
-        max_steps_remaining: int,
-        allow_attribute: bool,
-        allow_subscript: bool,
-    ) -> bool:
-        if target_type is None:
-            return True
-        if target_type.compare_type(child_t):
-            return True
-        if max_steps_remaining <= 0:
-            return False
-        if not is_dereferenceable(
-            child_t,
-            allow_attribute=allow_attribute,
-            allow_subscript=allow_subscript,
-        ):
-            return False
-        return can_reach_type_via_deref(
-            child_t,
-            target_type,
-            max_steps_remaining,
-            allow_attribute=allow_attribute,
-            allow_subscript=allow_subscript,
-        )
-
-    def _dereference_candidates(
-        self,
-        cur_t: VyperType,
-        *,
-        target_type: Optional[VyperType],
-        max_steps_remaining: int,
-        allow_attribute: bool,
-        allow_subscript: bool,
-    ) -> list[DerefCandidate]:
-        candidates: list[DerefCandidate] = []
-
-        if allow_attribute and isinstance(cur_t, StructT):
-            for field_name, field_type in cur_t.members.items():
-                if not self._allow_deref_candidate(
-                    field_type,
-                    target_type=target_type,
-                    max_steps_remaining=max_steps_remaining,
-                    allow_attribute=allow_attribute,
-                    allow_subscript=allow_subscript,
-                ):
-                    continue
-                candidates.append(
-                    DerefCandidate(
-                        kind="attribute",
-                        child_type=field_type,
-                        attr_name=field_name,
-                    )
-                )
-
-        if allow_subscript and is_subscriptable(cur_t):
-            if isinstance(cur_t, HashMapT):
-                child_t = cur_t.value_type
-                if self._allow_deref_candidate(
-                    child_t,
-                    target_type=target_type,
-                    max_steps_remaining=max_steps_remaining,
-                    allow_attribute=allow_attribute,
-                    allow_subscript=allow_subscript,
-                ):
-                    candidates.append(
-                        DerefCandidate(kind="subscript", child_type=child_t)
-                    )
-
-            elif isinstance(cur_t, (SArrayT, DArrayT)):
-                child_t = cur_t.value_type
-                if self._allow_deref_candidate(
-                    child_t,
-                    target_type=target_type,
-                    max_steps_remaining=max_steps_remaining,
-                    allow_attribute=allow_attribute,
-                    allow_subscript=allow_subscript,
-                ):
-                    candidates.append(
-                        DerefCandidate(kind="subscript", child_type=child_t)
-                    )
-
-            elif isinstance(cur_t, TupleT):
-                mtypes = list(getattr(cur_t, "member_types", []))
-                for i, mt in enumerate(mtypes):
-                    if not self._allow_deref_candidate(
-                        mt,
-                        target_type=target_type,
-                        max_steps_remaining=max_steps_remaining,
-                        allow_attribute=allow_attribute,
-                        allow_subscript=allow_subscript,
-                    ):
-                        continue
-                    candidates.append(
-                        DerefCandidate(
-                            kind="subscript",
-                            child_type=mt,
-                            tuple_index=i,
-                        )
-                    )
-
-        return candidates
-
     def _apply_dereference_step(
         self,
         node: ast.VyperNode,
@@ -627,7 +515,7 @@ class ExprGenerator(BaseGenerator):
         allow_attribute: bool = True,
         allow_subscript: bool = True,
     ) -> Optional[tuple[ast.VyperNode, VyperType, str]]:
-        candidates = self._dereference_candidates(
+        candidates = dereference_candidates(
             cur_t,
             target_type=target_type,
             max_steps_remaining=max_steps_remaining,
@@ -658,7 +546,7 @@ class ExprGenerator(BaseGenerator):
         steps_remaining = max(1, max_steps)
 
         while steps_remaining > 0:
-            candidates = self._dereference_candidates(
+            candidates = dereference_candidates(
                 cur_t,
                 target_type=target_type,
                 max_steps_remaining=steps_remaining - 1,

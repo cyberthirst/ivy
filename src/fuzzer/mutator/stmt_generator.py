@@ -21,6 +21,7 @@ from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.type_utils import is_dereferenceable, dereference_child_types
+from fuzzer.mutator.dereference_utils import pick_dereference_target_type
 from fuzzer.mutator.strategy import strategy
 
 
@@ -494,52 +495,6 @@ class StatementGenerator(BaseGenerator):
                 return True
         return False
 
-    def _collect_dereference_types(
-        self, typ: VyperType, max_steps: int
-    ) -> list[tuple[VyperType, int]]:
-        types: list[tuple[VyperType, int]] = []
-
-        def walk(cur_t: VyperType, steps_left: int, depth: int) -> None:
-            if steps_left <= 0:
-                return
-            for child_t in dereference_child_types(cur_t):
-                types.append((child_t, depth))
-                if is_dereferenceable(child_t):
-                    walk(child_t, steps_left - 1, depth + 1)
-
-        walk(typ, max_steps, 1)
-        return types
-
-    def _pick_dereference_target_type(
-        self,
-        base_type: VyperType,
-        *,
-        max_steps: int,
-        predicate,
-    ) -> Optional[VyperType]:
-        all_candidates = [
-            (t, depth)
-            for t, depth in self._collect_dereference_types(base_type, max_steps)
-            if predicate(t)
-        ]
-        if not all_candidates:
-            return None
-
-        desired_depth = 1
-        while (
-            desired_depth < max_steps
-            and self.rng.random() < self.cfg.deref_continue_prob
-        ):
-            desired_depth += 1
-
-        depth_candidates = [
-            t for t, depth in all_candidates if depth == desired_depth
-        ]
-        if depth_candidates:
-            return self.rng.choice(depth_candidates)
-
-        return self.rng.choice([t for t, _ in all_candidates])
-
     def _get_augassign_candidates(
         self, context: GenerationContext
     ) -> list[tuple[str, VarInfo]]:
@@ -598,10 +553,12 @@ class StatementGenerator(BaseGenerator):
             and ctx.gen.rng.random() < self.cfg.deref_assignment_prob
         )
         if should_deref:
-            target_pick = self._pick_dereference_target_type(
+            target_pick = pick_dereference_target_type(
                 var_info.typ,
                 max_steps=self.cfg.deref_chain_max_steps,
                 predicate=lambda t: not isinstance(t, HashMapT),
+                rng=ctx.gen.rng,
+                continue_prob=self.cfg.deref_continue_prob,
             )
             if target_pick is None:
                 if must_deref:
@@ -861,10 +818,12 @@ class StatementGenerator(BaseGenerator):
         target_type = base_type
 
         if should_deref:
-            target_pick = self._pick_dereference_target_type(
+            target_pick = pick_dereference_target_type(
                 base_type,
                 max_steps=self.cfg.deref_chain_max_steps,
                 predicate=self._is_augassignable_type,
+                rng=ctx.gen.rng,
+                continue_prob=self.cfg.deref_continue_prob,
             )
             if target_pick is None:
                 if not base_augassignable:
