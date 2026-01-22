@@ -431,14 +431,14 @@ class ExprGenerator(BaseGenerator):
             and self.rng.random() < cfg.dynarray_small_literal_in_guard_prob
         )
         if use_small:
-            i_expr = small_literal_index(self.rng)
+            i_expr = small_literal_index(self.rng, seq_t.length)
         else:
             i_expr = self.generate(INDEX_TYPE, context, depth)
 
         if isinstance(seq_t, SArrayT):
             len_call = ast_builder.uint256_literal(seq_t.length)
-        else:
-            len_call = build_len_call(base_node)
+            return ast_builder.uint256_binop(i_expr, ast.Mod(), len_call)
+        len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
 
     def _generate_random_index(
@@ -456,8 +456,14 @@ class ExprGenerator(BaseGenerator):
             and self.rng.random() < cfg.dynarray_small_literal_in_random_prob
         )
         if use_small:
-            return small_literal_index(self.rng)
-        return self.generate(INDEX_TYPE, context, depth)
+            idx_expr = small_literal_index(self.rng, seq_t.length)
+        else:
+            idx_expr = self.generate(INDEX_TYPE, context, depth)
+
+        if isinstance(seq_t, SArrayT):
+            len_call = ast_builder.uint256_literal(seq_t.length)
+            return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
+        return idx_expr
 
     def _generate_oob_index(
         self,
