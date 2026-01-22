@@ -435,7 +435,10 @@ class ExprGenerator(BaseGenerator):
         else:
             i_expr = self.generate(INDEX_TYPE, context, depth)
 
-        len_call = build_len_call(base_node)
+        if isinstance(seq_t, SArrayT):
+            len_call = ast_builder.uint256_literal(seq_t.length)
+        else:
+            len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
 
     def _generate_random_index(
