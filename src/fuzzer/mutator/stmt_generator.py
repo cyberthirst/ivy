@@ -10,18 +10,21 @@ from vyper.semantics.types import (
     BoolT,
     HashMapT,
     IntegerT,
-    DecimalT,
-    BytesM_T,
 )
-from vyper.semantics.types.user import FlagT
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.type_utils import is_dereferenceable, dereference_child_types
+from fuzzer.mutator.type_utils import is_dereferenceable
 from fuzzer.mutator.dereference_utils import pick_dereference_target_type
+from fuzzer.mutator.augassign_utils import (
+    augassign_ops_for_type,
+    is_augassignable_type,
+    augassign_rhs_type,
+    can_reach_augassignable,
+)
 from fuzzer.mutator.strategy import strategy
 
 
@@ -437,64 +440,6 @@ class StatementGenerator(BaseGenerator):
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
 
-    def _augassign_ops_for_type(
-        self, typ: VyperType
-    ) -> list[type[ast.VyperNode]]:
-        if not getattr(typ, "_is_prim_word", False):
-            return []
-
-        if isinstance(typ, IntegerT):
-            ops = [
-                ast.Add,
-                ast.Sub,
-                ast.Mult,
-                ast.FloorDiv,
-                ast.Mod,
-                ast.Pow,
-                ast.BitAnd,
-                ast.BitOr,
-                ast.BitXor,
-            ]
-            if typ.bits == 256:
-                ops.extend([ast.LShift, ast.RShift])
-            return ops
-
-        if isinstance(typ, DecimalT):
-            return [ast.Add, ast.Sub, ast.Mult, ast.Div]
-
-        if isinstance(typ, BytesM_T):
-            ops = [ast.BitAnd, ast.BitOr, ast.BitXor]
-            if typ.length == 32:
-                ops.extend([ast.LShift, ast.RShift])
-            return ops
-
-        if isinstance(typ, FlagT):
-            return [ast.BitAnd, ast.BitOr, ast.BitXor]
-
-        return []
-
-    def _is_augassignable_type(self, typ: VyperType) -> bool:
-        return bool(self._augassign_ops_for_type(typ))
-
-    def _augassign_rhs_type(
-        self, op_cls: type[ast.VyperNode], target_type: VyperType
-    ) -> VyperType:
-        if op_cls in (ast.LShift, ast.RShift):
-            return IntegerT(False, 256)
-        return target_type
-
-    def _can_reach_augassignable(self, typ: VyperType, max_steps: int) -> bool:
-        if self._is_augassignable_type(typ):
-            return True
-        if max_steps <= 0:
-            return False
-        if not is_dereferenceable(typ):
-            return False
-        for child_t in dereference_child_types(typ):
-            if self._can_reach_augassignable(child_t, max_steps - 1):
-                return True
-        return False
-
     def _get_augassign_candidates(
         self, context: GenerationContext
     ) -> list[tuple[str, VarInfo]]:
@@ -505,7 +450,7 @@ class StatementGenerator(BaseGenerator):
         return [
             (name, var_info)
             for name, var_info in writable_vars
-            if self._can_reach_augassignable(var_info.typ, max_steps)
+            if can_reach_augassignable(var_info.typ, max_steps)
         ]
 
     def _build_dereference_target(
@@ -804,7 +749,7 @@ class StatementGenerator(BaseGenerator):
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
         base_type = var_info.typ
-        base_augassignable = self._is_augassignable_type(base_type)
+        base_augassignable = is_augassignable_type(base_type)
         must_deref = isinstance(base_type, HashMapT)
         should_deref = must_deref or (
             is_dereferenceable(base_type)
@@ -821,7 +766,7 @@ class StatementGenerator(BaseGenerator):
             target_pick = pick_dereference_target_type(
                 base_type,
                 max_steps=self.cfg.deref_chain_max_steps,
-                predicate=self._is_augassignable_type,
+                predicate=is_augassignable_type,
                 rng=ctx.gen.rng,
                 continue_prob=self.cfg.deref_continue_prob,
             )
@@ -839,12 +784,12 @@ class StatementGenerator(BaseGenerator):
                     return None
                 target_node, target_type = built
 
-        ops = self._augassign_ops_for_type(target_type)
+        ops = augassign_ops_for_type(target_type)
         if not ops:
             return None
 
         op_class = ctx.gen.rng.choice(ops)
-        rhs_type = self._augassign_rhs_type(op_class, target_type)
+        rhs_type = augassign_rhs_type(op_class, target_type)
 
         if op_class is ast.Pow:
             rhs_value = ctx.gen.rng.randint(0, 8)
