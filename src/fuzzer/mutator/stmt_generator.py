@@ -763,6 +763,8 @@ class StatementGenerator(BaseGenerator):
         target_type = base_type
 
         if should_deref:
+            # We could build the deref target directly for augassign; picking a
+            # reachable target type first reuses the shared deref chain logic.
             target_pick = pick_dereference_target_type(
                 base_type,
                 max_steps=self.cfg.deref_chain_max_steps,
