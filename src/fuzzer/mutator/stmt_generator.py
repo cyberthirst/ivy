@@ -472,6 +472,49 @@ class StatementGenerator(BaseGenerator):
             allow_subscript=True,
         )
 
+    def _resolve_target_with_deref(
+        self,
+        ctx: StmtGenCtx,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        *,
+        predicate,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        base_ok = predicate(base_type)
+        must_deref = isinstance(base_type, HashMapT)
+        should_deref = must_deref or (
+            is_dereferenceable(base_type)
+            and (
+                not base_ok or ctx.gen.rng.random() < self.cfg.deref_assignment_prob
+            )
+        )
+
+        if should_deref:
+            # We could build the deref target directly; picking a reachable type
+            # first reuses the shared deref chain logic.
+            target_pick = pick_dereference_target_type(
+                base_type,
+                max_steps=self.cfg.deref_chain_max_steps,
+                predicate=predicate,
+                rng=ctx.gen.rng,
+                continue_prob=self.cfg.deref_continue_prob,
+            )
+            if target_pick is None:
+                if not base_ok:
+                    return None
+                return base_node, base_type
+
+            return self._build_dereference_target(
+                ctx,
+                base_node,
+                base_type,
+                target_type=target_pick,
+            )
+
+        if base_ok:
+            return base_node, base_type
+        return None
+
     @strategy(
         name="stmt.assign",
         tags=frozenset({"stmt", "terminal"}),
@@ -489,35 +532,15 @@ class StatementGenerator(BaseGenerator):
         base = ast_builder.var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
-        target_type = var_info.typ
-        target_node: ast.VyperNode = base
-
-        must_deref = isinstance(var_info.typ, HashMapT)
-        should_deref = must_deref or (
-            is_dereferenceable(var_info.typ)
-            and ctx.gen.rng.random() < self.cfg.deref_assignment_prob
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            var_info.typ,
+            predicate=lambda t: not isinstance(t, HashMapT),
         )
-        if should_deref:
-            target_pick = pick_dereference_target_type(
-                var_info.typ,
-                max_steps=self.cfg.deref_chain_max_steps,
-                predicate=lambda t: not isinstance(t, HashMapT),
-                rng=ctx.gen.rng,
-                continue_prob=self.cfg.deref_continue_prob,
-            )
-            if target_pick is None:
-                if must_deref:
-                    return None
-            else:
-                built = self._build_dereference_target(
-                    ctx,
-                    base,
-                    var_info.typ,
-                    target_type=target_pick,
-                )
-                if built is None:
-                    return None
-                target_node, target_type = built
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
 
         value = self.expr_generator.generate(
             target_type, ctx.context, depth=self.expr_generator.root_depth()
@@ -749,42 +772,15 @@ class StatementGenerator(BaseGenerator):
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
         base_type = var_info.typ
-        base_augassignable = is_augassignable_type(base_type)
-        must_deref = isinstance(base_type, HashMapT)
-        should_deref = must_deref or (
-            is_dereferenceable(base_type)
-            and (
-                not base_augassignable
-                or ctx.gen.rng.random() < self.cfg.deref_assignment_prob
-            )
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            base_type,
+            predicate=is_augassignable_type,
         )
-
-        target_node = base
-        target_type = base_type
-
-        if should_deref:
-            # We could build the deref target directly for augassign; picking a
-            # reachable target type first reuses the shared deref chain logic.
-            target_pick = pick_dereference_target_type(
-                base_type,
-                max_steps=self.cfg.deref_chain_max_steps,
-                predicate=is_augassignable_type,
-                rng=ctx.gen.rng,
-                continue_prob=self.cfg.deref_continue_prob,
-            )
-            if target_pick is None:
-                if not base_augassignable:
-                    return None
-            else:
-                built = self._build_dereference_target(
-                    ctx,
-                    base,
-                    base_type,
-                    target_type=target_pick,
-                )
-                if built is None:
-                    return None
-                target_node, target_type = built
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
 
         ops = augassign_ops_for_type(target_type)
         if not ops:
