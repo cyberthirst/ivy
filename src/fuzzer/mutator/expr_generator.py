@@ -131,7 +131,10 @@ class ExprGenerator(BaseGenerator):
         cfg = self.cfg
         if n == 0:
             return 1.0
-        return min(cfg.var_ref_weight_max, cfg.var_ref_weight_base + cfg.var_ref_weight_scale * n)
+        return min(
+            cfg.var_ref_weight_max,
+            cfg.var_ref_weight_base + cfg.var_ref_weight_scale * n,
+        )
 
     def _is_unary_minus_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return isinstance(ctx.target_type, IntegerT) and ctx.target_type.is_signed
@@ -170,23 +173,17 @@ class ExprGenerator(BaseGenerator):
 
     def _is_attribute_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return bool(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=True, allow_subscript=False
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=False)
         )
 
     def _is_subscript_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return bool(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=False, allow_subscript=True
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=False, allow_subscript=True)
         )
 
     def _is_dereference_var_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return bool(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=True, allow_subscript=True
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
 
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
@@ -201,25 +198,19 @@ class ExprGenerator(BaseGenerator):
 
     def _weight_attribute(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=True, allow_subscript=False
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=False)
         )
         return self._weight_deref_like(n)
 
     def _weight_subscript(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=False, allow_subscript=True
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=False, allow_subscript=True)
         )
         return self._weight_deref_like(n)
 
     def _weight_dereference_var(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
-            self._find_deref_bases(
-                ctx=ctx, allow_attribute=True, allow_subscript=True
-            )
+            self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
         return self._weight_deref_like(n)
 
@@ -502,9 +493,7 @@ class ExprGenerator(BaseGenerator):
             idx_expr = self._generate_index_for_sequence(node, cur_t, context, depth)
         elif isinstance(cur_t, TupleT):
             assert candidate.tuple_index is not None
-            idx_expr = ast_builder.literal(
-                candidate.tuple_index, IntegerT(False, 256)
-            )
+            idx_expr = ast_builder.literal(candidate.tuple_index, IntegerT(False, 256))
         else:
             raise ValueError(f"unsupported deref type: {type(cur_t).__name__}")
 
@@ -534,9 +523,7 @@ class ExprGenerator(BaseGenerator):
         if not candidates:
             return None
         candidate = self.rng.choice(candidates)
-        return self._apply_dereference_step(
-            node, cur_t, candidate, context, depth
-        )
+        return self._apply_dereference_step(node, cur_t, candidate, context, depth)
 
     def build_dereference_chain_to_target(
         self,
@@ -565,9 +552,7 @@ class ExprGenerator(BaseGenerator):
             if not candidates:
                 break
 
-            direct = [
-                c for c in candidates if target_type.compare_type(c.child_type)
-            ]
+            direct = [c for c in candidates if target_type.compare_type(c.child_type)]
             candidate = self.rng.choice(direct or candidates)
             node, cur_t, _ = self._apply_dereference_step(
                 node, cur_t, candidate, context, depth
@@ -867,8 +852,7 @@ class ExprGenerator(BaseGenerator):
                 use_builtin = True
             else:
                 use_builtin = (
-                    ctx.gen.rng.random()
-                    < self.cfg.use_builtin_when_both_available_prob
+                    ctx.gen.rng.random() < self.cfg.use_builtin_when_both_available_prob
                 )
 
         if use_builtin:
@@ -1111,7 +1095,14 @@ class ExprGenerator(BaseGenerator):
 
         arg_types = [make_typ(n) for n in parts]
         arg_depth = self.child_depth(depth)
-        args = [self.generate(t, context, arg_depth) for t in arg_types]
+        args = []
+        for t in arg_types:
+            if t.length == 0:
+                # Create empty literal directly to avoid generate() bugs with 0-sized types
+                empty_val = "" if isinstance(t, StringT) else b""
+                args.append(ast_builder.literal(empty_val, t))
+            else:
+                args.append(self.generate(t, context, arg_depth))
 
         # The concat return length is sum(parts) which is <= target length by design
         return self._finalize_call(func_node, args, make_typ(sum(parts)))
@@ -1209,7 +1200,9 @@ class ExprGenerator(BaseGenerator):
             elif choice < cfg.slice_invalid_start_plus_rand_prob:
                 # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
                 a1 = ast_builder.uint256_binop(
-                    len_call, ast.Add(), ast_builder.uint256_binop(rand_u, ast.Mod(), ten)
+                    len_call,
+                    ast.Add(),
+                    ast_builder.uint256_binop(rand_u, ast.Mod(), ten),
                 )
                 a2 = ast_builder.uint256_binop(
                     ast_builder.uint256_binop(
