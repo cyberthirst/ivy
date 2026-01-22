@@ -317,7 +317,10 @@ class StatementGenerator(BaseGenerator):
 
             if return_type is not None and not self.scope_is_terminated(body):
                 ret_expr = self.expr_generator.generate(
-                    return_type, context, depth=self.expr_generator.root_depth()
+                    return_type,
+                    context,
+                    depth=self.expr_generator.root_depth(),
+                    allow_tuple_literal=True,
                 )
                 body.append(ast.Return(value=ret_expr))
 

@@ -58,6 +58,7 @@ class ExprGenCtx:
     context: GenerationContext
     depth: int
     gen: ExprGenerator
+    allow_tuple_literal: bool
 
 
 class ExprGenerator(BaseGenerator):
@@ -91,13 +92,19 @@ class ExprGenerator(BaseGenerator):
         }
 
     def generate(
-        self, target_type: VyperType, context: GenerationContext, depth: int = 0
+        self,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int = 0,
+        *,
+        allow_tuple_literal: bool = False,
     ) -> ast.VyperNode:
         ctx = ExprGenCtx(
             target_type=target_type,
             context=context,
             depth=depth,
             gen=self,
+            allow_tuple_literal=allow_tuple_literal,
         )
 
         # Use tag-based filtering for terminal vs recursive strategies
@@ -113,17 +120,28 @@ class ExprGenerator(BaseGenerator):
             context={"ctx": ctx},
         )
 
+        if isinstance(target_type, TupleT) and not allow_tuple_literal:
+            # Tuple literals are rejected in assignment-like contexts; use empty(T).
+            fallback = lambda: self._build_empty(target_type)
+        else:
+            fallback = lambda: self._generate_literal(ctx=ctx)
+
         return self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",  # TODO nested hash maps
             context={"ctx": ctx},
-            fallback=lambda: self._generate_literal(ctx=ctx),
+            fallback=fallback,
         )
 
     # Applicability/weight helpers
 
     def _is_var_ref_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return bool(ctx.context.find_matching_vars(ctx.target_type))
+
+    def _is_literal_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        if isinstance(ctx.target_type, TupleT):
+            return ctx.allow_tuple_literal
+        return True
 
     def _weight_var_ref(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slightly bias towards var refs when there are many
@@ -231,11 +249,18 @@ class ExprGenerator(BaseGenerator):
     @strategy(
         name="expr.literal",
         tags=frozenset({"expr", "terminal"}),
+        is_applicable="_is_literal_applicable",
         weight="_weight_literal",
     )
     def _generate_literal(self, *, ctx: ExprGenCtx, **_) -> ast.VyperNode:
         value = self.literal_generator.generate(ctx.target_type)
         return ast_builder.literal(value, ctx.target_type)
+
+    def _build_empty(self, target_type: VyperType) -> ast.Call:
+        type_node = ast.Name(id=str(target_type))
+        call_node = ast.Call(func=ast.Name(id="empty"), args=[type_node], keywords=[])
+        call_node._metadata["type"] = target_type
+        return call_node
 
     def random_var_ref(
         self, target_type: VyperType, context: GenerationContext
@@ -367,8 +392,18 @@ class ExprGenerator(BaseGenerator):
         # Condition must be bool; branches must yield the same type
         next_depth = self.child_depth(ctx.depth)
         test = self.generate(BoolT(), ctx.context, next_depth)
-        body = self.generate(ctx.target_type, ctx.context, next_depth)
-        orelse = self.generate(ctx.target_type, ctx.context, next_depth)
+        body = self.generate(
+            ctx.target_type,
+            ctx.context,
+            next_depth,
+            allow_tuple_literal=ctx.allow_tuple_literal,
+        )
+        orelse = self.generate(
+            ctx.target_type,
+            ctx.context,
+            next_depth,
+            allow_tuple_literal=ctx.allow_tuple_literal,
+        )
 
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = ctx.target_type

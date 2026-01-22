@@ -249,7 +249,10 @@ class AstMutator(VyperNodeTransformer):
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(
-            target_type, self.context, depth=self.expr_generator.root_depth()
+            target_type,
+            self.context,
+            depth=self.expr_generator.root_depth(),
+            allow_tuple_literal=False,
         )
 
     def visit_Module(self, node: ast.Module):
@@ -489,7 +492,10 @@ class AstMutator(VyperNodeTransformer):
         # Generate assignment statements for each immutable
         for name, var_info in self.context.immutables_to_init:
             value_expr = self.expr_generator.generate(
-                var_info.typ, self.context, depth=self.expr_generator.root_depth()
+                var_info.typ,
+                self.context,
+                depth=self.expr_generator.root_depth(),
+                allow_tuple_literal=False,
             )
 
             assign = ast.Assign(targets=[ast.Name(id=name)], value=value_expr)
