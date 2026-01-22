@@ -4323,7 +4323,11 @@ def create_proxy(target: address, salt: bytes32) -> address:
 
 
 def test_create2_from_blueprint_address(get_contract, make_input_bundle, keccak):
-    """Test that create_from_blueprint with salt produces correct CREATE2 address."""
+    """Test that create_from_blueprint with salt produces correct CREATE2 address.
+
+    The CREATE2 address must include constructor args in the initcode hash.
+    Different constructor args with the same salt should produce different addresses.
+    """
     blueprint_src = """
 value: public(uint256)
 
@@ -4344,7 +4348,7 @@ def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
     return create_from_blueprint(bp, init_val, salt=salt)
     """
 
-    from vyper.compiler import CompilerData
+    from eth_abi import encode
 
     input_bundle = make_input_bundle({"blueprint_contract.vy": blueprint_src})
     # Blueprint needs an initial value for constructor
@@ -4356,8 +4360,9 @@ def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
 
     created_addr = factory.create_from_bp(blueprint.address, salt, init_val)
 
-    # For blueprint, the init_code is the blueprint's bytecode
-    init_code = blueprint.compiler_data.bytecode
+    # For blueprint, the init_code is bytecode + ABI-encoded constructor args
+    encoded_args = encode(["uint256"], [init_val])
+    init_code = blueprint.compiler_data.bytecode + encoded_args
 
     # Compute expected CREATE2 address
     sender = factory.address.canonical_address
@@ -4366,6 +4371,22 @@ def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
     expected_addr = keccak(preimage)[-20:]
 
     assert created_addr.canonical_address == expected_addr
+
+    # Also verify that different constructor args produce different addresses
+    init_val_2 = 1000
+    created_addr_2 = factory.create_from_bp(blueprint.address, salt, init_val_2)
+
+    # Different args should produce different addresses even with same salt
+    assert created_addr.canonical_address != created_addr_2.canonical_address
+
+    # Verify the second address is also computed correctly
+    encoded_args_2 = encode(["uint256"], [init_val_2])
+    init_code_2 = blueprint.compiler_data.bytecode + encoded_args_2
+    init_code_hash_2 = keccak(init_code_2)
+    preimage_2 = b"\xff" + sender + salt + init_code_hash_2
+    expected_addr_2 = keccak(preimage_2)[-20:]
+
+    assert created_addr_2.canonical_address == expected_addr_2
 
 
 def test_create2_same_salt_same_sender_same_code(get_contract, keccak):

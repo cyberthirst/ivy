@@ -380,7 +380,8 @@ class EVMCore:
         # Compute address - CREATE2 if salt provided, CREATE otherwise
         if salt is not None:
             # CREATE2: address = keccak256(0xff ++ sender ++ salt ++ keccak256(init_code))[-20:]
-            init_code = code.compiler_data.bytecode
+            # init_code includes bytecode + constructor args (data)
+            init_code = code.compiler_data.bytecode + data
             create_address = Address(
                 compute_create2_address(
                     current_address.canonical_address, salt, init_code
