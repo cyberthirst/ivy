@@ -75,6 +75,7 @@ class StmtGeneratorConfig:
     # Statement weights
     vardecl_weight: float = 0.3
     assign_weight: float = 2.0
+    augassign_weight: float = 0.4
     if_weight: float = 0.2
 
     # Type generation bias
@@ -94,6 +95,9 @@ class StmtGeneratorConfig:
 
     # Assignment
     subscript_assignment_prob: float = 0.7
+    deref_assignment_prob: float = 0.8
+    deref_continue_prob: float = 0.5
+    deref_chain_max_steps: int = 3
 
     # For loop generation
     for_weight: float = 0.1

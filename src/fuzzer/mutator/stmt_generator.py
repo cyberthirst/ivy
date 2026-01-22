@@ -10,14 +10,17 @@ from vyper.semantics.types import (
     BoolT,
     HashMapT,
     IntegerT,
+    DecimalT,
+    BytesM_T,
 )
+from vyper.semantics.types.user import FlagT
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.type_utils import is_subscriptable
+from fuzzer.mutator.type_utils import is_dereferenceable, dereference_child_types
 from fuzzer.mutator.strategy import strategy
 
 
@@ -65,6 +68,11 @@ class StatementGenerator(BaseGenerator):
             return False
         return bool(self.get_writable_variables(ctx.context))
 
+    def _is_augassign_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
+            return False
+        return bool(self._get_augassign_candidates(ctx.context))
+
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
@@ -78,6 +86,9 @@ class StatementGenerator(BaseGenerator):
 
     def _weight_assign(self, **_) -> float:
         return self.cfg.assign_weight
+
+    def _weight_augassign(self, **_) -> float:
+        return self.cfg.augassign_weight
 
     def _weight_if(self, **_) -> float:
         return self.cfg.if_weight
@@ -425,6 +436,142 @@ class StatementGenerator(BaseGenerator):
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
 
+    def _augassign_ops_for_type(
+        self, typ: VyperType
+    ) -> list[type[ast.VyperNode]]:
+        if not getattr(typ, "_is_prim_word", False):
+            return []
+
+        if isinstance(typ, IntegerT):
+            ops = [
+                ast.Add,
+                ast.Sub,
+                ast.Mult,
+                ast.FloorDiv,
+                ast.Mod,
+                ast.Pow,
+                ast.BitAnd,
+                ast.BitOr,
+                ast.BitXor,
+            ]
+            if typ.bits == 256:
+                ops.extend([ast.LShift, ast.RShift])
+            return ops
+
+        if isinstance(typ, DecimalT):
+            return [ast.Add, ast.Sub, ast.Mult, ast.Div]
+
+        if isinstance(typ, BytesM_T):
+            ops = [ast.BitAnd, ast.BitOr, ast.BitXor]
+            if typ.length == 32:
+                ops.extend([ast.LShift, ast.RShift])
+            return ops
+
+        if isinstance(typ, FlagT):
+            return [ast.BitAnd, ast.BitOr, ast.BitXor]
+
+        return []
+
+    def _is_augassignable_type(self, typ: VyperType) -> bool:
+        return bool(self._augassign_ops_for_type(typ))
+
+    def _augassign_rhs_type(
+        self, op_cls: type[ast.VyperNode], target_type: VyperType
+    ) -> VyperType:
+        if op_cls in (ast.LShift, ast.RShift):
+            return IntegerT(False, 256)
+        return target_type
+
+    def _can_reach_augassignable(self, typ: VyperType, max_steps: int) -> bool:
+        if self._is_augassignable_type(typ):
+            return True
+        if max_steps <= 0:
+            return False
+        if not is_dereferenceable(typ):
+            return False
+        for child_t in dereference_child_types(typ):
+            if self._can_reach_augassignable(child_t, max_steps - 1):
+                return True
+        return False
+
+    def _collect_dereference_types(
+        self, typ: VyperType, max_steps: int
+    ) -> list[tuple[VyperType, int]]:
+        types: list[tuple[VyperType, int]] = []
+
+        def walk(cur_t: VyperType, steps_left: int, depth: int) -> None:
+            if steps_left <= 0:
+                return
+            for child_t in dereference_child_types(cur_t):
+                types.append((child_t, depth))
+                if is_dereferenceable(child_t):
+                    walk(child_t, steps_left - 1, depth + 1)
+
+        walk(typ, max_steps, 1)
+        return types
+
+    def _pick_dereference_target_type(
+        self,
+        base_type: VyperType,
+        *,
+        max_steps: int,
+        predicate,
+    ) -> Optional[VyperType]:
+        all_candidates = [
+            (t, depth)
+            for t, depth in self._collect_dereference_types(base_type, max_steps)
+            if predicate(t)
+        ]
+        if not all_candidates:
+            return None
+
+        desired_depth = 1
+        while (
+            desired_depth < max_steps
+            and self.rng.random() < self.cfg.deref_continue_prob
+        ):
+            desired_depth += 1
+
+        depth_candidates = [
+            t for t, depth in all_candidates if depth == desired_depth
+        ]
+        if depth_candidates:
+            return self.rng.choice(depth_candidates)
+
+        return self.rng.choice([t for t, _ in all_candidates])
+
+    def _get_augassign_candidates(
+        self, context: GenerationContext
+    ) -> list[tuple[str, VarInfo]]:
+        writable_vars = self.get_writable_variables(context)
+        if not writable_vars:
+            return []
+        max_steps = self.cfg.deref_chain_max_steps
+        return [
+            (name, var_info)
+            for name, var_info in writable_vars
+            if self._can_reach_augassignable(var_info.typ, max_steps)
+        ]
+
+    def _build_dereference_target(
+        self,
+        ctx: StmtGenCtx,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        *,
+        target_type: Optional[VyperType],
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        return self.expr_generator.build_dereference_chain(
+            base_node,
+            base_type,
+            ctx.context,
+            self.expr_generator.root_depth(),
+            target_type=target_type,
+            max_steps=self.cfg.deref_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=True,
+        )
+
     @strategy(
         name="stmt.assign",
         tags=frozenset({"stmt", "terminal"}),
@@ -442,38 +589,33 @@ class StatementGenerator(BaseGenerator):
         base = ast_builder.var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
-        # Decide if we target a subscript (for arrays/hashmaps/tuples) and allow nesting
         target_type = var_info.typ
         target_node: ast.VyperNode = base
 
-        # HashMapT must always be subscripted - can't assign directly
-        # For other subscriptable types, bias towards subscripting
-        is_hashmap = isinstance(var_info.typ, HashMapT)
-        if is_hashmap or (
-            is_subscriptable(var_info.typ)
-            and ctx.gen.rng.random() < self.cfg.subscript_assignment_prob
-        ):
-            cur_node, cur_t = self.expr_generator.build_random_chain(
-                base,
+        must_deref = isinstance(var_info.typ, HashMapT)
+        should_deref = must_deref or (
+            is_dereferenceable(var_info.typ)
+            and ctx.gen.rng.random() < self.cfg.deref_assignment_prob
+        )
+        if should_deref:
+            target_pick = self._pick_dereference_target_type(
                 var_info.typ,
-                ctx.context,
-                depth=self.expr_generator.root_depth(),
-                max_steps=self.expr_generator.cfg.subscript_random_chain_max_steps,
+                max_steps=self.cfg.deref_chain_max_steps,
+                predicate=lambda t: not isinstance(t, HashMapT),
             )
-            target_node = cur_node
-            target_type = cur_t
-
-            # Keep subscripting while we still have a HashMapT
-            while isinstance(target_type, HashMapT):
-                cur_node, cur_t = self.expr_generator.build_random_chain(
-                    target_node,
-                    target_type,
-                    ctx.context,
-                    depth=self.expr_generator.root_depth(),
-                    max_steps=self.expr_generator.cfg.subscript_hashmap_chain_max_steps,
+            if target_pick is None:
+                if must_deref:
+                    return None
+            else:
+                built = self._build_dereference_target(
+                    ctx,
+                    base,
+                    var_info.typ,
+                    target_type=target_pick,
                 )
-                target_node = cur_node
-                target_type = cur_t
+                if built is None:
+                    return None
+                target_node, target_type = built
 
         value = self.expr_generator.generate(
             target_type, ctx.context, depth=self.expr_generator.root_depth()
@@ -689,10 +831,71 @@ class StatementGenerator(BaseGenerator):
 
         return for_node
 
-    def generate_augassign(
-        self, context, parent: Optional[ast.VyperNode]
-    ) -> ast.AugAssign:
-        pass
+    @strategy(
+        name="stmt.augassign",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_augassign_applicable",
+        weight="_weight_augassign",
+    )
+    def generate_augassign(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.AugAssign]:
+        candidates = self._get_augassign_candidates(ctx.context)
+        if not candidates:
+            return None
+
+        var_name, var_info = ctx.gen.rng.choice(candidates)
+        base = ast_builder.var_ref(var_name, var_info)
+        base._metadata = {"type": var_info.typ, "varinfo": var_info}
+
+        base_type = var_info.typ
+        base_augassignable = self._is_augassignable_type(base_type)
+        must_deref = isinstance(base_type, HashMapT)
+        should_deref = must_deref or (
+            is_dereferenceable(base_type)
+            and (
+                not base_augassignable
+                or ctx.gen.rng.random() < self.cfg.deref_assignment_prob
+            )
+        )
+
+        target_node = base
+        target_type = base_type
+
+        if should_deref:
+            target_pick = self._pick_dereference_target_type(
+                base_type,
+                max_steps=self.cfg.deref_chain_max_steps,
+                predicate=self._is_augassignable_type,
+            )
+            if target_pick is None:
+                if not base_augassignable:
+                    return None
+            else:
+                built = self._build_dereference_target(
+                    ctx,
+                    base,
+                    base_type,
+                    target_type=target_pick,
+                )
+                if built is None:
+                    return None
+                target_node, target_type = built
+
+        ops = self._augassign_ops_for_type(target_type)
+        if not ops:
+            return None
+
+        op_class = ctx.gen.rng.choice(ops)
+        rhs_type = self._augassign_rhs_type(op_class, target_type)
+
+        if op_class is ast.Pow:
+            rhs_value = ctx.gen.rng.randint(0, 8)
+            rhs = ast_builder.literal(rhs_value, rhs_type)
+        else:
+            rhs = self.expr_generator.generate(
+                rhs_type, ctx.context, depth=self.expr_generator.root_depth()
+            )
+
+        return ast.AugAssign(target=target_node, op=op_class(), value=rhs)
 
     def generate_assert(self, context, parent: Optional[ast.VyperNode]) -> ast.Assert:
         pass
