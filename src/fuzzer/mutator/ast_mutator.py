@@ -121,7 +121,9 @@ class AstMutator(VyperNodeTransformer):
         # Type generator for random types
         self.type_generator = TypeGenerator(rng)
         # Function registry for tracking and generating functions
-        self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
+        self.function_registry = FunctionRegistry(
+            self.rng, max_initial_functions=5, max_dynamic_functions=5
+        )
         # Interface registry for external calls
         self.interface_registry = InterfaceRegistry(self.rng)
         # Expression generator with function and interface registries
@@ -201,7 +203,7 @@ class AstMutator(VyperNodeTransformer):
             max_stmts=2,
         )
 
-        max_funcs = self.function_registry.max_generated_functions
+        max_funcs = self.function_registry.max_initial_functions
         if max_funcs <= 0:
             return module
 
@@ -214,6 +216,7 @@ class AstMutator(VyperNodeTransformer):
                 return_type=return_type,
                 type_generator=self.type_generator,
                 max_args=2,
+                initial=True,
             )
             if func_def is not None:
                 module.body.append(func_def)
