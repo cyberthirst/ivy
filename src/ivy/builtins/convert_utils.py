@@ -2,7 +2,6 @@
 # - https://github.com/vyperlang/vyper/blob/c32b9b4c6f0d8b8cdb103d3017ff540faf56a305/tests/functional/builtins/codegen/test_convert.py#L301
 
 import enum
-import math
 
 from vyper.semantics.types import (
     BytesT,
@@ -63,9 +62,8 @@ def _convert_int_to_decimal(val, o_typ):
 def _to_bits(val, i_typ):
     # i_typ: the type to convert from
     if isinstance(i_typ, DecimalT):
-        val = val * i_typ.divisor
-        assert math.ceil(val) == math.floor(val)
-        val = int(val)
+        assert isinstance(val, VyperDecimal)
+        val = val.value  # Already the scaled integer representation
     return abi_encode(i_typ, val)
 
 

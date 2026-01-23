@@ -264,3 +264,62 @@ def bar() -> uint256:
     # or 19000000000 (1.9 * 10^10) - we should get 1 instead
     assert c.foo() == 1
     assert c.bar() == 1
+
+
+def test_convert_decimal_to_bool_zero(get_contract):
+    """convert(0.0, bool) should return False."""
+    src = """
+@external
+def foo() -> bool:
+    d: decimal = 0.0
+    return convert(d, bool)
+"""
+    c = get_contract(src)
+    assert c.foo() is False
+
+
+def test_convert_decimal_to_bool_positive(get_contract):
+    """convert(positive_decimal, bool) should return True."""
+    src = """
+@external
+def foo() -> bool:
+    d: decimal = 0.0000000001
+    return convert(d, bool)
+"""
+    c = get_contract(src)
+    assert c.foo() is True
+
+
+def test_convert_decimal_to_bool_negative(get_contract):
+    """convert(negative_decimal, bool) should return True."""
+    src = """
+@external
+def foo() -> bool:
+    d: decimal = -0.0000000001
+    return convert(d, bool)
+"""
+    c = get_contract(src)
+    assert c.foo() is True
+
+
+def test_convert_bool_true_to_decimal(get_contract):
+    """convert(True, decimal) should return scaled 1.0."""
+    src = """
+@external
+def foo() -> decimal:
+    return convert(True, decimal)
+"""
+    c = get_contract(src)
+    # Decimal 1.0 is represented as 10^10 internally
+    assert c.foo() == 10_000_000_000
+
+
+def test_convert_bool_false_to_decimal(get_contract):
+    """convert(False, decimal) should return 0."""
+    src = """
+@external
+def foo() -> decimal:
+    return convert(False, decimal)
+"""
+    c = get_contract(src)
+    assert c.foo() == 0

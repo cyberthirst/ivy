@@ -124,6 +124,9 @@ class VyperBool(VyperValue):
     def __bool__(self) -> bool:
         return self._value
 
+    def __int__(self) -> int:
+        return int(self._value)
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, VyperBool):
             return self._value == other._value
@@ -242,6 +245,9 @@ class VyperDecimal(VyperValue):
     def __init__(self, value: Union[Decimal, int, float], *, scaled: bool = False):
         self.typ = DecimalT()
         if not scaled:
+            # Convert non-numeric types (e.g., VyperBool) to int first
+            if not isinstance(value, (int, float, Decimal)):
+                value = int(value)
             self.value = int(value * self.SCALING_FACTOR)
         else:
             assert isinstance(value, int)
