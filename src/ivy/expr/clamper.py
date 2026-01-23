@@ -9,6 +9,7 @@ from vyper.semantics.types import (
     TupleT,
     VyperType,
 )
+from vyper.semantics.types.base import _GenericTypeAcceptor
 
 from ivy.types import (
     VyperInt,
@@ -32,6 +33,15 @@ def box_value(value: Any, typ: VyperType) -> Any:
 
     Raises Revert if the value is out of bounds for the given type.
     """
+    if isinstance(typ, _GenericTypeAcceptor):
+        if typ.type_ is StringT:
+            if isinstance(value, bytes):
+                byte_len = len(value)
+            else:
+                byte_len = len(value.encode("utf-8"))
+            typ = StringT(byte_len)
+        else:
+            return value
     if isinstance(typ, IntegerT):
         if isinstance(value, VyperInt):
             if value.typ == typ:
@@ -58,7 +68,8 @@ def box_value(value: Any, typ: VyperType) -> Any:
         if isinstance(value, VyperString):
             if value.typ == typ:
                 return value
-            return VyperString(str(value), typ)
+            # VyperString is bytes-based, preserve raw bytes when re-boxing
+            return VyperString(bytes(value), typ)
         return VyperString(value, typ)
 
     if isinstance(typ, BoolT):

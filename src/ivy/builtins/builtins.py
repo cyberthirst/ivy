@@ -19,7 +19,6 @@ from vyper.codegen.core import (
     calculate_type_for_external_return,
     needs_external_call_wrap,
 )
-from vyper.utils import method_id
 
 
 from ivy.abi import abi_decode, abi_encode
@@ -28,7 +27,7 @@ from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
 from ivy.exceptions import Assert, GasReference, Revert
-from ivy.types import Address, VyperDecimal, VyperBytes, VyperInt
+from ivy.types import Address, VyperDecimal, VyperBytes, VyperInt, VyperString
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
 from ivy.builtins import unsafe_math_utils as unsafe_math
@@ -74,12 +73,14 @@ _WEI_DENOMS = {
 }
 
 
-def builtin_as_wei_value(value: Union[int, VyperDecimal], denom: str):
+def builtin_as_wei_value(value: Union[int, VyperDecimal], denom: VyperString):
     from ivy.exceptions import Assert
 
-    if denom not in _WEI_DENOMS:
-        raise ValueError(f"Unknown wei denomination: {denom}")
-    multiplier = _WEI_DENOMS[denom]
+    denom_str = denom.decode("utf-8")
+
+    if denom_str not in _WEI_DENOMS:
+        raise ValueError(f"Unknown wei denomination: {denom_str}")
+    multiplier = _WEI_DENOMS[denom_str]
 
     if isinstance(value, VyperDecimal):
         # Vyper asserts value >= 0 for decimals
@@ -178,9 +179,11 @@ def builtin_uint2str(x: int) -> str:
     return str(x)
 
 
-def builtin_method_id(method: str, output_type: Optional[VyperType] = None):
+def builtin_method_id(method: VyperString, output_type: Optional[VyperType] = None):
     # output_type (bytes4 vs Bytes[4]) only affects ABI encoding, not the value
-    return method_id(method)
+    if not isinstance(method, VyperString):
+        raise TypeError(f"Expected VyperString, got {type(method)}")
+    return keccak(bytes(method))[:4]
 
 
 def builtin_send(evm: EVMCore, to, value, gas: int = 0) -> None:

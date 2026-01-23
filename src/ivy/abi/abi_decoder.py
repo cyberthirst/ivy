@@ -208,12 +208,11 @@ def _decode_r(
         # abi string doesn't actually define string decoder, so we
         # just bytecast the output
         if isinstance(abi_t, ABI_String):
-            # match eth-stdlib, since that's what we check against
-            ret = ret.decode(errors="surrogateescape")
-            # Box strings - VyperString validates length
+            # Box strings - VyperString stores raw UTF-8 bytes internally
             if ivy_compat and isinstance(typ, StringT):
-                return VyperString(ret, typ)
-            return ret
+                return VyperString(ret, typ)  # ret is already bytes
+            # For non-ivy-compat, decode to str for compatibility
+            return ret.decode(errors="surrogateescape")
 
         # Box bytes - VyperBytes validates length
         if ivy_compat and isinstance(typ, BytesT):

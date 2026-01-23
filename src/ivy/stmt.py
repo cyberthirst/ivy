@@ -14,6 +14,7 @@ from ivy.exceptions import Assert, Raise, Invalid
 from ivy.visitor import BaseVisitor
 from ivy.expr.operators import get_operator_handler
 from ivy.expr.clamper import box_value_from_node, box_value
+from ivy.types import VyperString
 
 
 class ReturnException(Exception):
@@ -65,14 +66,18 @@ class StmtVisitor(BaseVisitor):
         if isinstance(msg_node, ast.Name) and msg_node.id == "UNREACHABLE":
             raise Invalid()
 
-        msg_string = self.visit(msg_node)
+        msg_value = self.visit(msg_node)
+        if not isinstance(msg_value, VyperString):
+            raise TypeError(f"Expected VyperString, got {type(msg_value)}")
+        msg_bytes = msg_value
+        msg_string = str(msg_value)
         assert isinstance(msg_string, str)
 
         # encode the msg and raise Revert
         error_method_id = method_id("Error(string)")
         typ = msg_node._metadata["type"]
         wrapped_typ = calculate_type_for_external_return(typ)
-        wrapped_msg = (msg_string,)
+        wrapped_msg = (msg_bytes,)
 
         encoded = abi_encode(wrapped_typ, wrapped_msg)
 
