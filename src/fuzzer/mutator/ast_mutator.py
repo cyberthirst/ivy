@@ -201,7 +201,7 @@ class AstMutator(VyperNodeTransformer):
             parent=module,
             depth=self.stmt_generator.root_depth(),
             min_stmts=0,
-            max_stmts=2,
+            max_stmts=15,
         )
 
         max_funcs = self.function_registry.max_initial_functions
