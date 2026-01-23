@@ -9,6 +9,20 @@ from fuzzer.mutator.ast_mutator import AstMutator
 from unparser.unparser import unparse
 
 
+def test_generator_has_external_function():
+    rng = random.Random(0)
+    mutator = AstMutator(rng, generate=True)
+    module = mutator.mutate(ast.Module(body=[]))
+
+    funcs = [node for node in module.body if isinstance(node, ast.FunctionDef)]
+    assert funcs, "expected at least one generated function"
+    assert any(
+        func._metadata.get("func_type")
+        and func._metadata["func_type"].is_external
+        for func in funcs
+    ), "expected at least one external function"
+
+
 @pytest.mark.xfail(strict=False)
 @pytest.mark.parametrize("_iteration", range(100))
 def test_generator_produces_valid_code(_iteration: int):

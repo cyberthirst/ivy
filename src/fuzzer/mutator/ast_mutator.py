@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
+from vyper.semantics.types.function import FunctionVisibility
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -208,7 +209,21 @@ class AstMutator(VyperNodeTransformer):
             return module
 
         num_funcs = self.rng.randint(1, max_funcs)
-        for _ in range(num_funcs):
+        functions_added = 0
+
+        return_type = self.type_generator.generate_type(nesting=2, skip={HashMapT})
+        func_def = self.function_registry.create_new_function(
+            return_type=return_type,
+            type_generator=self.type_generator,
+            max_args=2,
+            initial=True,
+            visibility=FunctionVisibility.EXTERNAL,
+        )
+        if func_def is not None:
+            module.body.append(func_def)
+            functions_added += 1
+
+        for _ in range(num_funcs - functions_added):
             return_type = self.type_generator.generate_type(
                 nesting=2, skip={HashMapT}
             )

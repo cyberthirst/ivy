@@ -262,6 +262,7 @@ class FunctionRegistry:
         caller_mutability: Optional[StateMutability] = None,
         *,
         initial: bool = False,
+        visibility: Optional[FunctionVisibility] = None,
     ) -> Optional[ast.FunctionDef]:
         """Create a new function with empty body and ContractFunctionT in metadata.
         The body is created later, once we have more information. That allows
@@ -270,6 +271,7 @@ class FunctionRegistry:
         Args:
             initial: If True, counts against initial_functions budget (generate mode).
                      If False, counts against dynamic_functions budget.
+            visibility: Force a specific visibility when provided.
         """
         # Check the appropriate budget
         if initial:
@@ -292,12 +294,13 @@ class FunctionRegistry:
             positional_args.append(PositionalArg(arg_name, arg_type))
 
         # Choose function properties
-        visibility = self.rng.choice(
-            [
-                FunctionVisibility.INTERNAL,
-                FunctionVisibility.EXTERNAL,
-            ]
-        )
+        if visibility is None:
+            visibility = self.rng.choice(
+                [
+                    FunctionVisibility.INTERNAL,
+                    FunctionVisibility.EXTERNAL,
+                ]
+            )
 
         # Choose state mutability
         mutability_options = [
