@@ -78,19 +78,36 @@ class VyperBytes(VyperValue, bytes):
         return VyperBytes(bytes(self), self.typ)
 
 
-class VyperString(VyperValue, str):
-    """Boxed string with type info and length validation at construction."""
+class VyperString(VyperValue, bytes):
+    """Boxed string stored as UTF-8 bytes internally.
 
-    def __new__(cls, value: str, typ: StringT):
+    Vyper strings are byte sequences in memory. The length field stores
+    the byte count, and operations like len() and slice() work on bytes.
+    Since Vyper only allows ASCII in source literals, this is transparent
+    for normal usage, but correctly handles non-ASCII bytes that may
+    arrive via external calls or convert(Bytes, String).
+    """
+
+    def __new__(cls, value: Union[str, bytes], typ: StringT):
+        if isinstance(value, str):
+            value = value.encode("utf-8")
         if len(value) > typ.length:
             from ivy.exceptions import Revert
+
             raise Revert(data=b"")
         instance = super().__new__(cls, value)
         instance.typ = typ
         return instance
 
+    def __str__(self) -> str:
+        """Decode as UTF-8 for display, using surrogateescape for invalid bytes."""
+        return self.decode("utf-8", errors="surrogateescape")
+
+    def __repr__(self) -> str:
+        return f"VyperString({str(self)!r})"
+
     def __deepcopy__(self, memo):
-        return VyperString(str(self), self.typ)
+        return VyperString(bytes(self), self.typ)
 
 
 class VyperBytesM(VyperValue, bytes):

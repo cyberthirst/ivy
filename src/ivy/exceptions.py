@@ -36,7 +36,11 @@ class Revert(VyperException):
                     from ivy.abi import abi_decode
 
                     ret = abi_decode(TupleT((StringT(2**16),)), self.data[4:])
-                    return ret[0]
+                    # VyperString is bytes-based, decode to str for display
+                    msg = ret[0]
+                    if isinstance(msg, bytes):
+                        return msg.decode("utf-8", errors="surrogateescape")
+                    return msg
             return self.data.hex()
         return super().__str__()
 

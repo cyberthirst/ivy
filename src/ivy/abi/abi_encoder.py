@@ -123,12 +123,14 @@ def _encode_bytes(_: ABI_Bytes, value: Union[bytes, str]) -> bytes:
     return length + padded_value
 
 
-def _encode_string(_: ABI_String, value: str) -> bytes:
-    if not isinstance(value, str):
-        raise EncodeError(f"Expected str, got {type(value)}")
+def _encode_string(_: ABI_String, value: Union[str, bytes]) -> bytes:
+    if isinstance(value, bytes):
+        encoded_str = value
+    elif isinstance(value, str):
+        encoded_str = value.encode("utf-8")
+    else:
+        raise EncodeError(f"Expected str or bytes, got {type(value)}")
 
-    encoded_str = value.encode("utf-8")
-    # TODO is it correct to pass the len() here?
     return _encode_bytes(ABI_Bytes(len(encoded_str)), encoded_str)
 
 
