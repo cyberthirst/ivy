@@ -8,7 +8,7 @@ class DepthConfig:
     """Shared depth control configuration for generators."""
 
     root_depth: int = 0  # Starting depth for new generation
-    decay_base: float = 0.3  # P(continue) = decay_base ^ depth
+    decay_base: float = 0.5  # P(continue) = decay_base ^ depth
     max_depth: int = 5  # Hard cap, always terminate at this depth
 
 
@@ -98,6 +98,8 @@ class StmtGeneratorConfig:
     deref_assignment_prob: float = 0.8
     deref_continue_prob: float = 0.5
     deref_chain_max_steps: int = 3
+    self_assign_prob: float = 0.0001
+    self_assign_max_retries: int = 5
 
     # For loop generation
     for_weight: float = 0.1

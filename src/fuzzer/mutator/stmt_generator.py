@@ -17,6 +17,7 @@ from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability,
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.ast_utils import ast_equivalent
 from fuzzer.mutator.type_utils import is_dereferenceable
 from fuzzer.mutator.dereference_utils import pick_dereference_target_type
 from fuzzer.mutator.augassign_utils import (
@@ -518,6 +519,29 @@ class StatementGenerator(BaseGenerator):
             return base_node, base_type
         return None
 
+    def _generate_assign_value(
+        self,
+        context: GenerationContext,
+        target_node: ast.VyperNode,
+        target_type: VyperType,
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> ast.VyperNode:
+        rng = rng or self.rng
+        retries = max(0, self.cfg.self_assign_max_retries)
+        # TODO: This retry loop might be a performance hotspot; consider prechecking
+        # matching vars or biasing expr generation to avoid self-assigns upfront.
+        for _ in range(retries + 1):
+            value = self.expr_generator.generate(
+                target_type, context, depth=self.expr_generator.root_depth()
+            )
+            if not ast_equivalent(target_node, value):
+                return value
+            if rng.random() < self.cfg.self_assign_prob:
+                return value
+
+        return value
+
     @strategy(
         name="stmt.assign",
         tags=frozenset({"stmt", "terminal"}),
@@ -545,8 +569,8 @@ class StatementGenerator(BaseGenerator):
             return None
         target_node, target_type = resolved
 
-        value = self.expr_generator.generate(
-            target_type, ctx.context, depth=self.expr_generator.root_depth()
+        value = self._generate_assign_value(
+            ctx.context, target_node, target_type, rng=ctx.gen.rng
         )
 
         return ast.Assign(targets=[target_node], value=value)
