@@ -618,17 +618,27 @@ class StatementGenerator(BaseGenerator):
             or not context.is_module_scope  # inside a function / block
         )
         if needs_init:
+            allow_tuple_literal = (
+                not context.is_module_scope
+                or var_info.modifiability == Modifiability.CONSTANT
+            )
             if (
                 context.is_module_scope
                 and var_info.modifiability == Modifiability.CONSTANT
             ):
                 with context.mutability(ExprMutability.CONST):
                     init_val = self.expr_generator.generate(
-                        var_info.typ, context, depth=self.expr_generator.root_depth()
+                        var_info.typ,
+                        context,
+                        depth=self.expr_generator.root_depth(),
+                        allow_tuple_literal=allow_tuple_literal,
                     )
             else:
                 init_val = self.expr_generator.generate(
-                    var_info.typ, context, depth=self.expr_generator.root_depth()
+                    var_info.typ,
+                    context,
+                    depth=self.expr_generator.root_depth(),
+                    allow_tuple_literal=allow_tuple_literal,
                 )
         else:
             init_val = None
