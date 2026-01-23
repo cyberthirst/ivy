@@ -8,7 +8,7 @@ class DepthConfig:
     """Shared depth control configuration for generators."""
 
     root_depth: int = 0  # Starting depth for new generation
-    decay_base: float = 0.5  # P(continue) = decay_base ^ depth
+    decay_base: float = 0.6  # P(continue) = decay_base ^ depth
     max_depth: int = 5  # Hard cap, always terminate at this depth
 
 
@@ -20,8 +20,8 @@ class ExprGeneratorConfig:
     terminal_var_ref_prob: float = 0.95  # Prefer var refs over literals
 
     # Strategy weights
-    literal_weight: float = 0.15
-    ifexp_weight: float = 0.3
+    literal_weight: float = 0.01
+    ifexp_weight: float = 0.05
 
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5
