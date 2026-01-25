@@ -215,7 +215,7 @@ class AstMutator(VyperNodeTransformer):
         func_def = self.function_registry.create_new_function(
             return_type=return_type,
             type_generator=self.type_generator,
-            max_args=2,
+            max_args=6,
             initial=True,
             visibility=FunctionVisibility.EXTERNAL,
         )
@@ -230,7 +230,7 @@ class AstMutator(VyperNodeTransformer):
             func_def = self.function_registry.create_new_function(
                 return_type=return_type,
                 type_generator=self.type_generator,
-                max_args=2,
+                max_args=6,
                 initial=True,
             )
             if func_def is not None:
