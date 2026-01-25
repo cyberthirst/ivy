@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from vyper.ast import nodes as ast
 
-from fuzzer.mutator.strategy import strategy
+from fuzzer.mutator.constant_folding import constant_folds_to_zero
 from fuzzer.mutator.mutations.base import MutationCtx
+from fuzzer.mutator.strategy import strategy
 
 
 OP_SWAPS = {
@@ -21,7 +22,15 @@ OP_SWAPS = {
 
 
 def _can_swap(*, ctx: MutationCtx, **_) -> bool:
-    return type(ctx.node.op) in OP_SWAPS
+    op_type = type(ctx.node.op)
+    if op_type not in OP_SWAPS:
+        return False
+    new_op = OP_SWAPS[op_type]
+    if new_op in (ast.FloorDiv, ast.Mod, ast.Div):
+        return not constant_folds_to_zero(ctx.node.right, {}) or bool(
+            getattr(ctx.node.right, "_metadata", {}).get("type")
+        )
+    return True
 
 
 @strategy(
@@ -33,4 +42,13 @@ def _can_swap(*, ctx: MutationCtx, **_) -> bool:
 def _swap_operator(*, ctx: MutationCtx, **_) -> ast.BinOp:
     op_type = type(ctx.node.op)
     ctx.node.op = OP_SWAPS[op_type]()
+    if (
+        isinstance(ctx.node.op, (ast.FloorDiv, ast.Mod, ast.Div))
+        and constant_folds_to_zero(ctx.node.right, {})
+    ):
+        rhs_type = getattr(ctx.node.right, "_metadata", {}).get("type")
+        if rhs_type is not None:
+            ctx.node.right = ctx.expr_gen.generate_nonzero_expr(
+                rhs_type, ctx.context, depth=ctx.expr_gen.root_depth()
+            )
     return ctx.node

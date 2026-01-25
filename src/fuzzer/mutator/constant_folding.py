@@ -278,3 +278,17 @@ def fold_constant_expression(
         return None
     unboxed = _unbox_value(value, typ)
     return ast_builder.literal(unboxed, typ)
+
+
+def constant_folds_to_zero(
+    node: ast.VyperNode,
+    constants: dict[str, Any],
+) -> bool:
+    folded = fold_constant_expression(node, constants)
+    if folded is None:
+        return False
+    if isinstance(folded, ast.Int):
+        return folded.value == 0
+    if isinstance(folded, ast.Decimal):
+        return folded.value == 0
+    return False

@@ -37,7 +37,10 @@ from fuzzer.mutator.type_utils import (
     is_dereferenceable,
     find_dereference_bases,
 )
-from fuzzer.mutator.constant_folding import fold_constant_expression
+from fuzzer.mutator.constant_folding import (
+    constant_folds_to_zero,
+    fold_constant_expression,
+)
 from fuzzer.mutator.dereference_utils import (
     DerefCandidate,
     dereference_candidates,
@@ -136,6 +139,17 @@ class ExprGenerator(BaseGenerator):
             context={"ctx": ctx},
             fallback=fallback,
         )
+
+    def generate_nonzero_expr(
+        self,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.VyperNode:
+        while True:
+            expr = self.generate(target_type, context, depth)
+            if not constant_folds_to_zero(expr, {}):
+                return expr
 
     # Applicability/weight helpers
 
@@ -768,18 +782,12 @@ class ExprGenerator(BaseGenerator):
 
         next_depth = self.child_depth(ctx.depth)
         left = self.generate(ctx.target_type, ctx.context, next_depth)
-        right = self.generate(ctx.target_type, ctx.context, next_depth)
+        if op_class in (ast.FloorDiv, ast.Mod, ast.Div):
+            right = self.generate_nonzero_expr(ctx.target_type, ctx.context, next_depth)
+        else:
+            right = self.generate(ctx.target_type, ctx.context, next_depth)
 
         node = ast.BinOp(left=left, op=op_class(), right=right)
-
-        if isinstance(node.op, (ast.FloorDiv, ast.Mod, ast.Div)):
-            if isinstance(right, ast.Int) and getattr(right, "value", None) == 0:
-                ctx.context.compilation_xfails.append(
-                    XFailExpectation(
-                        kind="compilation",
-                        reason="division or modulo by zero should fail compilation",
-                    )
-                )
 
         node._metadata["type"] = ctx.target_type
         return node

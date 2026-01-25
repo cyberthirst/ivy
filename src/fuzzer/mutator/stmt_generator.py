@@ -934,6 +934,10 @@ class StatementGenerator(BaseGenerator):
         if op_class is ast.Pow:
             rhs_value = ctx.gen.rng.randint(0, 8)
             rhs = ast_builder.literal(rhs_value, rhs_type)
+        elif op_class in (ast.FloorDiv, ast.Mod, ast.Div):
+            rhs = self.expr_generator.generate_nonzero_expr(
+                rhs_type, ctx.context, depth=self.expr_generator.root_depth()
+            )
         else:
             rhs = self.expr_generator.generate(
                 rhs_type, ctx.context, depth=self.expr_generator.root_depth()
