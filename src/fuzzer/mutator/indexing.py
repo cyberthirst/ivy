@@ -17,13 +17,37 @@ from fuzzer.mutator import ast_builder
 # Standard index type for array access
 INDEX_TYPE = IntegerT(False, 256)
 
+def random_index_type(rng: random.Random) -> IntegerT:
+    return rng.choice(
+        [
+            IntegerT(False, 256),
+            IntegerT(False, 128),
+            IntegerT(True, 256),
+            IntegerT(True, 128),
+        ]
+    )
 
-def small_literal_index(rng: random.Random, seq_length: int) -> ast.Int:
+
+def small_literal_index(
+    rng: random.Random,
+    seq_length: int,
+    *,
+    max_value: int = 2,
+) -> ast.Int:
     """Generate a small literal index within bounds for the given length."""
     if seq_length <= 1:
         val = 0
     else:
-        val = rng.randint(0, min(2, seq_length - 1))
+        val = rng.randint(0, min(max_value, seq_length - 1))
+    return ast_builder.literal(val, INDEX_TYPE)
+
+
+def random_literal_index(rng: random.Random, seq_length: int) -> ast.Int:
+    """Generate a random literal index within bounds for the given length."""
+    if seq_length <= 1:
+        val = 0
+    else:
+        val = rng.randint(0, seq_length - 1)
     return ast_builder.literal(val, INDEX_TYPE)
 
 

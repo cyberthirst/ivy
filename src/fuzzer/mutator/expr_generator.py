@@ -37,12 +37,15 @@ from fuzzer.mutator.type_utils import (
     is_dereferenceable,
     find_dereference_bases,
 )
+from fuzzer.mutator.constant_folding import fold_constant_expression
 from fuzzer.mutator.dereference_utils import (
     DerefCandidate,
     dereference_candidates,
 )
 from fuzzer.mutator.indexing import (
     small_literal_index,
+    random_literal_index,
+    random_index_type,
     build_len_call,
     build_guarded_index,
     build_dyn_last_index,
@@ -451,6 +454,19 @@ class ExprGenerator(BaseGenerator):
     ) -> ast.VyperNode:
         """Generate a bounds-guarded index expression."""
         cfg = self.cfg
+        if isinstance(seq_t, SArrayT):
+            roll = self.rng.random()
+            if roll < 1 / 3:
+                return random_literal_index(self.rng, seq_t.length)
+            if roll < 2 / 3:
+                return small_literal_index(
+                    self.rng,
+                    seq_t.length,
+                    max_value=3,
+                )
+            idx_expr = self.generate(INDEX_TYPE, context, depth)
+            len_call = ast_builder.uint256_literal(seq_t.length)
+            return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
         if isinstance(seq_t, DArrayT):
             len_call = build_len_call(base_node)
             if self.rng.random() < cfg.dynarray_last_index_in_guard_prob:
@@ -466,9 +482,6 @@ class ExprGenerator(BaseGenerator):
         else:
             i_expr = self.generate(INDEX_TYPE, context, depth)
 
-        if isinstance(seq_t, SArrayT):
-            len_call = ast_builder.uint256_literal(seq_t.length)
-            return ast_builder.uint256_binop(i_expr, ast.Mod(), len_call)
         len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
 
@@ -481,6 +494,13 @@ class ExprGenerator(BaseGenerator):
         """Generate a random (unconstrained) index expression."""
         cfg = self.cfg
 
+        if isinstance(seq_t, SArrayT):
+            for _ in range(3):
+                idx_expr = self.generate(random_index_type(self.rng), context, depth)
+                if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
+                    return idx_expr
+            return random_literal_index(self.rng, seq_t.length)
+
         # Bias DynArray towards small literals
         use_small = (
             isinstance(seq_t, DArrayT)
@@ -489,12 +509,17 @@ class ExprGenerator(BaseGenerator):
         if use_small:
             idx_expr = small_literal_index(self.rng, seq_t.length)
         else:
-            idx_expr = self.generate(INDEX_TYPE, context, depth)
+            idx_expr = self.generate(random_index_type(self.rng), context, depth)
 
-        if isinstance(seq_t, SArrayT):
-            len_call = ast_builder.uint256_literal(seq_t.length)
-            return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
         return idx_expr
+
+    def _static_index_is_constant_oob(
+        self, idx_expr: ast.VyperNode, seq_length: int
+    ) -> bool:
+        folded = fold_constant_expression(idx_expr, {})
+        if folded is None or not isinstance(folded, ast.Int):
+            return False
+        return folded.value < 0 or folded.value >= seq_length
 
     def _generate_oob_index(
         self,
