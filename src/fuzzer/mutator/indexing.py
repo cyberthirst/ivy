@@ -9,7 +9,7 @@ from __future__ import annotations
 import random
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import IntegerT, BoolT
+from vyper.semantics.types import IntegerT
 
 from fuzzer.mutator import ast_builder
 
@@ -38,45 +38,18 @@ def build_len_call(base_node: ast.VyperNode) -> ast.Call:
 def build_guarded_index(
     i_expr: ast.VyperNode,
     len_call: ast.VyperNode,
-) -> ast.IfExp:
+) -> ast.BinOp:
     """Build a bounds-guarded index expression.
 
-    Returns: i if i < len else (len-1 if len > 0 else 0)
+    Returns: i % max(len, 1)
 
-    This ensures the index is always valid at runtime, even if i_expr
-    could be out of bounds.
+    This keeps the index in-bounds when len > 0, while avoiding a zero divisor
+    for empty arrays.
     """
-    zero = ast_builder.uint256_literal(0)
     one = ast_builder.uint256_literal(1)
-
-    # len > 0
-    len_gt_zero = ast.Compare(
-        left=len_call,
-        ops=[ast.Gt()],
-        comparators=[zero],
-    )
-    len_gt_zero._metadata = {"type": BoolT()}
-
-    # len - 1
-    len_minus_one = ast.BinOp(left=len_call, op=ast.Sub(), right=one)
-    len_minus_one._metadata = {"type": INDEX_TYPE}
-
-    # (len-1 if len > 0 else 0)
-    safe_fallback = ast.IfExp(
-        test=len_gt_zero,
-        body=len_minus_one,
-        orelse=zero,
-    )
-    safe_fallback._metadata = {"type": INDEX_TYPE}
-
-    # i < len
-    cond = ast.Compare(left=i_expr, ops=[ast.Lt()], comparators=[len_call])
-    cond._metadata = {"type": BoolT()}
-
-    # i if i < len else safe_fallback
-    guarded = ast.IfExp(test=cond, body=i_expr, orelse=safe_fallback)
-    guarded._metadata = {"type": INDEX_TYPE}
-    return guarded
+    max_len = ast.Call(func=ast.Name(id="max"), args=[len_call, one], keywords=[])
+    max_len._metadata = {"type": INDEX_TYPE}
+    return ast_builder.uint256_binop(i_expr, ast.Mod(), max_len)
 
 
 def pick_oob_value(seq_length: int, rng: random.Random, cap_prob: float) -> int:
