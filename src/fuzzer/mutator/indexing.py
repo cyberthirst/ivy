@@ -52,6 +52,17 @@ def build_guarded_index(
     return ast_builder.uint256_binop(i_expr, ast.Mod(), max_len)
 
 
+def build_dyn_last_index(len_call: ast.VyperNode) -> ast.BinOp:
+    """Build a last-element index for dynarrays.
+
+    Returns: max(len, 1) - 1
+    """
+    one = ast_builder.uint256_literal(1)
+    max_len = ast.Call(func=ast.Name(id="max"), args=[len_call, one], keywords=[])
+    max_len._metadata = {"type": INDEX_TYPE}
+    return ast_builder.uint256_binop(max_len, ast.Sub(), one)
+
+
 def pick_oob_value(seq_length: int, rng: random.Random, cap_prob: float) -> int:
     """Pick an out-of-bounds index value.
 

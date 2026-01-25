@@ -45,6 +45,7 @@ from fuzzer.mutator.indexing import (
     small_literal_index,
     build_len_call,
     build_guarded_index,
+    build_dyn_last_index,
     pick_oob_value,
     INDEX_TYPE,
 )
@@ -447,9 +448,13 @@ class ExprGenerator(BaseGenerator):
         seq_t: _SequenceT,
         context: GenerationContext,
         depth: int,
-    ) -> ast.IfExp:
+    ) -> ast.VyperNode:
         """Generate a bounds-guarded index expression."""
         cfg = self.cfg
+        if isinstance(seq_t, DArrayT):
+            len_call = build_len_call(base_node)
+            if self.rng.random() < cfg.dynarray_last_index_in_guard_prob:
+                return build_dyn_last_index(len_call)
 
         # Choose the raw index expression (biased towards small literals for DynArray)
         use_small = (

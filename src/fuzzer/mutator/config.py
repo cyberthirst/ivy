@@ -45,6 +45,7 @@ class ExprGeneratorConfig:
 
     # DynArray index biases
     dynarray_small_literal_in_guard_prob: float = 0.75
+    dynarray_last_index_in_guard_prob: float = 0.2
     dynarray_small_literal_in_random_prob: float = 0.6
 
     # OOB literal generation
