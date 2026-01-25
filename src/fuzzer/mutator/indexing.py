@@ -17,6 +17,16 @@ from fuzzer.mutator import ast_builder
 # Standard index type for array access
 INDEX_TYPE = IntegerT(False, 256)
 
+def random_index_type(rng: random.Random) -> IntegerT:
+    return rng.choice(
+        [
+            IntegerT(False, 256),
+            IntegerT(False, 128),
+            IntegerT(True, 256),
+            IntegerT(True, 128),
+        ]
+    )
+
 
 def small_literal_index(
     rng: random.Random,

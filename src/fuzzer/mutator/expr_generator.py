@@ -45,6 +45,7 @@ from fuzzer.mutator.dereference_utils import (
 from fuzzer.mutator.indexing import (
     small_literal_index,
     random_literal_index,
+    random_index_type,
     build_len_call,
     build_guarded_index,
     build_dyn_last_index,
@@ -495,7 +496,7 @@ class ExprGenerator(BaseGenerator):
 
         if isinstance(seq_t, SArrayT):
             for _ in range(3):
-                idx_expr = self.generate(INDEX_TYPE, context, depth)
+                idx_expr = self.generate(random_index_type(self.rng), context, depth)
                 if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
                     return idx_expr
             return random_literal_index(self.rng, seq_t.length)
@@ -508,7 +509,7 @@ class ExprGenerator(BaseGenerator):
         if use_small:
             idx_expr = small_literal_index(self.rng, seq_t.length)
         else:
-            idx_expr = self.generate(INDEX_TYPE, context, depth)
+            idx_expr = self.generate(random_index_type(self.rng), context, depth)
 
         return idx_expr
 
