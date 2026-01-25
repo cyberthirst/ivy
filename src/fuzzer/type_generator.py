@@ -1,5 +1,5 @@
 import random
-from typing import List, Optional, Set, Callable, Dict
+from typing import List, Optional, Set, Callable, Dict, Type, Union
 
 from vyper.semantics.types import (
     VyperType,
@@ -44,11 +44,47 @@ class TypeGenerator:
             StructT: self._generate_struct,
         }
 
+        self.leaf_type_set = set(self.leaf_types)
+        self.complex_type_set = set(self.complex_types)
+
+    def _is_type_class(self, t: Union[Type[VyperType], VyperType]) -> bool:
+        return isinstance(t, type)
+
+    def _get_type_class(self, t: Union[Type[VyperType], VyperType]) -> Type[VyperType]:
+        if self._is_type_class(t):
+            return t  # type: ignore
+        return type(t)
+
+    def _filter_preferred(
+        self,
+        preferred: Optional[List[Union[Type[VyperType], VyperType]]],
+        excluded: Set[type],
+    ) -> List[Union[Type[VyperType], VyperType]]:
+        if not preferred:
+            return []
+        return [p for p in preferred if self._get_type_class(p) not in excluded]
+
+    def _resolve_preferred(
+        self,
+        preferred: Union[Type[VyperType], VyperType],
+        nesting: int,
+        skip: Set[type],
+        size_budget: Optional[int],
+    ) -> VyperType:
+        if self._is_type_class(preferred):
+            generator = self.type_generators[preferred]  # type: ignore
+            return generator(nesting, skip, size_budget)
+        else:
+            return preferred  # type: ignore
+
     def generate_type(
         self,
         nesting: int = 3,
         skip: Optional[Set[type]] = None,
         size_budget: Optional[int] = None,
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> VyperType:
         """Generate a random Vyper type.
 
@@ -66,7 +102,33 @@ class TypeGenerator:
 
         skip = skip or set()
 
-        # Choose type category based on nesting
+        if nesting == 0:
+            valid_preferred = self._filter_preferred(preferred_leafs, skip)
+            if valid_preferred and self.rng.random() < prefer_probability:
+                chosen = self.rng.choice(valid_preferred)
+                return self._resolve_preferred(chosen, nesting, skip, size_budget)
+        else:
+            valid_leaf_prefs = self._filter_preferred(preferred_leafs, skip)
+            valid_container_prefs = self._filter_preferred(preferred_containers, skip)
+            all_valid_prefs = valid_leaf_prefs + valid_container_prefs  # type: ignore
+
+            if all_valid_prefs and self.rng.random() < prefer_probability:
+                chosen = self.rng.choice(all_valid_prefs)
+                type_class = self._get_type_class(chosen)
+
+                if type_class in self.leaf_type_set:
+                    return self._resolve_preferred(chosen, nesting, skip, size_budget)
+
+                generator = self.type_generators[type_class]
+                return generator(
+                    nesting,
+                    skip,
+                    size_budget,
+                    preferred_leafs,
+                    preferred_containers,
+                    prefer_probability,
+                )
+
         if nesting == 0:
             available_types = [t for t in self.leaf_types if t not in skip]
         else:
@@ -76,12 +138,21 @@ class TypeGenerator:
         if not available_types:
             raise ValueError(f"No available types after filtering. Skipped: {skip}")
 
-        # Choose a type constructor
         type_ctor = self.rng.choice(available_types)
 
-        # Generate the type using the appropriate generator
         generator = self.type_generators[type_ctor]
-        return generator(nesting, skip, size_budget)
+
+        if type_ctor in self.complex_type_set:
+            return generator(
+                nesting,
+                skip,
+                size_budget,
+                preferred_leafs,
+                preferred_containers,
+                prefer_probability,
+            )
+        else:
+            return generator(nesting, skip, size_budget)
 
     # ---------- helpers for budgeted sizing ----------
     def _shrink_length_to_fit(self, initial_len: int, make_type, budget: int) -> int:
@@ -107,17 +178,34 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> List[VyperType]:
         elements: List[VyperType] = []
         if size_budget is None:
             for _ in range(n):
-                elem_t = self.generate_type(nesting - 1, skip, size_budget=None)
+                elem_t = self.generate_type(
+                    nesting - 1,
+                    skip,
+                    size_budget=None,
+                    preferred_leafs=preferred_leafs,
+                    preferred_containers=preferred_containers,
+                    prefer_probability=prefer_probability,
+                )
                 elements.append(elem_t)
             return elements
 
         remaining = size_budget
         for _ in range(n):
-            elem_t = self.generate_type(nesting - 1, skip, size_budget=remaining)
+            elem_t = self.generate_type(
+                nesting - 1,
+                skip,
+                size_budget=remaining,
+                preferred_leafs=preferred_leafs,
+                preferred_containers=preferred_containers,
+                prefer_probability=prefer_probability,
+            )
             elements.append(elem_t)
             used = elem_t.memory_bytes_required
             remaining = max(0, remaining - used)
@@ -189,10 +277,20 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> SArrayT:
-        # Skip types that can't be in arrays
         element_skip = skip | {TupleT, BytesT, StringT, HashMapT}
-        element_type = self.generate_type(nesting - 1, element_skip, size_budget)
+        filtered_leafs = self._filter_preferred(preferred_leafs, element_skip)
+        element_type = self.generate_type(
+            nesting - 1,
+            element_skip,
+            size_budget,
+            preferred_leafs=filtered_leafs,
+            preferred_containers=preferred_containers,
+            prefer_probability=prefer_probability,
+        )
         length = self.rng.randint(1, 6)
         if size_budget is not None:
             elem_size = max(1, element_type.memory_bytes_required)
@@ -205,10 +303,20 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> DArrayT:
-        # Dynamic arrays can't contain tuples or hashmaps
         element_skip = skip | {TupleT, HashMapT}
-        element_type = self.generate_type(nesting - 1, element_skip, size_budget)
+        filtered_leafs = self._filter_preferred(preferred_leafs, element_skip)
+        element_type = self.generate_type(
+            nesting - 1,
+            element_skip,
+            size_budget,
+            preferred_leafs=filtered_leafs,
+            preferred_containers=preferred_containers,
+            prefer_probability=prefer_probability,
+        )
         max_length = self.rng.randint(1, 16)
         if size_budget is not None:
             elem_size = max(1, element_type.memory_bytes_required)
@@ -221,9 +329,12 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         _size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> HashMapT:
-        # Key must be a hashable type (leaf types only)
         hashable_types = [BoolT, AddressT, IntegerT, BytesM_T]
+        hashable_set = set(hashable_types)
         key_available = [t for t in hashable_types if t not in skip]
 
         if not key_available:
@@ -231,12 +342,28 @@ class TypeGenerator:
                 f"No hashable types available for HashMap key. Skipped: {skip}"
             )
 
-        key_ctor = self.rng.choice(key_available)
-        key_generator = self.type_generators[key_ctor]
-        key_type = key_generator(0, skip, None)  # Keys are always leaf types
+        key_preferred = [
+            p
+            for p in self._filter_preferred(preferred_leafs, skip)
+            if self._get_type_class(p) in hashable_set
+        ]
 
-        # Value can be any type
-        value_type = self.generate_type(nesting - 1, skip, size_budget=None)
+        if key_preferred and self.rng.random() < prefer_probability:
+            chosen_key = self.rng.choice(key_preferred)
+            key_type = self._resolve_preferred(chosen_key, 0, skip, None)
+        else:
+            key_ctor = self.rng.choice(key_available)
+            key_generator = self.type_generators[key_ctor]
+            key_type = key_generator(0, skip, None)
+
+        value_type = self.generate_type(
+            nesting - 1,
+            skip,
+            size_budget=None,
+            preferred_leafs=preferred_leafs,
+            preferred_containers=preferred_containers,
+            prefer_probability=prefer_probability,
+        )
         return HashMapT(key_type, value_type)
 
     def _generate_tuple(
@@ -244,13 +371,23 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> TupleT:
-        # Tuples must have at least 1 element
         n_elements = self.rng.randint(1, 6)
-        element_skip = skip | {HashMapT}  # Tuples can't contain hashmaps
+        element_skip = skip | {HashMapT}
+
+        filtered_leafs = self._filter_preferred(preferred_leafs, element_skip)
 
         elements = self._generate_elements_with_budget(
-            n_elements, nesting, element_skip, size_budget
+            n_elements,
+            nesting,
+            element_skip,
+            size_budget,
+            preferred_leafs=filtered_leafs,
+            preferred_containers=preferred_containers,
+            prefer_probability=prefer_probability,
         )
 
         return TupleT(elements)
@@ -260,13 +397,24 @@ class TypeGenerator:
         nesting: int,
         skip: Set[type],
         size_budget: Optional[int],
+        preferred_leafs: Optional[List[Union[Type[VyperType], VyperType]]] = None,
+        preferred_containers: Optional[List[Type[VyperType]]] = None,
+        prefer_probability: float = 0.8,
     ) -> StructT:
         n_fields = self.rng.randint(1, 6)
-        field_skip = skip | {HashMapT}  # Structs can't contain hashmaps
+        field_skip = skip | {HashMapT}
+
+        filtered_leafs = self._filter_preferred(preferred_leafs, field_skip)
 
         fields = {}
         element_types = self._generate_elements_with_budget(
-            n_fields, nesting, field_skip, size_budget
+            n_fields,
+            nesting,
+            field_skip,
+            size_budget,
+            preferred_leafs=filtered_leafs,
+            preferred_containers=preferred_containers,
+            prefer_probability=prefer_probability,
         )
         for i, field_type in enumerate(element_types):
             field_name = f"x{i}"
