@@ -8,7 +8,7 @@ class DepthConfig:
     """Shared depth control configuration for generators."""
 
     root_depth: int = 0  # Starting depth for new generation
-    decay_base: float = 0.3  # P(continue) = decay_base ^ depth
+    decay_base: float = 0.6  # P(continue) = decay_base ^ depth
     max_depth: int = 5  # Hard cap, always terminate at this depth
 
 
@@ -20,8 +20,8 @@ class ExprGeneratorConfig:
     terminal_var_ref_prob: float = 0.95  # Prefer var refs over literals
 
     # Strategy weights
-    literal_weight: float = 0.15
-    ifexp_weight: float = 0.3
+    literal_weight: float = 0.01
+    ifexp_weight: float = 0.01
 
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5
@@ -75,6 +75,8 @@ class StmtGeneratorConfig:
     # Statement weights
     vardecl_weight: float = 0.3
     assign_weight: float = 2.0
+    append_weight: float = 0.2
+    augassign_weight: float = 0.4
     if_weight: float = 0.2
 
     # Type generation bias
@@ -92,8 +94,18 @@ class StmtGeneratorConfig:
     # If statement
     generate_else_branch_prob: float = 0.4
 
+    # Loop terminators (break/continue) inside for loops
+    loop_terminator_in_if_prob: float = 0.15
+    loop_terminator_direct_prob: float = 0.02
+    loop_terminator_force_else_prob: float = 0.2
+
     # Assignment
     subscript_assignment_prob: float = 0.7
+    deref_assignment_prob: float = 0.8
+    deref_continue_prob: float = 0.5
+    deref_chain_max_steps: int = 3
+    self_assign_prob: float = 0.0001
+    self_assign_max_retries: int = 5
 
     # For loop generation
     for_weight: float = 0.1

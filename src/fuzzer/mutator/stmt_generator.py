@@ -10,6 +10,7 @@ from vyper.semantics.types import (
     BoolT,
     HashMapT,
     IntegerT,
+    DArrayT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
@@ -17,7 +18,18 @@ from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability,
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.type_utils import is_subscriptable
+from fuzzer.mutator.ast_utils import ast_equivalent
+from fuzzer.mutator.type_utils import is_dereferenceable
+from fuzzer.mutator.dereference_utils import (
+    pick_dereference_target_type,
+    collect_dereference_types,
+)
+from fuzzer.mutator.augassign_utils import (
+    augassign_ops_for_type,
+    is_augassignable_type,
+    augassign_rhs_type,
+    can_reach_augassignable,
+)
 from fuzzer.mutator.strategy import strategy
 
 
@@ -65,6 +77,16 @@ class StatementGenerator(BaseGenerator):
             return False
         return bool(self.get_writable_variables(ctx.context))
 
+    def _is_augassign_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
+            return False
+        return bool(self._get_augassign_candidates(ctx.context))
+
+    def _is_append_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
+            return False
+        return bool(self._get_append_candidates(ctx.context))
+
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
@@ -78,6 +100,12 @@ class StatementGenerator(BaseGenerator):
 
     def _weight_assign(self, **_) -> float:
         return self.cfg.assign_weight
+
+    def _weight_augassign(self, **_) -> float:
+        return self.cfg.augassign_weight
+
+    def _weight_append(self, **_) -> float:
+        return self.cfg.append_weight
 
     def _weight_if(self, **_) -> float:
         return self.cfg.if_weight
@@ -249,6 +277,7 @@ class StatementGenerator(BaseGenerator):
         *,
         include_vardecls: bool = True,
         leading_vars: int = 0,
+        allow_loop_terminator: bool = True,
     ) -> None:
         """
         Inject random statements into body.
@@ -302,9 +331,15 @@ class StatementGenerator(BaseGenerator):
 
             if return_type is not None and not self.scope_is_terminated(body):
                 ret_expr = self.expr_generator.generate(
-                    return_type, context, depth=self.expr_generator.root_depth()
+                    return_type,
+                    context,
+                    depth=self.expr_generator.root_depth(),
+                    allow_tuple_literal=True,
                 )
                 body.append(ast.Return(value=ret_expr))
+
+        if allow_loop_terminator:
+            self._maybe_append_loop_terminator(body, context, parent)
 
     def inject_statements(
         self,
@@ -316,6 +351,8 @@ class StatementGenerator(BaseGenerator):
         max_stmts: Optional[int] = None,
         min_vardecls: int = 0,
         max_vardecls: int = 2,
+        *,
+        allow_loop_terminator: bool = True,
     ) -> None:
         """Inject variable declarations, then random statements (legacy behavior)."""
         if self.at_max_depth(depth):
@@ -338,6 +375,7 @@ class StatementGenerator(BaseGenerator):
             max_stmts=max_stmts,
             include_vardecls=False,
             leading_vars=num_vars,
+            allow_loop_terminator=allow_loop_terminator,
         )
 
     def generate(
@@ -386,6 +424,16 @@ class StatementGenerator(BaseGenerator):
         )
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
+        inside_for = ctx.context.is_inside_for_scope()
+        want_terminator = inside_for and (
+            ctx.gen.rng.random() < self.cfg.loop_terminator_in_if_prob
+        )
+        generate_else = ctx.gen.rng.random() < self.cfg.generate_else_branch_prob
+        force_else = False
+        if want_terminator and not generate_else:
+            if ctx.gen.rng.random() < self.cfg.loop_terminator_force_else_prob:
+                generate_else = True
+                force_else = True
 
         with ctx.context.new_scope(ScopeType.IF):
             self.inject_statements(
@@ -395,12 +443,13 @@ class StatementGenerator(BaseGenerator):
                 self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
+                allow_loop_terminator=False,
             )
 
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
-        if ctx.gen.rng.random() < self.cfg.generate_else_branch_prob:
+        if generate_else:
             with ctx.context.new_scope(ScopeType.IF):
                 self.inject_statements(
                     if_node.orelse,
@@ -409,7 +458,16 @@ class StatementGenerator(BaseGenerator):
                     self.child_depth(ctx.depth),
                     min_stmts=self.cfg.min_stmts,
                     max_stmts=self.cfg.max_stmts,
+                    allow_loop_terminator=False,
                 )
+
+        if want_terminator:
+            target_body = if_node.body
+            if force_else:
+                target_body = if_node.orelse
+            elif generate_else and ctx.gen.rng.random() < 0.5:
+                target_body = if_node.orelse
+            self._append_loop_terminator(target_body, rng=ctx.gen.rng)
 
         return if_node
 
@@ -421,9 +479,173 @@ class StatementGenerator(BaseGenerator):
         last_stmt = body[-1]
         return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
 
+    def _append_loop_terminator(
+        self,
+        body: list,
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        if self.scope_is_terminated(body):
+            return
+
+        if body and isinstance(body[-1], ast.Pass):
+            body.pop()
+
+        rng = rng or self.rng
+        if rng.random() < 0.5:
+            body.append(ast.Break())
+        else:
+            body.append(ast.Continue())
+
+    def _maybe_append_loop_terminator(
+        self,
+        body: list,
+        context: GenerationContext,
+        parent: Optional[ast.VyperNode],
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        if parent is None or not context.is_inside_for_scope():
+            return
+
+        if isinstance(parent, ast.For):
+            prob = self.cfg.loop_terminator_direct_prob
+        elif isinstance(parent, ast.If):
+            prob = self.cfg.loop_terminator_in_if_prob
+        else:
+            return
+
+        rng = rng or self.rng
+        if rng.random() >= prob:
+            return
+
+        self._append_loop_terminator(body, rng=rng)
+
     def get_writable_variables(self, context: GenerationContext) -> list[tuple[str, VarInfo]]:
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
+
+    def _get_augassign_candidates(
+        self, context: GenerationContext
+    ) -> list[tuple[str, VarInfo]]:
+        writable_vars = self.get_writable_variables(context)
+        if not writable_vars:
+            return []
+        max_steps = self.cfg.deref_chain_max_steps
+        return [
+            (name, var_info)
+            for name, var_info in writable_vars
+            if can_reach_augassignable(var_info.typ, max_steps)
+        ]
+
+    def _can_reach_dynarray(self, base_type: VyperType) -> bool:
+        if isinstance(base_type, DArrayT):
+            return True
+        if not is_dereferenceable(base_type):
+            return False
+        for child_t, _depth in collect_dereference_types(
+            base_type, self.cfg.deref_chain_max_steps
+        ):
+            if isinstance(child_t, DArrayT):
+                return True
+        return False
+
+    def _get_append_candidates(
+        self, context: GenerationContext
+    ) -> list[tuple[str, VarInfo]]:
+        writable_vars = self.get_writable_variables(context)
+        if not writable_vars:
+            return []
+        return [
+            (name, var_info)
+            for name, var_info in writable_vars
+            if self._can_reach_dynarray(var_info.typ)
+        ]
+
+    def _build_dereference_target(
+        self,
+        ctx: StmtGenCtx,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        *,
+        target_type: Optional[VyperType],
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        return self.expr_generator.build_dereference_chain(
+            base_node,
+            base_type,
+            ctx.context,
+            self.expr_generator.root_depth(),
+            target_type=target_type,
+            max_steps=self.cfg.deref_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=True,
+        )
+
+    def _resolve_target_with_deref(
+        self,
+        ctx: StmtGenCtx,
+        base_node: ast.VyperNode,
+        base_type: VyperType,
+        *,
+        predicate,
+    ) -> Optional[tuple[ast.VyperNode, VyperType]]:
+        base_ok = predicate(base_type)
+        must_deref = isinstance(base_type, HashMapT)
+        should_deref = must_deref or (
+            is_dereferenceable(base_type)
+            and (
+                not base_ok or ctx.gen.rng.random() < self.cfg.deref_assignment_prob
+            )
+        )
+
+        if should_deref:
+            # We could build the deref target directly; picking a reachable type
+            # first reuses the shared deref chain logic.
+            target_pick = pick_dereference_target_type(
+                base_type,
+                max_steps=self.cfg.deref_chain_max_steps,
+                predicate=predicate,
+                rng=ctx.gen.rng,
+                continue_prob=self.cfg.deref_continue_prob,
+            )
+            if target_pick is None:
+                if not base_ok:
+                    return None
+                return base_node, base_type
+
+            return self._build_dereference_target(
+                ctx,
+                base_node,
+                base_type,
+                target_type=target_pick,
+            )
+
+        if base_ok:
+            return base_node, base_type
+        return None
+
+    def _generate_assign_value(
+        self,
+        context: GenerationContext,
+        target_node: ast.VyperNode,
+        target_type: VyperType,
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> ast.VyperNode:
+        rng = rng or self.rng
+        retries = max(0, self.cfg.self_assign_max_retries)
+        # TODO: This retry loop might be a performance hotspot; consider prechecking
+        # matching vars or biasing expr generation to avoid self-assigns upfront.
+        for _ in range(retries + 1):
+            value = self.expr_generator.generate(
+                target_type, context, depth=self.expr_generator.root_depth()
+            )
+            if not ast_equivalent(target_node, value):
+                return value
+            if rng.random() < self.cfg.self_assign_prob:
+                return value
+
+        return value
 
     @strategy(
         name="stmt.assign",
@@ -442,41 +664,18 @@ class StatementGenerator(BaseGenerator):
         base = ast_builder.var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
-        # Decide if we target a subscript (for arrays/hashmaps/tuples) and allow nesting
-        target_type = var_info.typ
-        target_node: ast.VyperNode = base
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            var_info.typ,
+            predicate=lambda t: not isinstance(t, HashMapT),
+        )
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
 
-        # HashMapT must always be subscripted - can't assign directly
-        # For other subscriptable types, bias towards subscripting
-        is_hashmap = isinstance(var_info.typ, HashMapT)
-        if is_hashmap or (
-            is_subscriptable(var_info.typ)
-            and ctx.gen.rng.random() < self.cfg.subscript_assignment_prob
-        ):
-            cur_node, cur_t = self.expr_generator.build_random_chain(
-                base,
-                var_info.typ,
-                ctx.context,
-                depth=self.expr_generator.root_depth(),
-                max_steps=self.expr_generator.cfg.subscript_random_chain_max_steps,
-            )
-            target_node = cur_node
-            target_type = cur_t
-
-            # Keep subscripting while we still have a HashMapT
-            while isinstance(target_type, HashMapT):
-                cur_node, cur_t = self.expr_generator.build_random_chain(
-                    target_node,
-                    target_type,
-                    ctx.context,
-                    depth=self.expr_generator.root_depth(),
-                    max_steps=self.expr_generator.cfg.subscript_hashmap_chain_max_steps,
-                )
-                target_node = cur_node
-                target_type = cur_t
-
-        value = self.expr_generator.generate(
-            target_type, ctx.context, depth=self.expr_generator.root_depth()
+        value = self._generate_assign_value(
+            ctx.context, target_node, target_type, rng=ctx.gen.rng
         )
 
         return ast.Assign(targets=[target_node], value=value)
@@ -524,17 +723,27 @@ class StatementGenerator(BaseGenerator):
             or not context.is_module_scope  # inside a function / block
         )
         if needs_init:
+            allow_tuple_literal = (
+                not context.is_module_scope
+                or var_info.modifiability == Modifiability.CONSTANT
+            )
             if (
                 context.is_module_scope
                 and var_info.modifiability == Modifiability.CONSTANT
             ):
                 with context.mutability(ExprMutability.CONST):
                     init_val = self.expr_generator.generate(
-                        var_info.typ, context, depth=self.expr_generator.root_depth()
+                        var_info.typ,
+                        context,
+                        depth=self.expr_generator.root_depth(),
+                        allow_tuple_literal=allow_tuple_literal,
                     )
             else:
                 init_val = self.expr_generator.generate(
-                    var_info.typ, context, depth=self.expr_generator.root_depth()
+                    var_info.typ,
+                    context,
+                    depth=self.expr_generator.root_depth(),
+                    allow_tuple_literal=allow_tuple_literal,
                 )
         else:
             init_val = None
@@ -689,10 +898,83 @@ class StatementGenerator(BaseGenerator):
 
         return for_node
 
-    def generate_augassign(
-        self, context, parent: Optional[ast.VyperNode]
-    ) -> ast.AugAssign:
-        pass
+    @strategy(
+        name="stmt.augassign",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_augassign_applicable",
+        weight="_weight_augassign",
+    )
+    def generate_augassign(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.AugAssign]:
+        candidates = self._get_augassign_candidates(ctx.context)
+        if not candidates:
+            return None
+
+        var_name, var_info = ctx.gen.rng.choice(candidates)
+        base = ast_builder.var_ref(var_name, var_info)
+        base._metadata = {"type": var_info.typ, "varinfo": var_info}
+
+        base_type = var_info.typ
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            base_type,
+            predicate=is_augassignable_type,
+        )
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
+
+        ops = augassign_ops_for_type(target_type)
+        if not ops:
+            return None
+
+        op_class = ctx.gen.rng.choice(ops)
+        rhs_type = augassign_rhs_type(op_class, target_type)
+
+        if op_class is ast.Pow:
+            rhs_value = ctx.gen.rng.randint(0, 8)
+            rhs = ast_builder.literal(rhs_value, rhs_type)
+        else:
+            rhs = self.expr_generator.generate(
+                rhs_type, ctx.context, depth=self.expr_generator.root_depth()
+            )
+
+        return ast.AugAssign(target=target_node, op=op_class(), value=rhs)
+
+    @strategy(
+        name="stmt.append",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_append_applicable",
+        weight="_weight_append",
+    )
+    def generate_append(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.Expr]:
+        candidates = self._get_append_candidates(ctx.context)
+        if not candidates:
+            return None
+
+        var_name, var_info = ctx.gen.rng.choice(candidates)
+        base = ast_builder.var_ref(var_name, var_info)
+        base._metadata = {"type": var_info.typ, "varinfo": var_info}
+
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            var_info.typ,
+            predicate=lambda t: isinstance(t, DArrayT),
+        )
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
+
+        value = self.expr_generator.generate(
+            target_type.value_type, ctx.context, depth=self.expr_generator.root_depth()
+        )
+        call = ast.Call(
+            func=ast.Attribute(value=target_node, attr="append"),
+            args=[value],
+            keywords=[],
+        )
+        return ast.Expr(value=call)
 
     def generate_assert(self, context, parent: Optional[ast.VyperNode]) -> ast.Assert:
         pass
@@ -704,12 +986,12 @@ class StatementGenerator(BaseGenerator):
         pass
 
     def generate_break(self, context, parent: Optional[ast.VyperNode]) -> ast.Break:
-        pass
+        return ast.Break()
 
     def generate_continue(
         self, context, parent: Optional[ast.VyperNode]
     ) -> ast.Continue:
-        pass
+        return ast.Continue()
 
     def generate_return(
         self, context, parent: Optional[ast.VyperNode], return_type: VyperType

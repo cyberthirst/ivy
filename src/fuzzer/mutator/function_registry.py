@@ -32,7 +32,12 @@ class FreshFunctionNameGenerator:
 
 
 class FunctionRegistry:
-    def __init__(self, rng: random.Random, max_generated_functions: int = 5):
+    def __init__(
+        self,
+        rng: random.Random,
+        max_initial_functions: int = 5,
+        max_dynamic_functions: int = 5,
+    ):
         self.rng = rng
         self.functions: Dict[str, ContractFunctionT] = {}
         # Map from return type to set of function names
@@ -45,8 +50,11 @@ class FunctionRegistry:
             None  # Track which function we're currently generating
         )
         self.name_generator = FreshFunctionNameGenerator()
-        self.max_generated_functions = max_generated_functions
-        self.generated_count = 0
+        # Separate budgets for initial (generate mode) and dynamic (during generation)
+        self.max_initial_functions = max_initial_functions
+        self.max_dynamic_functions = max_dynamic_functions
+        self.initial_count = 0
+        self.dynamic_count = 0
         self._initialize_builtins()
 
     @staticmethod
@@ -252,17 +260,30 @@ class FunctionRegistry:
         type_generator,
         max_args: int = 3,
         caller_mutability: Optional[StateMutability] = None,
+        *,
+        initial: bool = False,
+        visibility: Optional[FunctionVisibility] = None,
     ) -> Optional[ast.FunctionDef]:
         """Create a new function with empty body and ContractFunctionT in metadata.
         The body is created later, once we have more information. That allows
         e.g. calls to other functions which are yet to be registered
+
+        Args:
+            initial: If True, counts against initial_functions budget (generate mode).
+                     If False, counts against dynamic_functions budget.
+            visibility: Force a specific visibility when provided.
         """
-        # Check if we've reached the limit
-        if self.generated_count >= self.max_generated_functions:
-            return None
+        # Check the appropriate budget
+        if initial:
+            if self.initial_count >= self.max_initial_functions:
+                return None
+            self.initial_count += 1
+        else:
+            if self.dynamic_count >= self.max_dynamic_functions:
+                return None
+            self.dynamic_count += 1
 
         name = self.name_generator.generate()
-        self.generated_count += 1
 
         # Generate arguments (struct fragments are stored in type_generator)
         num_args = self.rng.randint(0, max_args)
@@ -273,12 +294,13 @@ class FunctionRegistry:
             positional_args.append(PositionalArg(arg_name, arg_type))
 
         # Choose function properties
-        visibility = self.rng.choice(
-            [
-                FunctionVisibility.INTERNAL,
-                FunctionVisibility.EXTERNAL,
-            ]
-        )
+        if visibility is None:
+            visibility = self.rng.choice(
+                [
+                    FunctionVisibility.INTERNAL,
+                    FunctionVisibility.EXTERNAL,
+                ]
+            )
 
         # Choose state mutability
         mutability_options = [
@@ -351,9 +373,10 @@ class FunctionRegistry:
         """Set the context of which function we're currently generating."""
         self.current_function = name
 
-    def can_generate_more_functions(self) -> bool:
-        """Check if more functions can be generated."""
-        return self.generated_count < self.max_generated_functions
+    def can_generate_more_functions(self, *, initial: bool = False) -> bool:
+        if initial:
+            return self.initial_count < self.max_initial_functions
+        return self.dynamic_count < self.max_dynamic_functions
 
     def reset(self):
         """Reset the registry state for a new mutation."""
@@ -363,6 +386,7 @@ class FunctionRegistry:
         self.call_graph.clear()
         self.current_function = None
         self.name_generator.counter = 0
-        self.generated_count = 0
+        self.initial_count = 0
+        self.dynamic_count = 0
         # Re-initialize builtins
         self._initialize_builtins()

@@ -18,9 +18,12 @@ from fuzzer.mutator import ast_builder
 INDEX_TYPE = IntegerT(False, 256)
 
 
-def small_literal_index(rng: random.Random) -> ast.Int:
-    """Generate a small literal index in [0, 2] for DynArray bias."""
-    val = rng.randint(0, 2)
+def small_literal_index(rng: random.Random, seq_length: int) -> ast.Int:
+    """Generate a small literal index within bounds for the given length."""
+    if seq_length <= 1:
+        val = 0
+    else:
+        val = rng.randint(0, min(2, seq_length - 1))
     return ast_builder.literal(val, INDEX_TYPE)
 
 

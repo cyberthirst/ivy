@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
+from vyper.semantics.types.function import FunctionVisibility
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
 
@@ -121,7 +122,9 @@ class AstMutator(VyperNodeTransformer):
         # Type generator for random types
         self.type_generator = TypeGenerator(rng)
         # Function registry for tracking and generating functions
-        self.function_registry = FunctionRegistry(self.rng, max_generated_functions=5)
+        self.function_registry = FunctionRegistry(
+            self.rng, max_initial_functions=5, max_dynamic_functions=5
+        )
         # Interface registry for external calls
         self.interface_registry = InterfaceRegistry(self.rng)
         # Expression generator with function and interface registries
@@ -198,15 +201,29 @@ class AstMutator(VyperNodeTransformer):
             parent=module,
             depth=self.stmt_generator.root_depth(),
             min_stmts=0,
-            max_stmts=2,
+            max_stmts=15,
         )
 
-        max_funcs = self.function_registry.max_generated_functions
+        max_funcs = self.function_registry.max_initial_functions
         if max_funcs <= 0:
             return module
 
         num_funcs = self.rng.randint(1, max_funcs)
-        for _ in range(num_funcs):
+        functions_added = 0
+
+        return_type = self.type_generator.generate_type(nesting=2, skip={HashMapT})
+        func_def = self.function_registry.create_new_function(
+            return_type=return_type,
+            type_generator=self.type_generator,
+            max_args=2,
+            initial=True,
+            visibility=FunctionVisibility.EXTERNAL,
+        )
+        if func_def is not None:
+            module.body.append(func_def)
+            functions_added += 1
+
+        for _ in range(num_funcs - functions_added):
             return_type = self.type_generator.generate_type(
                 nesting=2, skip={HashMapT}
             )
@@ -214,6 +231,7 @@ class AstMutator(VyperNodeTransformer):
                 return_type=return_type,
                 type_generator=self.type_generator,
                 max_args=2,
+                initial=True,
             )
             if func_def is not None:
                 module.body.append(func_def)
@@ -249,7 +267,10 @@ class AstMutator(VyperNodeTransformer):
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(
-            target_type, self.context, depth=self.expr_generator.root_depth()
+            target_type,
+            self.context,
+            depth=self.expr_generator.root_depth(),
+            allow_tuple_literal=False,
         )
 
     def visit_Module(self, node: ast.Module):
@@ -489,7 +510,10 @@ class AstMutator(VyperNodeTransformer):
         # Generate assignment statements for each immutable
         for name, var_info in self.context.immutables_to_init:
             value_expr = self.expr_generator.generate(
-                var_info.typ, self.context, depth=self.expr_generator.root_depth()
+                var_info.typ,
+                self.context,
+                depth=self.expr_generator.root_depth(),
+                allow_tuple_literal=False,
             )
 
             assign = ast.Assign(targets=[ast.Name(id=name)], value=value_expr)

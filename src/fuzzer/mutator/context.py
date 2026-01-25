@@ -85,6 +85,11 @@ class GenerationContext:
     def is_module_scope(self) -> bool:
         return self.current_scope.scope_type == ScopeType.MODULE
 
+    def is_inside_for_scope(self) -> bool:
+        if self.current_scope.scope_type == ScopeType.FOR:
+            return True
+        return any(scope.scope_type == ScopeType.FOR for scope in self.scope_stack)
+
     @contextmanager
     def new_scope(self, scope_type: ScopeType):
         self._push_scope(scope_type)
