@@ -21,7 +21,7 @@ class ExprGeneratorConfig:
 
     # Strategy weights
     literal_weight: float = 0.01
-    ifexp_weight: float = 0.05
+    ifexp_weight: float = 0.01
 
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5
@@ -92,6 +92,11 @@ class StmtGeneratorConfig:
 
     # If statement
     generate_else_branch_prob: float = 0.4
+
+    # Loop terminators (break/continue) inside for loops
+    loop_terminator_in_if_prob: float = 0.15
+    loop_terminator_direct_prob: float = 0.02
+    loop_terminator_force_else_prob: float = 0.2
 
     # Assignment
     subscript_assignment_prob: float = 0.7
