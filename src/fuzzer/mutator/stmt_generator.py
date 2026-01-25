@@ -10,6 +10,7 @@ from vyper.semantics.types import (
     BoolT,
     HashMapT,
     IntegerT,
+    DArrayT,
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
@@ -19,7 +20,10 @@ from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.ast_utils import ast_equivalent
 from fuzzer.mutator.type_utils import is_dereferenceable
-from fuzzer.mutator.dereference_utils import pick_dereference_target_type
+from fuzzer.mutator.dereference_utils import (
+    pick_dereference_target_type,
+    collect_dereference_types,
+)
 from fuzzer.mutator.augassign_utils import (
     augassign_ops_for_type,
     is_augassignable_type,
@@ -78,6 +82,11 @@ class StatementGenerator(BaseGenerator):
             return False
         return bool(self._get_augassign_candidates(ctx.context))
 
+    def _is_append_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        if ctx.context.is_module_scope:
+            return False
+        return bool(self._get_append_candidates(ctx.context))
+
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
@@ -94,6 +103,9 @@ class StatementGenerator(BaseGenerator):
 
     def _weight_augassign(self, **_) -> float:
         return self.cfg.augassign_weight
+
+    def _weight_append(self, **_) -> float:
+        return self.cfg.append_weight
 
     def _weight_if(self, **_) -> float:
         return self.cfg.if_weight
@@ -455,6 +467,30 @@ class StatementGenerator(BaseGenerator):
             (name, var_info)
             for name, var_info in writable_vars
             if can_reach_augassignable(var_info.typ, max_steps)
+        ]
+
+    def _can_reach_dynarray(self, base_type: VyperType) -> bool:
+        if isinstance(base_type, DArrayT):
+            return True
+        if not is_dereferenceable(base_type):
+            return False
+        for child_t, _depth in collect_dereference_types(
+            base_type, self.cfg.deref_chain_max_steps
+        ):
+            if isinstance(child_t, DArrayT):
+                return True
+        return False
+
+    def _get_append_candidates(
+        self, context: GenerationContext
+    ) -> list[tuple[str, VarInfo]]:
+        writable_vars = self.get_writable_variables(context)
+        if not writable_vars:
+            return []
+        return [
+            (name, var_info)
+            for name, var_info in writable_vars
+            if self._can_reach_dynarray(var_info.typ)
         ]
 
     def _build_dereference_target(
@@ -835,6 +871,41 @@ class StatementGenerator(BaseGenerator):
             )
 
         return ast.AugAssign(target=target_node, op=op_class(), value=rhs)
+
+    @strategy(
+        name="stmt.append",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_append_applicable",
+        weight="_weight_append",
+    )
+    def generate_append(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.Expr]:
+        candidates = self._get_append_candidates(ctx.context)
+        if not candidates:
+            return None
+
+        var_name, var_info = ctx.gen.rng.choice(candidates)
+        base = ast_builder.var_ref(var_name, var_info)
+        base._metadata = {"type": var_info.typ, "varinfo": var_info}
+
+        resolved = self._resolve_target_with_deref(
+            ctx,
+            base,
+            var_info.typ,
+            predicate=lambda t: isinstance(t, DArrayT),
+        )
+        if resolved is None:
+            return None
+        target_node, target_type = resolved
+
+        value = self.expr_generator.generate(
+            target_type.value_type, ctx.context, depth=self.expr_generator.root_depth()
+        )
+        call = ast.Call(
+            func=ast.Attribute(value=target_node, attr="append"),
+            args=[value],
+            keywords=[],
+        )
+        return ast.Expr(value=call)
 
     def generate_assert(self, context, parent: Optional[ast.VyperNode]) -> ast.Assert:
         pass

@@ -21,7 +21,7 @@ class ExprGeneratorConfig:
 
     # Strategy weights
     literal_weight: float = 0.01
-    ifexp_weight: float = 0.05
+    ifexp_weight: float = 0.01
 
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5
@@ -75,6 +75,7 @@ class StmtGeneratorConfig:
     # Statement weights
     vardecl_weight: float = 0.3
     assign_weight: float = 2.0
+    append_weight: float = 0.2
     augassign_weight: float = 0.4
     if_weight: float = 0.2
 
