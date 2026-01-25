@@ -277,6 +277,7 @@ class StatementGenerator(BaseGenerator):
         *,
         include_vardecls: bool = True,
         leading_vars: int = 0,
+        allow_loop_terminator: bool = True,
     ) -> None:
         """
         Inject random statements into body.
@@ -337,6 +338,9 @@ class StatementGenerator(BaseGenerator):
                 )
                 body.append(ast.Return(value=ret_expr))
 
+        if allow_loop_terminator:
+            self._maybe_append_loop_terminator(body, context, parent)
+
     def inject_statements(
         self,
         body: list,
@@ -347,6 +351,8 @@ class StatementGenerator(BaseGenerator):
         max_stmts: Optional[int] = None,
         min_vardecls: int = 0,
         max_vardecls: int = 2,
+        *,
+        allow_loop_terminator: bool = True,
     ) -> None:
         """Inject variable declarations, then random statements (legacy behavior)."""
         if self.at_max_depth(depth):
@@ -369,6 +375,7 @@ class StatementGenerator(BaseGenerator):
             max_stmts=max_stmts,
             include_vardecls=False,
             leading_vars=num_vars,
+            allow_loop_terminator=allow_loop_terminator,
         )
 
     def generate(
@@ -417,6 +424,16 @@ class StatementGenerator(BaseGenerator):
         )
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
+        inside_for = ctx.context.is_inside_for_scope()
+        want_terminator = inside_for and (
+            ctx.gen.rng.random() < self.cfg.loop_terminator_in_if_prob
+        )
+        generate_else = ctx.gen.rng.random() < self.cfg.generate_else_branch_prob
+        force_else = False
+        if want_terminator and not generate_else:
+            if ctx.gen.rng.random() < self.cfg.loop_terminator_force_else_prob:
+                generate_else = True
+                force_else = True
 
         with ctx.context.new_scope(ScopeType.IF):
             self.inject_statements(
@@ -426,12 +443,13 @@ class StatementGenerator(BaseGenerator):
                 self.child_depth(ctx.depth),
                 min_stmts=self.cfg.min_stmts,
                 max_stmts=self.cfg.max_stmts,
+                allow_loop_terminator=False,
             )
 
             if not if_node.body:
                 if_node.body.append(ast.Pass())
 
-        if ctx.gen.rng.random() < self.cfg.generate_else_branch_prob:
+        if generate_else:
             with ctx.context.new_scope(ScopeType.IF):
                 self.inject_statements(
                     if_node.orelse,
@@ -440,7 +458,16 @@ class StatementGenerator(BaseGenerator):
                     self.child_depth(ctx.depth),
                     min_stmts=self.cfg.min_stmts,
                     max_stmts=self.cfg.max_stmts,
+                    allow_loop_terminator=False,
                 )
+
+        if want_terminator:
+            target_body = if_node.body
+            if force_else:
+                target_body = if_node.orelse
+            elif generate_else and ctx.gen.rng.random() < 0.5:
+                target_body = if_node.orelse
+            self._append_loop_terminator(target_body, rng=ctx.gen.rng)
 
         return if_node
 
@@ -451,6 +478,48 @@ class StatementGenerator(BaseGenerator):
 
         last_stmt = body[-1]
         return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
+
+    def _append_loop_terminator(
+        self,
+        body: list,
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        if self.scope_is_terminated(body):
+            return
+
+        if body and isinstance(body[-1], ast.Pass):
+            body.pop()
+
+        rng = rng or self.rng
+        if rng.random() < 0.5:
+            body.append(ast.Break())
+        else:
+            body.append(ast.Continue())
+
+    def _maybe_append_loop_terminator(
+        self,
+        body: list,
+        context: GenerationContext,
+        parent: Optional[ast.VyperNode],
+        *,
+        rng: Optional[random.Random] = None,
+    ) -> None:
+        if parent is None or not context.is_inside_for_scope():
+            return
+
+        if isinstance(parent, ast.For):
+            prob = self.cfg.loop_terminator_direct_prob
+        elif isinstance(parent, ast.If):
+            prob = self.cfg.loop_terminator_in_if_prob
+        else:
+            return
+
+        rng = rng or self.rng
+        if rng.random() >= prob:
+            return
+
+        self._append_loop_terminator(body, rng=rng)
 
     def get_writable_variables(self, context: GenerationContext) -> list[tuple[str, VarInfo]]:
         with context.access_mode(AccessMode.WRITE):
@@ -917,12 +986,12 @@ class StatementGenerator(BaseGenerator):
         pass
 
     def generate_break(self, context, parent: Optional[ast.VyperNode]) -> ast.Break:
-        pass
+        return ast.Break()
 
     def generate_continue(
         self, context, parent: Optional[ast.VyperNode]
     ) -> ast.Continue:
-        pass
+        return ast.Continue()
 
     def generate_return(
         self, context, parent: Optional[ast.VyperNode], return_type: VyperType
