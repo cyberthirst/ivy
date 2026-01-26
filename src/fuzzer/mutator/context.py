@@ -125,6 +125,28 @@ class GenerationContext:
         finally:
             self.current_access_mode = prev
 
+    def _is_var_accessible(self, var_info: VarInfo) -> bool:
+        if self.current_mutability == ExprMutability.CONST:
+            if var_info.modifiability != Modifiability.CONSTANT:
+                return False
+        elif self.current_mutability == ExprMutability.PURE:
+            if var_info.is_state_variable():
+                return False
+        elif self.current_mutability == ExprMutability.VIEW:
+            if self.current_access_mode == AccessMode.WRITE and var_info.location in (
+                DataLocation.STORAGE,
+                DataLocation.TRANSIENT,
+            ):
+                return False
+
+        if (
+            self.current_access_mode == AccessMode.WRITE
+            and var_info.modifiability != Modifiability.MODIFIABLE
+        ):
+            return False
+
+        return True
+
     def find_matching_vars(
         self, want_type: Optional[VyperType] = None
     ) -> list[tuple[str, VarInfo]]:
@@ -134,31 +156,8 @@ class GenerationContext:
             if want_type is not None and not want_type.compare_type(var_info.typ):
                 continue
 
-            # CONST: Only compile-time constants
-            if self.current_mutability == ExprMutability.CONST:
-                if var_info.modifiability != Modifiability.CONSTANT:
-                    continue
-
-            # PURE: Cannot access state variables
-            elif self.current_mutability == ExprMutability.PURE:
-                if var_info.is_state_variable():
-                    continue
-
-            # VIEW: Can read everything, cannot write storage/transient
-            elif self.current_mutability == ExprMutability.VIEW:
-                if self.current_access_mode == AccessMode.WRITE:
-                    if var_info.location in (
-                        DataLocation.STORAGE,
-                        DataLocation.TRANSIENT,
-                    ):
-                        continue
-
-            # STATEFUL: no filtering needed for mutability
-
-            # WRITE mode: can only write to MODIFIABLE variables
-            if self.current_access_mode == AccessMode.WRITE:
-                if var_info.modifiability != Modifiability.MODIFIABLE:
-                    continue
+            if not self._is_var_accessible(var_info):
+                continue
 
             candidates.append((name, var_info))
         return candidates
@@ -169,4 +168,5 @@ class GenerationContext:
             (name, var_info)
             for name, var_info in self.all_vars.items()
             if isinstance(var_info.typ, (SArrayT, DArrayT))
+            and self._is_var_accessible(var_info)
         ]
