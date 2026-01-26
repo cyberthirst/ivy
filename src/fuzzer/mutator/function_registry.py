@@ -82,6 +82,7 @@ class FunctionRegistry:
             "ceil",
             "concat",
             "slice",
+            "keccak256",
         ]
 
         for name, builtin in DISPATCH_TABLE.items():

@@ -94,6 +94,7 @@ class ExprGenerator(BaseGenerator):
             "floor": self._builtin_floor_ceil,
             "ceil": self._builtin_floor_ceil,
             "len": self._builtin_len,
+            "keccak256": self._builtin_keccak256,
             "concat": self._builtin_concat,
             #"slice": self._builtin_slice,
         }
@@ -1191,6 +1192,25 @@ class ExprGenerator(BaseGenerator):
         arg_t = self.rng.choice([BytesT(max_len), StringT(max_len)])
         a0 = self.generate(arg_t, context, self.child_depth(depth))
         ret_t = getattr(builtin, "_return_type", IntegerT(False, 256))
+        return self._finalize_call(func_node, [a0], ret_t)
+
+    def _builtin_keccak256(
+        self,
+        *,
+        func_node: ast.Name,
+        builtin,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        **_,
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
+        if not (isinstance(target_type, BytesM_T) and target_type.length == 32):
+            return None
+
+        max_len = self.rng.randint(1, 128)
+        arg_t = self.rng.choice([BytesT(max_len), StringT(max_len), BytesM_T(32)])
+        a0 = self.generate(arg_t, context, self.child_depth(depth))
+        ret_t = getattr(builtin, "_return_type", None) or target_type
         return self._finalize_call(func_node, [a0], ret_t)
 
     def _builtin_concat(
