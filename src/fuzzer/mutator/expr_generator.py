@@ -39,7 +39,7 @@ from fuzzer.mutator.type_utils import (
 )
 from fuzzer.mutator.constant_folding import (
     constant_folds_to_zero,
-    fold_constant_expression,
+    fold_constant_expression_status,
 )
 from fuzzer.mutator.dereference_utils import (
     DerefCandidate,
@@ -523,8 +523,10 @@ class ExprGenerator(BaseGenerator):
     def _static_index_is_constant_oob(
         self, idx_expr: ast.VyperNode, seq_length: int
     ) -> bool:
-        folded = fold_constant_expression(idx_expr, {})
-        if folded is None or not isinstance(folded, ast.Int):
+        status, folded = fold_constant_expression_status(idx_expr, {})
+        if status == "invalid_constant":
+            return True
+        if status != "value" or not isinstance(folded, ast.Int):
             return False
         return folded.value < 0 or folded.value >= seq_length
 
