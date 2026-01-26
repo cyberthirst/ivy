@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Callable, Optional, Union
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -478,7 +478,12 @@ class ExprGenerator(BaseGenerator):
                     seq_t.length,
                     max_value=3,
                 )
-            idx_expr = self.generate(INDEX_TYPE, context, depth)
+            idx_expr = self._retry_index_expr(
+                seq_length=seq_t.length,
+                make_candidate=lambda: self.generate(INDEX_TYPE, context, depth),
+                fallback=lambda: random_literal_index(self.rng, seq_t.length),
+                reject_if=self._static_index_is_invalid_constant,
+            )
             len_call = ast_builder.uint256_literal(seq_t.length)
             return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
         if isinstance(seq_t, DArrayT):
@@ -494,7 +499,12 @@ class ExprGenerator(BaseGenerator):
         if use_small:
             i_expr = small_literal_index(self.rng, seq_t.length)
         else:
-            i_expr = self.generate(INDEX_TYPE, context, depth)
+            i_expr = self._retry_index_expr(
+                seq_length=seq_t.length,
+                make_candidate=lambda: self.generate(INDEX_TYPE, context, depth),
+                fallback=lambda: small_literal_index(self.rng, seq_t.length),
+                reject_if=self._static_index_is_invalid_constant,
+            )
 
         len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
@@ -507,18 +517,44 @@ class ExprGenerator(BaseGenerator):
     ) -> ast.VyperNode:
         """Generate a random (unconstrained) index expression."""
         if isinstance(seq_t, SArrayT):
-            for _ in range(3):
-                idx_expr = self.generate(random_index_type(self.rng), context, depth)
-                if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
-                    return idx_expr
-            return random_literal_index(self.rng, seq_t.length)
+            return self._retry_index_expr(
+                seq_length=seq_t.length,
+                make_candidate=lambda: self.generate(
+                    random_index_type(self.rng), context, depth
+                ),
+                fallback=lambda: random_literal_index(self.rng, seq_t.length),
+                reject_if=self._static_index_is_constant_oob,
+            )
 
-        for _ in range(3):
-            idx_expr = self.generate(random_index_type(self.rng), context, depth)
-            if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
-                return idx_expr
+        return self._retry_index_expr(
+            seq_length=seq_t.length,
+            make_candidate=lambda: self.generate(
+                random_index_type(self.rng), context, depth
+            ),
+            fallback=lambda: small_literal_index(self.rng, seq_t.length),
+            reject_if=self._static_index_is_constant_oob,
+        )
 
-        return small_literal_index(self.rng, seq_t.length)
+    def _retry_index_expr(
+        self,
+        *,
+        seq_length: int,
+        make_candidate: Callable[[], ast.VyperNode],
+        fallback: Callable[[], ast.VyperNode],
+        reject_if: Callable[[ast.VyperNode, int], bool],
+        retries: int = 3,
+    ) -> ast.VyperNode:
+        for _ in range(retries):
+            candidate = make_candidate()
+            if not reject_if(candidate, seq_length):
+                return candidate
+        return fallback()
+
+    def _static_index_is_invalid_constant(
+        self, idx_expr: ast.VyperNode, _seq_length: int
+    ) -> bool:
+        status, _ = fold_constant_expression_status(idx_expr, {})
+        return status == "invalid_constant"
 
     def _static_index_is_constant_oob(
         self, idx_expr: ast.VyperNode, seq_length: int
