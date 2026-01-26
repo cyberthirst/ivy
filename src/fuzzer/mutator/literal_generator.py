@@ -64,7 +64,13 @@ class LiteralGenerator(BaseValueGenerator):
         smol = [v for v in [-2, -1, 0, 1, 2] if lo <= v <= hi]
         if self.rng.random() < 0.99:
             return self.rng.choice(smol)
-        return self.rng.choice([-10, 10, 100, 255, 256])
+
+        # Interesting boundary values: min, max, near-boundaries, and power-of-2 related
+        interesting = [lo, hi, lo + 1, hi - 1, 10, -10, 100, 127, 128, 255, 256, 1000]
+        interesting = [v for v in interesting if lo <= v <= hi and v not in smol]
+        if interesting:
+            return self.rng.choice(interesting)
+        return self.rng.choice(smol)
 
     def _generate_address(self, vyper_type: AddressT) -> str:
         # Always delegate to boundary generator
