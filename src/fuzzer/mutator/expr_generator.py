@@ -22,7 +22,7 @@ from vyper.semantics.types import (
     TYPE_T,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
-from vyper.semantics.analysis.base import VarInfo
+from vyper.semantics.analysis.base import VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator.literal_generator import LiteralGenerator
@@ -190,6 +190,12 @@ class ExprGenerator(BaseGenerator):
         allow_subscript: bool,
     ) -> list[tuple[str, VyperType]]:
         vars_dict = dict(ctx.context.find_matching_vars(None))
+        if allow_subscript:
+            vars_dict = {
+                name: var_info
+                for name, var_info in vars_dict.items()
+                if not self._is_empty_constant_array(name, var_info, ctx.context)
+            }
         return find_dereference_bases(
             ctx.target_type,
             vars_dict,
@@ -197,6 +203,24 @@ class ExprGenerator(BaseGenerator):
             allow_attribute=allow_attribute,
             allow_subscript=allow_subscript,
         )
+
+    def _is_empty_constant_array(
+        self,
+        name: str,
+        var_info: VarInfo,
+        context: GenerationContext,
+    ) -> bool:
+        if var_info.modifiability != Modifiability.CONSTANT:
+            return False
+        if not isinstance(var_info.typ, (SArrayT, DArrayT)):
+            return False
+        if name not in context.constants:
+            return False
+        value = context.constants[name]
+        try:
+            return len(value) == 0
+        except Exception:
+            return getattr(value, "length", None) == 0
 
     def _weight_deref_like(self, n: int) -> float:
         cfg = self.cfg
