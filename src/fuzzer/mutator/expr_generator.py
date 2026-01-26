@@ -95,7 +95,7 @@ class ExprGenerator(BaseGenerator):
             "ceil": self._builtin_floor_ceil,
             "len": self._builtin_len,
             "concat": self._builtin_concat,
-            "slice": self._builtin_slice,
+            #"slice": self._builtin_slice,
         }
 
     def generate(
@@ -506,8 +506,6 @@ class ExprGenerator(BaseGenerator):
         depth: int,
     ) -> ast.VyperNode:
         """Generate a random (unconstrained) index expression."""
-        cfg = self.cfg
-
         if isinstance(seq_t, SArrayT):
             for _ in range(3):
                 idx_expr = self.generate(random_index_type(self.rng), context, depth)
@@ -515,17 +513,12 @@ class ExprGenerator(BaseGenerator):
                     return idx_expr
             return random_literal_index(self.rng, seq_t.length)
 
-        # Bias DynArray towards small literals
-        use_small = (
-            isinstance(seq_t, DArrayT)
-            and self.rng.random() < cfg.dynarray_small_literal_in_random_prob
-        )
-        if use_small:
-            idx_expr = small_literal_index(self.rng, seq_t.length)
-        else:
+        for _ in range(3):
             idx_expr = self.generate(random_index_type(self.rng), context, depth)
+            if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
+                return idx_expr
 
-        return idx_expr
+        return small_literal_index(self.rng, seq_t.length)
 
     def _static_index_is_constant_oob(
         self, idx_expr: ast.VyperNode, seq_length: int
