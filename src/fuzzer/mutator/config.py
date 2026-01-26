@@ -22,6 +22,7 @@ class ExprGeneratorConfig:
     # Strategy weights
     literal_weight: float = 0.01
     ifexp_weight: float = 0.01
+    env_var_weight: float = 0.01
 
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5

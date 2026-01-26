@@ -161,6 +161,38 @@ class ExprGenerator(BaseGenerator):
             return ctx.allow_tuple_literal
         return True
 
+    def _env_var_candidates(
+        self, *, ctx: ExprGenCtx
+    ) -> list[tuple[Optional[str], str, VyperType]]:
+        if ctx.context.is_module_scope:
+            return []
+        if ctx.context.current_mutability in (ExprMutability.CONST, ExprMutability.PURE):
+            return []
+
+        candidates: list[tuple[Optional[str], str, VyperType]] = []
+        if ctx.target_type.compare_type(AddressT()):
+            candidates.extend(
+                [
+                    ("msg", "sender", AddressT()),
+                    ("tx", "origin", AddressT()),
+                    (None, "self", AddressT()),
+                ]
+            )
+        else:
+            uint256_t = IntegerT(False, 256)
+            if not ctx.target_type.compare_type(uint256_t):
+                return candidates
+
+            candidates.append(("block", "timestamp", uint256_t))
+            if ctx.context.current_function_mutability == StateMutability.PAYABLE:
+                candidates.append(("msg", "value", uint256_t))
+            # TODO: support msg.data
+
+        return candidates
+
+    def _is_env_var_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return bool(self._env_var_candidates(ctx=ctx))
+
     def _weight_var_ref(self, *, ctx: ExprGenCtx, **_) -> float:
         # Slightly bias towards var refs when there are many
         n = len(ctx.context.find_matching_vars(ctx.target_type))
@@ -256,6 +288,9 @@ class ExprGenerator(BaseGenerator):
     def _weight_ifexp(self, **_) -> float:
         return self.cfg.ifexp_weight
 
+    def _weight_env_var(self, **_) -> float:
+        return self.cfg.env_var_weight
+
     def _weight_attribute(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=False)
@@ -297,6 +332,25 @@ class ExprGenerator(BaseGenerator):
     def _generate_literal(self, *, ctx: ExprGenCtx, **_) -> ast.VyperNode:
         value = self.literal_generator.generate(ctx.target_type)
         return ast_builder.literal(value, ctx.target_type)
+
+    @strategy(
+        name="expr.env_var",
+        tags=frozenset({"expr", "terminal"}),
+        is_applicable="_is_env_var_applicable",
+        weight="_weight_env_var",
+    )
+    def _generate_env_var(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.VyperNode]:
+        candidates = self._env_var_candidates(ctx=ctx)
+        if not candidates:
+            return None
+
+        base, name, typ = ctx.gen.rng.choice(candidates)
+        if base is None:
+            node = ast.Name(id=name)
+        else:
+            node = ast.Attribute(value=ast.Name(id=base), attr=name)
+        node._metadata = {"type": typ}
+        return node
 
     def _build_empty(self, target_type: VyperType) -> ast.Call:
         type_node = ast.Name(id=str(target_type))
