@@ -3,7 +3,7 @@ import random
 import pytest
 from vyper.compiler.phases import CompilerData
 from vyper.ast import nodes as ast
-from vyper.exceptions import VyperException
+from vyper.exceptions import VyperException, VyperInternalException
 
 from fuzzer.mutator.ast_mutator import AstMutator
 from unparser.unparser import unparse
@@ -38,6 +38,10 @@ def test_generator_produces_valid_code(_iteration: int):
     try:
         CompilerData(source).bytecode
     except VyperException as e:
+        # ICE (internal compiler error) is considered a success - we found a compiler bug
+        if isinstance(e, VyperInternalException):
+            return
+
         if mutator.context.compilation_xfails:
             return
         pytest.fail(

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from vyper.compiler.phases import CompilerData
-from vyper.exceptions import VyperException
+from vyper.exceptions import VyperException, VyperInternalException
 
 from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
 from fuzzer.trace_types import DeploymentTrace
@@ -126,6 +126,10 @@ def test_mutator_produces_valid_code(source_code: str, test_id: str):
                 mutated_compiler_data.annotated_vyper_module.to_dict()
             )
         except VyperException as e:
+            # ICE (internal compiler error) is considered a success - we found a compiler bug
+            if isinstance(e, VyperInternalException):
+                return
+
             pytest.fail(
                 f"Mutated code failed to compile but no compilation_xfails was set.\n"
                 f"seed={seed}, max_mutations={max_mutations}\n"
