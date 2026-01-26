@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Optional
+from typing import Any, Optional, Literal
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -40,6 +40,13 @@ from fuzzer.mutator import ast_builder
 
 class ConstEvalError(Exception):
     pass
+
+
+class ConstEvalNonConstant(ConstEvalError):
+    pass
+
+
+FoldStatus = Literal["value", "non_constant", "invalid_constant"]
 
 
 def _bytes_value(value: Any) -> bytes:
@@ -220,9 +227,9 @@ class ConstExprEvaluator(ExprVisitor):
         is_static=None,
     ):
         if any(isinstance(value, ast.VyperNode) for value in kws.values()):
-            raise ConstEvalError("unsupported keyword arg value")
+            raise ConstEvalNonConstant("unsupported keyword arg value")
         if isinstance(call.func, ast.Attribute):
-            raise ConstEvalError("method calls are not constant")
+            raise ConstEvalNonConstant("method calls are not constant")
         if isinstance(call.func, ast.Name):
             handler = _BUILTIN_HANDLERS.get(call.func.id)
             if handler is not None:
@@ -234,25 +241,25 @@ class ConstExprEvaluator(ExprVisitor):
                 raise ConstEvalError("struct constructors require keywords")
             return Struct(typ, kws)
 
-        raise ConstEvalError("unsupported call in const eval")
+        raise ConstEvalNonConstant("unsupported call in const eval")
 
     @property
     def current_address(self):
-        raise ConstEvalError("self not allowed in const eval")
+        raise ConstEvalNonConstant("self not allowed in const eval")
 
     def _handle_env_variable(self, node: ast.Attribute):
-        raise ConstEvalError("env variables are not constant")
+        raise ConstEvalNonConstant("env variables are not constant")
 
     def _handle_address_variable(self, node: ast.Attribute):
-        raise ConstEvalError("address variables are not constant")
+        raise ConstEvalNonConstant("address variables are not constant")
 
     def set_variable(self, name: str, value, node: Optional[ast.VyperNode] = None):
-        raise ConstEvalError("const eval does not support assignment")
+        raise ConstEvalNonConstant("const eval does not support assignment")
 
     def get_variable(self, name: str, node: Optional[ast.VyperNode] = None):
         if name in self._constants:
             return self._constants[name]
-        raise ConstEvalError(f"unknown constant: {name}")
+        raise ConstEvalNonConstant(f"unknown constant: {name}")
 
 
 def evaluate_constant_expression(
@@ -267,17 +274,34 @@ def fold_constant_expression(
     node: ast.VyperNode,
     constants: dict[str, Any],
 ) -> Optional[ast.VyperNode]:
+    status, folded = fold_constant_expression_status(node, constants)
+    if status != "value":
+        return None
+    return folded
+
+
+def fold_constant_expression_status(
+    node: ast.VyperNode,
+    constants: dict[str, Any],
+) -> tuple[FoldStatus, Optional[ast.VyperNode]]:
     typ = node._metadata.get("type")
     if typ is None:
-        return None
+        return "non_constant", None
     try:
         value = evaluate_constant_expression(node, constants)
+    except ConstEvalNonConstant:
+        return "non_constant", None
+    except ConstEvalError:
+        return "invalid_constant", None
     except Exception:
-        return None
+        return "invalid_constant", None
     if value is None:
-        return None
-    unboxed = _unbox_value(value, typ)
-    return ast_builder.literal(unboxed, typ)
+        return "invalid_constant", None
+    try:
+        unboxed = _unbox_value(value, typ)
+        return "value", ast_builder.literal(unboxed, typ)
+    except Exception:
+        return "invalid_constant", None
 
 
 def constant_folds_to_zero(
