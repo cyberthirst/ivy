@@ -18,6 +18,7 @@ from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_m
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
 from fuzzer.mutator.strategy import StrategyRegistry
+from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
 from fuzzer.mutator.mutations import register_all as register_all_mutations
 from fuzzer.mutator.mutations.base import MutationCtx
@@ -319,6 +320,18 @@ class AstMutator(VyperNodeTransformer):
                     and isinstance(item.target, ast.Name)
                 ):
                     self.context.add_variable(item.target.id, var_info)
+                    if (
+                        var_info.modifiability == Modifiability.CONSTANT
+                        and item.value is not None
+                    ):
+                        try:
+                            const_value = evaluate_constant_expression(
+                                item.value, self.context.constants
+                            )
+                        except Exception:
+                            pass
+                        else:
+                            self.context.add_constant(item.target.id, const_value)
 
     def visit_VariableDecl(self, node: ast.VariableDecl):
         # VariableDecl is module-level only (storage, immutables, transient, constants).

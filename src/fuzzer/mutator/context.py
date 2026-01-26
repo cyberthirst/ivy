@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -48,6 +48,7 @@ class GenerationContext:
     current_scope: Scope = field(default_factory=lambda: Scope(ScopeType.MODULE))
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
+    constants: Dict[str, Any] = field(default_factory=dict)
     immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
     compilation_xfails: List[XFailExpectation] = field(default_factory=list)
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
@@ -80,6 +81,9 @@ class GenerationContext:
             and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
         ):
             self.immutables_to_init.append((name, var_info))
+
+    def add_constant(self, name: str, value: Any) -> None:
+        self.constants[name] = value
 
     @property
     def is_module_scope(self) -> bool:

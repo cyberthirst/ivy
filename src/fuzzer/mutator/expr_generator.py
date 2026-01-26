@@ -148,7 +148,7 @@ class ExprGenerator(BaseGenerator):
     ) -> ast.VyperNode:
         while True:
             expr = self.generate(target_type, context, depth)
-            if not constant_folds_to_zero(expr, {}):
+            if not constant_folds_to_zero(expr, context.constants):
                 return expr
 
     # Applicability/weight helpers
@@ -509,21 +509,25 @@ class ExprGenerator(BaseGenerator):
         if isinstance(seq_t, SArrayT):
             for _ in range(3):
                 idx_expr = self.generate(random_index_type(self.rng), context, depth)
-                if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
+                if not self._static_index_is_constant_oob(
+                    idx_expr, seq_t.length, context.constants
+                ):
                     return idx_expr
             return random_literal_index(self.rng, seq_t.length)
 
         for _ in range(3):
             idx_expr = self.generate(random_index_type(self.rng), context, depth)
-            if not self._static_index_is_constant_oob(idx_expr, seq_t.length):
+            if not self._static_index_is_constant_oob(
+                idx_expr, seq_t.length, context.constants
+            ):
                 return idx_expr
 
         return small_literal_index(self.rng, seq_t.length)
 
     def _static_index_is_constant_oob(
-        self, idx_expr: ast.VyperNode, seq_length: int
+        self, idx_expr: ast.VyperNode, seq_length: int, constants: dict[str, object]
     ) -> bool:
-        folded = fold_constant_expression(idx_expr, {})
+        folded = fold_constant_expression(idx_expr, constants)
         if folded is None or not isinstance(folded, ast.Int):
             return False
         return folded.value < 0 or folded.value >= seq_length

@@ -19,6 +19,7 @@ from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.ast_utils import ast_equivalent
+from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.type_utils import is_dereferenceable
 from fuzzer.mutator.dereference_utils import (
     pick_dereference_target_type,
@@ -691,7 +692,29 @@ class StatementGenerator(BaseGenerator):
     ) -> Union[ast.VariableDecl, ast.AnnAssign]:
         var_decl, var_name, var_info = self.generate_vardecl(ctx.context, ctx.parent)
         self.add_variable(ctx.context, var_name, var_info)
+        self._register_constant_value(ctx.context, var_name, var_info, var_decl)
         return var_decl
+
+    def _register_constant_value(
+        self,
+        context: GenerationContext,
+        name: str,
+        var_info: VarInfo,
+        var_decl: Union[ast.VariableDecl, ast.AnnAssign],
+    ) -> None:
+        if (
+            var_info.modifiability != Modifiability.CONSTANT
+            or not context.is_module_scope
+        ):
+            return
+        value_node = getattr(var_decl, "value", None)
+        if value_node is None:
+            return
+        try:
+            const_value = evaluate_constant_expression(value_node, context.constants)
+        except Exception:
+            return
+        context.add_constant(name, const_value)
 
     def generate_vardecl(
         self, context, parent: Optional[ast.VyperNode]

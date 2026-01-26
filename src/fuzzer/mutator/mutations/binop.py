@@ -27,7 +27,7 @@ def _can_swap(*, ctx: MutationCtx, **_) -> bool:
         return False
     new_op = OP_SWAPS[op_type]
     if new_op in (ast.FloorDiv, ast.Mod, ast.Div):
-        return not constant_folds_to_zero(ctx.node.right, {}) or bool(
+        return not constant_folds_to_zero(ctx.node.right, ctx.context.constants) or bool(
             getattr(ctx.node.right, "_metadata", {}).get("type")
         )
     return True
@@ -44,7 +44,7 @@ def _swap_operator(*, ctx: MutationCtx, **_) -> ast.BinOp:
     ctx.node.op = OP_SWAPS[op_type]()
     if (
         isinstance(ctx.node.op, (ast.FloorDiv, ast.Mod, ast.Div))
-        and constant_folds_to_zero(ctx.node.right, {})
+        and constant_folds_to_zero(ctx.node.right, ctx.context.constants)
     ):
         rhs_type = getattr(ctx.node.right, "_metadata", {}).get("type")
         if rhs_type is not None:
