@@ -143,7 +143,7 @@ class StatementGenerator(BaseGenerator):
         skip: Optional[set] = None,
         size_budget: Optional[int] = None,
     ) -> VyperType:
-        """Generate a type, biasing towards existing types in context."""
+        """Generate a type, biasing towards existing types and preferred fuzzing types."""
         skip = skip or set()
 
         # Bias towards existing variable types to enable compatible expressions
@@ -158,7 +158,7 @@ class StatementGenerator(BaseGenerator):
                 return var_info.typ
 
         # Struct fragments are stored in type_generator.source_fragments
-        return self.type_generator.generate_type(
+        return self.type_generator.generate_biased_type(
             nesting=nesting, skip=skip, size_budget=size_budget
         )
 

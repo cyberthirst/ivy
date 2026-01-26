@@ -289,7 +289,7 @@ class FunctionRegistry:
         num_args = self.rng.randint(0, max_args)
         positional_args = []
         for i in range(num_args):
-            arg_type = type_generator.generate_type(skip={HashMapT}, nesting=1)
+            arg_type = type_generator.generate_biased_type(skip={HashMapT}, nesting=1)
             arg_name = f"arg{i}"
             positional_args.append(PositionalArg(arg_name, arg_type))
 

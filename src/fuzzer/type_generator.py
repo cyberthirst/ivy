@@ -47,6 +47,38 @@ class TypeGenerator:
         self.leaf_type_set = set(self.leaf_types)
         self.complex_type_set = set(self.complex_types)
 
+    def _biased_leaf_types(self) -> List[VyperType]:
+        return [
+            BoolT(),
+            IntegerT(True, 256),
+            IntegerT(True, 128),
+            IntegerT(False, 256),
+            IntegerT(False, 128),
+            AddressT(),
+            BytesM_T(32),
+            BytesT(32),
+            BytesT(64),
+        ]
+
+    def _biased_container_types(self) -> List[Type[VyperType]]:
+        return [DArrayT, HashMapT, StructT]
+
+    def generate_biased_type(
+        self,
+        nesting: int = 3,
+        skip: Optional[Set[type]] = None,
+        size_budget: Optional[int] = None,
+        prefer_probability: float = 0.8,
+    ) -> VyperType:
+        return self.generate_type(
+            nesting=nesting,
+            skip=skip,
+            size_budget=size_budget,
+            preferred_leafs=self._biased_leaf_types(),
+            preferred_containers=self._biased_container_types(),
+            prefer_probability=prefer_probability,
+        )
+
     def _is_type_class(self, t: Union[Type[VyperType], VyperType]) -> bool:
         return isinstance(t, type)
 
