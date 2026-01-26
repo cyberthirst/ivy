@@ -4300,7 +4300,7 @@ def create_proxy(target: address, salt: bytes32) -> address:
     return create_minimal_proxy_to(target, salt=salt)
     """
 
-    from vyper.compiler import CompilerData
+    from eth_abi import encode
     from ivy.builtins.create_utils import MinimalProxyFactory
 
     target = get_contract(target_src)
@@ -4310,8 +4310,10 @@ def create_proxy(target: address, salt: bytes32) -> address:
     created_proxy = factory.create_proxy(target.address, salt)
 
     # Get the init_code for the minimal proxy
+    # For CREATE2, init_code = bytecode + ABI-encoded constructor args
     proxy_data = MinimalProxyFactory.get_proxy_contract_data()
-    init_code = proxy_data.compiler_data.bytecode
+    encoded_target = encode(["address"], [target.address.canonical_address])
+    init_code = proxy_data.compiler_data.bytecode + encoded_target
 
     # Compute expected CREATE2 address
     sender = factory.address.canonical_address
