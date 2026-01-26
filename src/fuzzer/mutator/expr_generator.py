@@ -434,17 +434,19 @@ class ExprGenerator(BaseGenerator):
         # Condition must be bool; branches must yield the same type
         next_depth = self.child_depth(ctx.depth)
         test = self.generate(BoolT(), ctx.context, next_depth)
+        # Avoid ambiguous tuple literal typing inside if-expressions.
+        allow_tuple_literal = False
         body = self.generate(
             ctx.target_type,
             ctx.context,
             next_depth,
-            allow_tuple_literal=ctx.allow_tuple_literal,
+            allow_tuple_literal=allow_tuple_literal,
         )
         orelse = self.generate(
             ctx.target_type,
             ctx.context,
             next_depth,
-            allow_tuple_literal=ctx.allow_tuple_literal,
+            allow_tuple_literal=allow_tuple_literal,
         )
 
         node = ast.IfExp(test=test, body=body, orelse=orelse)
