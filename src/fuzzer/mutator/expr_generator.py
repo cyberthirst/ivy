@@ -368,9 +368,7 @@ class ExprGenerator(BaseGenerator):
         src_type = self._expr_type(src_expr)
         if src_type is None:
             return None
-        if not convert_is_valid(
-            src_type, target_type, allow_same_type=False
-        ):
+        if not convert_is_valid(src_type, target_type):
             return None
         if not self._convert_literal_length_ok(src_expr, target_type):
             return None
@@ -394,9 +392,7 @@ class ExprGenerator(BaseGenerator):
         var_candidates = [
             (name, info)
             for name, info in context.find_matching_vars(None)
-            if convert_is_valid(
-                info.typ, target_type, allow_same_type=False
-            )
+            if convert_is_valid(info.typ, target_type)
         ]
         if var_candidates:
             return self._generate_variable_ref(self.rng.choice(var_candidates), context)
@@ -412,9 +408,7 @@ class ExprGenerator(BaseGenerator):
             src_type = self._expr_type(src_expr)
             if src_type is None:
                 continue
-            if not convert_is_valid(
-                src_type, target_type, allow_same_type=False
-            ):
+            if not convert_is_valid(src_type, target_type):
                 continue
             if not self._convert_literal_length_ok(src_expr, target_type):
                 continue

@@ -59,12 +59,6 @@ CONVERT_MATRIX: tuple[ConvertRule, ...] = (
 _CONVERT_RULES = {rule.target: rule for rule in CONVERT_MATRIX}
 
 
-def _convert_same_type_allowed(src: VyperType, dst: VyperType) -> bool:
-    if not isinstance(src, IntegerT) or not isinstance(dst, IntegerT):
-        return False
-    return src.bits == 256 and dst.bits == 256 and src.is_signed == dst.is_signed
-
-
 def convert_target_supported(dst: VyperType) -> bool:
     return type(dst) in _CONVERT_RULES
 
@@ -76,12 +70,7 @@ def convert_source_kinds(dst: VyperType) -> tuple[Type[VyperType], ...]:
     return rule.sources
 
 
-def convert_is_valid(
-    src: VyperType,
-    dst: VyperType,
-    *,
-    allow_same_type: bool = True,
-) -> bool:
+def convert_is_valid(src: VyperType, dst: VyperType) -> bool:
     src_kind = type(src)
     dst_kind = type(dst)
     rule = _CONVERT_RULES.get(dst_kind)
@@ -90,12 +79,9 @@ def convert_is_valid(
     if src_kind not in rule.sources:
         return False
 
-    same_type = src.compare_type(dst)
-    if same_type:
-        if not allow_same_type:
-            return False
-        if not _convert_same_type_allowed(src, dst):
-            return False
+    # Disallow no-op conversions (e.g., uint256 -> uint256).
+    if src.compare_type(dst):
+        return False
 
     if dst_kind is BoolT:
         if src_kind in {BytesT, StringT} and src.length > 32:
@@ -227,6 +213,6 @@ def pick_convert_source_type(
         src_t = random_convert_type(rng, kind, target_type)
         if src_t is None:
             continue
-        if convert_is_valid(src_t, target_type, allow_same_type=False):
+        if convert_is_valid(src_t, target_type):
             return src_t
     return None
