@@ -295,6 +295,8 @@ class ExprGenerator(BaseGenerator):
         return ctx.context.current_mutability != ExprMutability.CONST
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        if ctx.context.current_mutability == ExprMutability.CONST:
+            return False
         return convert_target_supported(ctx.target_type)
 
     def _weight_literal(self, **_) -> float:
