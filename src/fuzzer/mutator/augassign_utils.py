@@ -56,6 +56,8 @@ def augassign_rhs_type(
     op_cls: type[ast.VyperNode], target_type: VyperType
 ) -> VyperType:
     if op_cls in (ast.LShift, ast.RShift):
+        if isinstance(target_type, IntegerT) and target_type.is_signed:
+            return target_type
         return IntegerT(False, 256)
     return target_type
 
