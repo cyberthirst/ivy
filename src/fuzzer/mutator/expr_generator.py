@@ -332,21 +332,6 @@ class ExprGenerator(BaseGenerator):
     def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
         return getattr(node, "_metadata", {}).get("type")
 
-    def _is_literal_expr(self, node: ast.VyperNode) -> bool:
-        return isinstance(
-            node,
-            (
-                ast.Int,
-                ast.Decimal,
-                ast.Hex,
-                ast.Bytes,
-                ast.Str,
-                ast.NameConstant,
-                ast.List,
-                ast.Tuple,
-            ),
-        )
-
     def _literal_len(self, node: ast.VyperNode) -> Optional[int]:
         if isinstance(node, ast.Bytes):
             return len(node.value)
@@ -445,9 +430,6 @@ class ExprGenerator(BaseGenerator):
             if src_t is None:
                 return None
             src_expr = self.generate(src_t, context, self.child_depth(depth))
-            if self._is_literal_expr(src_expr):
-                if self.rng.random() > self.cfg.convert_literal_prob:
-                    continue
             src_type = self._expr_type(src_expr)
             if src_type is None:
                 continue
