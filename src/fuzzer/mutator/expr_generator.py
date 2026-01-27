@@ -65,7 +65,6 @@ from fuzzer.mutator.indexing import (
 )
 from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
-from ivy.builtins import convert_utils as ivy_convert_utils
 from ivy.builtins.builtins import builtin_convert
 
 
@@ -377,8 +376,6 @@ class ExprGenerator(BaseGenerator):
         try:
             builtin_convert(value, dst_type)
             return True
-        except (ivy_convert_utils.ConvertError, ValueError):
-            return False
         except Exception:
             return False
 
