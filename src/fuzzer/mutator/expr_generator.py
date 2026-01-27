@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Type, Union
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -96,6 +96,7 @@ class ExprGenerator(BaseGenerator):
             "len": self._builtin_len,
             "keccak256": self._builtin_keccak256,
             "concat": self._builtin_concat,
+            "convert": self._builtin_convert,
             #"slice": self._builtin_slice,
         }
 
@@ -283,6 +284,9 @@ class ExprGenerator(BaseGenerator):
         # Disallow if-expressions in constant contexts due to compiler limitation
         return ctx.context.current_mutability != ExprMutability.CONST
 
+    def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return self.function_registry.convert_target_supported(ctx.target_type)
+
     def _weight_literal(self, **_) -> float:
         return self.cfg.literal_weight
 
@@ -291,6 +295,9 @@ class ExprGenerator(BaseGenerator):
 
     def _weight_env_var(self, **_) -> float:
         return self.cfg.env_var_weight
+
+    def _weight_convert(self, **_) -> float:
+        return self.cfg.convert_weight
 
     def _weight_attribute(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
@@ -309,6 +316,199 @@ class ExprGenerator(BaseGenerator):
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
         return self._weight_deref_like(n)
+
+    def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
+        return getattr(node, "_metadata", {}).get("type")
+
+    def _is_literal_expr(self, node: ast.VyperNode) -> bool:
+        return isinstance(
+            node,
+            (
+                ast.Int,
+                ast.Decimal,
+                ast.Hex,
+                ast.Bytes,
+                ast.Str,
+                ast.NameConstant,
+                ast.List,
+                ast.Tuple,
+            ),
+        )
+
+    def _literal_len(self, node: ast.VyperNode) -> Optional[int]:
+        if isinstance(node, ast.Bytes):
+            return len(node.value)
+        if isinstance(node, ast.Str):
+            return len(node.value)
+        return None
+
+    def _convert_literal_length_ok(
+        self, src_expr: ast.VyperNode, dst_type: VyperType
+    ) -> bool:
+        if not isinstance(dst_type, (BytesT, StringT)):
+            return True
+        lit_len = self._literal_len(src_expr)
+        if lit_len is None:
+            return True
+        return lit_len <= dst_type.length
+
+    def _convert_type_literal(self, target_type: VyperType) -> ast.Name:
+        return ast.Name(id=str(target_type))
+
+    def maybe_convert_expr(
+        self, src_expr: ast.VyperNode, target_type: VyperType
+    ) -> Optional[ast.Call]:
+        if not self.function_registry:
+            return None
+        src_type = self._expr_type(src_expr)
+        if src_type is None:
+            return None
+        if not self.function_registry.convert_is_valid(
+            src_type, target_type, allow_same_type=False
+        ):
+            return None
+        if not self._convert_literal_length_ok(src_expr, target_type):
+            return None
+
+        func_node = ast.Name(id="convert")
+        func_node._metadata = {}
+        if "convert" in self.function_registry.builtins:
+            func_node._metadata["type"] = self.function_registry.builtins["convert"]
+        type_node = self._convert_type_literal(target_type)
+
+        call_node = ast.Call(func=func_node, args=[src_expr, type_node], keywords=[])
+        call_node._metadata = {"type": target_type}
+        return call_node
+
+    def _random_bytes_length(self, min_len: int, max_len: int) -> Optional[int]:
+        if max_len < min_len:
+            return None
+        return self.rng.randint(min_len, max_len)
+
+    def _random_convert_type(
+        self, kind: Type[VyperType], target_type: VyperType
+    ) -> Optional[VyperType]:
+        if kind is IntegerT:
+            bit_options = [8, 16, 32, 64, 128, 256]
+            max_bits = None
+            if isinstance(target_type, BytesM_T):
+                max_bits = target_type.length * 8
+            if max_bits is not None:
+                bit_options = [b for b in bit_options if b <= max_bits]
+            if not bit_options:
+                return None
+            bits = self.rng.choice(bit_options)
+            signed = self.rng.choice([True, False])
+            if isinstance(target_type, AddressT):
+                signed = False
+            return IntegerT(signed, bits)
+
+        if kind is AddressT:
+            return AddressT()
+
+        if kind is BoolT:
+            return BoolT()
+
+        if kind is BytesM_T:
+            min_len = 1
+            max_len = 32
+            if isinstance(target_type, BytesM_T):
+                min_len = target_type.length + 1
+            length = self._random_bytes_length(min_len, max_len)
+            if length is None:
+                return None
+            return BytesM_T(length)
+
+        if kind is BytesT:
+            max_dyn_len = 128
+            min_len = 1
+            max_len = max_dyn_len
+            if isinstance(target_type, BytesM_T):
+                max_len = min(max_dyn_len, target_type.length)
+            elif isinstance(target_type, (BoolT, IntegerT, AddressT)):
+                max_len = min(max_dyn_len, 32)
+            elif isinstance(target_type, BytesT):
+                min_len = target_type.length + 1
+            elif isinstance(target_type, StringT):
+                max_len = max_dyn_len
+            else:
+                return None
+            length = self._random_bytes_length(min_len, max_len)
+            if length is None:
+                return None
+            return BytesT(length)
+
+        if kind is StringT:
+            max_dyn_len = 128
+            min_len = 1
+            max_len = max_dyn_len
+            if isinstance(target_type, StringT):
+                min_len = target_type.length + 1
+            elif isinstance(target_type, BytesT):
+                max_len = max_dyn_len
+            else:
+                return None
+            length = self._random_bytes_length(min_len, max_len)
+            if length is None:
+                return None
+            return StringT(length)
+
+        return None
+
+    def _pick_convert_source_type(
+        self, target_type: VyperType
+    ) -> Optional[VyperType]:
+        kinds = list(self.function_registry.convert_source_kinds(target_type))
+        if not kinds:
+            return None
+
+        for _ in range(6):
+            kind = self.rng.choice(kinds)
+            src_t = self._random_convert_type(kind, target_type)
+            if src_t is None:
+                continue
+            if self.function_registry.convert_is_valid(
+                src_t, target_type, allow_same_type=False
+            ):
+                return src_t
+        return None
+
+    def _pick_convert_source_expr(
+        self, target_type: VyperType, context: GenerationContext, depth: int
+    ) -> Optional[ast.VyperNode]:
+        if not self.function_registry:
+            return None
+
+        var_candidates = [
+            (name, info)
+            for name, info in context.find_matching_vars(None)
+            if self.function_registry.convert_is_valid(
+                info.typ, target_type, allow_same_type=False
+            )
+        ]
+        if var_candidates:
+            return self._generate_variable_ref(self.rng.choice(var_candidates), context)
+
+        for _ in range(self.cfg.convert_max_attempts):
+            src_t = self._pick_convert_source_type(target_type)
+            if src_t is None:
+                return None
+            src_expr = self.generate(src_t, context, self.child_depth(depth))
+            if self._is_literal_expr(src_expr):
+                if self.rng.random() > self.cfg.convert_literal_prob:
+                    continue
+            src_type = self._expr_type(src_expr)
+            if src_type is None:
+                continue
+            if not self.function_registry.convert_is_valid(
+                src_type, target_type, allow_same_type=False
+            ):
+                continue
+            if not self._convert_literal_length_ok(src_expr, target_type):
+                continue
+            return src_expr
+
+        return None
 
     # Strategy methods
 
@@ -507,6 +707,21 @@ class ExprGenerator(BaseGenerator):
         node = ast.IfExp(test=test, body=body, orelse=orelse)
         node._metadata["type"] = ctx.target_type
         return node
+
+    @strategy(
+        name="expr.convert",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(BoolT, IntegerT, AddressT, BytesM_T, BytesT, StringT),
+        is_applicable="_is_convert_applicable",
+        weight="_weight_convert",
+    )
+    def _generate_convert(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Call]:
+        src_expr = self._pick_convert_source_expr(
+            ctx.target_type, ctx.context, ctx.depth
+        )
+        if src_expr is None:
+            return None
+        return self.maybe_convert_expr(src_expr, ctx.target_type)
 
     # -------------------------
     # Shared dereference utils
@@ -1032,6 +1247,12 @@ class ExprGenerator(BaseGenerator):
             ctx.target_type,
             caller_mutability=caller_mutability,
         )
+        if compatible_builtins:
+            compatible_builtins = [
+                (name, builtin)
+                for name, builtin in compatible_builtins
+                if name != "convert"
+            ]
 
         # Decide path: prefer user function, but sometimes pick builtin
         use_builtin = False
@@ -1180,6 +1401,19 @@ class ExprGenerator(BaseGenerator):
             context=context,
             depth=depth,
         )
+
+    def _builtin_convert(
+        self,
+        *,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        **_,
+    ) -> Optional[ast.Call]:
+        src_expr = self._pick_convert_source_expr(target_type, context, depth)
+        if src_expr is None:
+            return None
+        return self.maybe_convert_expr(src_expr, target_type)
 
     def _builtin_min_max(
         self,
