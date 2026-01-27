@@ -101,8 +101,6 @@ def convert_is_valid(src: VyperType, dst: VyperType) -> bool:
                 return False
             return True
         if src_kind is BytesM_T:
-            if src.length <= dst.length:
-                return False
             return True
         if src_kind is IntegerT:
             if dst.length * 8 < src.bits:
