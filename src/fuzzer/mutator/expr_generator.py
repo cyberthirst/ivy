@@ -30,6 +30,11 @@ from fuzzer.mutator.context import GenerationContext, ExprMutability
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.convert_utils import (
+    convert_is_valid,
+    convert_source_kinds,
+    convert_target_supported,
+)
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.strategy import strategy
@@ -285,7 +290,7 @@ class ExprGenerator(BaseGenerator):
         return ctx.context.current_mutability != ExprMutability.CONST
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
-        return self.function_registry.convert_target_supported(ctx.target_type)
+        return convert_target_supported(ctx.target_type)
 
     def _weight_literal(self, **_) -> float:
         return self.cfg.literal_weight
@@ -363,7 +368,7 @@ class ExprGenerator(BaseGenerator):
         src_type = self._expr_type(src_expr)
         if src_type is None:
             return None
-        if not self.function_registry.convert_is_valid(
+        if not convert_is_valid(
             src_type, target_type, allow_same_type=False
         ):
             return None
@@ -458,7 +463,7 @@ class ExprGenerator(BaseGenerator):
     def _pick_convert_source_type(
         self, target_type: VyperType
     ) -> Optional[VyperType]:
-        kinds = list(self.function_registry.convert_source_kinds(target_type))
+        kinds = list(convert_source_kinds(target_type))
         if not kinds:
             return None
 
@@ -467,7 +472,7 @@ class ExprGenerator(BaseGenerator):
             src_t = self._random_convert_type(kind, target_type)
             if src_t is None:
                 continue
-            if self.function_registry.convert_is_valid(
+            if convert_is_valid(
                 src_t, target_type, allow_same_type=False
             ):
                 return src_t
@@ -482,7 +487,7 @@ class ExprGenerator(BaseGenerator):
         var_candidates = [
             (name, info)
             for name, info in context.find_matching_vars(None)
-            if self.function_registry.convert_is_valid(
+            if convert_is_valid(
                 info.typ, target_type, allow_same_type=False
             )
         ]
@@ -500,7 +505,7 @@ class ExprGenerator(BaseGenerator):
             src_type = self._expr_type(src_expr)
             if src_type is None:
                 continue
-            if not self.function_registry.convert_is_valid(
+            if not convert_is_valid(
                 src_type, target_type, allow_same_type=False
             ):
                 continue
