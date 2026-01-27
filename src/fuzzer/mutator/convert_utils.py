@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass
-from typing import Type
+from typing import Optional, Type
 
 from vyper.semantics.types import (
     VyperType,
@@ -144,3 +145,88 @@ def convert_is_valid(
         return True
 
     return False
+
+
+def random_convert_type(
+    rng: random.Random, kind: Type[VyperType], target_type: VyperType
+) -> Optional[VyperType]:
+    if kind is IntegerT:
+        bit_options = [8, 16, 32, 64, 128, 256]
+        max_bits = None
+        if isinstance(target_type, BytesM_T):
+            max_bits = target_type.length * 8
+        if max_bits is not None:
+            bit_options = [b for b in bit_options if b <= max_bits]
+        if not bit_options:
+            return None
+        bits = rng.choice(bit_options)
+        signed = rng.choice([True, False])
+        if isinstance(target_type, AddressT):
+            signed = False
+        return IntegerT(signed, bits)
+
+    if kind is AddressT:
+        return AddressT()
+
+    if kind is BoolT:
+        return BoolT()
+
+    if kind is BytesM_T:
+        min_len = 1
+        max_len = 32
+        if isinstance(target_type, BytesM_T):
+            min_len = target_type.length + 1
+        if max_len < min_len:
+            return None
+        return BytesM_T(rng.randint(min_len, max_len))
+
+    if kind is BytesT:
+        max_dyn_len = 128
+        min_len = 1
+        max_len = max_dyn_len
+        if isinstance(target_type, BytesM_T):
+            max_len = min(max_dyn_len, target_type.length)
+        elif isinstance(target_type, (BoolT, IntegerT, AddressT)):
+            max_len = min(max_dyn_len, 32)
+        elif isinstance(target_type, BytesT):
+            min_len = target_type.length + 1
+        elif isinstance(target_type, StringT):
+            max_len = max_dyn_len
+        else:
+            return None
+        if max_len < min_len:
+            return None
+        return BytesT(rng.randint(min_len, max_len))
+
+    if kind is StringT:
+        max_dyn_len = 128
+        min_len = 1
+        max_len = max_dyn_len
+        if isinstance(target_type, StringT):
+            min_len = target_type.length + 1
+        elif isinstance(target_type, BytesT):
+            max_len = max_dyn_len
+        else:
+            return None
+        if max_len < min_len:
+            return None
+        return StringT(rng.randint(min_len, max_len))
+
+    return None
+
+
+def pick_convert_source_type(
+    rng: random.Random, target_type: VyperType
+) -> Optional[VyperType]:
+    kinds = list(convert_source_kinds(target_type))
+    if not kinds:
+        return None
+
+    for _ in range(6):
+        kind = rng.choice(kinds)
+        src_t = random_convert_type(rng, kind, target_type)
+        if src_t is None:
+            continue
+        if convert_is_valid(src_t, target_type, allow_same_type=False):
+            return src_t
+    return None

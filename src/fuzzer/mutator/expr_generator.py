@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Callable, Optional, Type, Union
+from typing import Callable, Optional, Union
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
@@ -32,8 +32,8 @@ from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.convert_utils import (
     convert_is_valid,
-    convert_source_kinds,
     convert_target_supported,
+    pick_convert_source_type,
 )
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
@@ -385,99 +385,6 @@ class ExprGenerator(BaseGenerator):
         call_node._metadata = {"type": target_type}
         return call_node
 
-    def _random_bytes_length(self, min_len: int, max_len: int) -> Optional[int]:
-        if max_len < min_len:
-            return None
-        return self.rng.randint(min_len, max_len)
-
-    def _random_convert_type(
-        self, kind: Type[VyperType], target_type: VyperType
-    ) -> Optional[VyperType]:
-        if kind is IntegerT:
-            bit_options = [8, 16, 32, 64, 128, 256]
-            max_bits = None
-            if isinstance(target_type, BytesM_T):
-                max_bits = target_type.length * 8
-            if max_bits is not None:
-                bit_options = [b for b in bit_options if b <= max_bits]
-            if not bit_options:
-                return None
-            bits = self.rng.choice(bit_options)
-            signed = self.rng.choice([True, False])
-            if isinstance(target_type, AddressT):
-                signed = False
-            return IntegerT(signed, bits)
-
-        if kind is AddressT:
-            return AddressT()
-
-        if kind is BoolT:
-            return BoolT()
-
-        if kind is BytesM_T:
-            min_len = 1
-            max_len = 32
-            if isinstance(target_type, BytesM_T):
-                min_len = target_type.length + 1
-            length = self._random_bytes_length(min_len, max_len)
-            if length is None:
-                return None
-            return BytesM_T(length)
-
-        if kind is BytesT:
-            max_dyn_len = 128
-            min_len = 1
-            max_len = max_dyn_len
-            if isinstance(target_type, BytesM_T):
-                max_len = min(max_dyn_len, target_type.length)
-            elif isinstance(target_type, (BoolT, IntegerT, AddressT)):
-                max_len = min(max_dyn_len, 32)
-            elif isinstance(target_type, BytesT):
-                min_len = target_type.length + 1
-            elif isinstance(target_type, StringT):
-                max_len = max_dyn_len
-            else:
-                return None
-            length = self._random_bytes_length(min_len, max_len)
-            if length is None:
-                return None
-            return BytesT(length)
-
-        if kind is StringT:
-            max_dyn_len = 128
-            min_len = 1
-            max_len = max_dyn_len
-            if isinstance(target_type, StringT):
-                min_len = target_type.length + 1
-            elif isinstance(target_type, BytesT):
-                max_len = max_dyn_len
-            else:
-                return None
-            length = self._random_bytes_length(min_len, max_len)
-            if length is None:
-                return None
-            return StringT(length)
-
-        return None
-
-    def _pick_convert_source_type(
-        self, target_type: VyperType
-    ) -> Optional[VyperType]:
-        kinds = list(convert_source_kinds(target_type))
-        if not kinds:
-            return None
-
-        for _ in range(6):
-            kind = self.rng.choice(kinds)
-            src_t = self._random_convert_type(kind, target_type)
-            if src_t is None:
-                continue
-            if convert_is_valid(
-                src_t, target_type, allow_same_type=False
-            ):
-                return src_t
-        return None
-
     def _pick_convert_source_expr(
         self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> Optional[ast.VyperNode]:
@@ -495,7 +402,7 @@ class ExprGenerator(BaseGenerator):
             return self._generate_variable_ref(self.rng.choice(var_candidates), context)
 
         for _ in range(self.cfg.convert_max_attempts):
-            src_t = self._pick_convert_source_type(target_type)
+            src_t = pick_convert_source_type(self.rng, target_type)
             if src_t is None:
                 return None
             src_expr = self.generate(src_t, context, self.child_depth(depth))
