@@ -37,8 +37,9 @@ def augassign_ops_for_type(typ: VyperType) -> list[type[ast.VyperNode]]:
 
     if isinstance(typ, BytesM_T):
         ops = [ast.BitAnd, ast.BitOr, ast.BitXor]
-        if typ.length == 32:
-            ops.extend([ast.LShift, ast.RShift])
+        # bytes32 augmented shifts are a compiler error; keep disabled for now.
+        # if typ.length == 32:
+        #     ops.extend([ast.LShift, ast.RShift])
         return ops
 
     if isinstance(typ, FlagT):
