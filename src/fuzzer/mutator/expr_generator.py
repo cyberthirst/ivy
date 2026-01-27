@@ -1034,21 +1034,27 @@ class ExprGenerator(BaseGenerator):
         tags=frozenset({"expr", "recursive"}),
         type_classes=(IntegerT,),
     )
-    def _generate_arithmetic(self, *, ctx: ExprGenCtx, **_) -> ast.BinOp:
+    def _generate_arithmetic(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.BinOp]:
         op_classes = [ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod]
-        op_class = ctx.gen.rng.choice(op_classes)
-
         next_depth = self.child_depth(ctx.depth)
-        left = self.generate(ctx.target_type, ctx.context, next_depth)
-        if op_class in (ast.FloorDiv, ast.Mod, ast.Div):
-            right = self.generate_nonzero_expr(ctx.target_type, ctx.context, next_depth)
-        else:
-            right = self.generate(ctx.target_type, ctx.context, next_depth)
+        for _ in range(self.cfg.arithmetic_max_attempts):
+            op_class = ctx.gen.rng.choice(op_classes)
+            left = self.generate(ctx.target_type, ctx.context, next_depth)
+            if op_class in (ast.FloorDiv, ast.Mod, ast.Div):
+                right = self.generate_nonzero_expr(
+                    ctx.target_type, ctx.context, next_depth
+                )
+            else:
+                right = self.generate(ctx.target_type, ctx.context, next_depth)
 
-        node = ast.BinOp(left=left, op=op_class(), right=right)
+            node = ast.BinOp(left=left, op=op_class(), right=right)
+            node._metadata["type"] = ctx.target_type
 
-        node._metadata["type"] = ctx.target_type
-        return node
+            status, _ = fold_constant_expression_status(node, ctx.context.constants)
+            if status != "invalid_constant":
+                return node
+
+        return None
 
     @strategy(
         name="expr.comparison",

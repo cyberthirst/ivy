@@ -29,6 +29,9 @@ class ExprGeneratorConfig:
     convert_literal_prob: float = 0.1
     convert_max_attempts: int = 3
 
+    # Arithmetic generation
+    arithmetic_max_attempts: int = 3
+
     # Variable reference weight scaling: base + scale * count, capped at max
     var_ref_weight_base: float = 0.5
     var_ref_weight_scale: float = 0.1
