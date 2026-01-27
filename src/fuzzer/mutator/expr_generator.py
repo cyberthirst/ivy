@@ -43,7 +43,10 @@ from fuzzer.mutator.type_utils import (
     find_dereference_bases,
 )
 from fuzzer.mutator.constant_folding import (
+    ConstEvalError,
+    ConstEvalNonConstant,
     constant_folds_to_zero,
+    evaluate_constant_expression,
     fold_constant_expression_status,
 )
 from fuzzer.mutator.dereference_utils import (
@@ -62,6 +65,8 @@ from fuzzer.mutator.indexing import (
 )
 from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
+from ivy.builtins import convert_utils as ivy_convert_utils
+from ivy.builtins.builtins import builtin_convert
 
 
 @dataclass
@@ -357,11 +362,47 @@ class ExprGenerator(BaseGenerator):
             return True
         return lit_len <= dst_type.length
 
+    def _convert_literal_ok(
+        self,
+        src_expr: ast.VyperNode,
+        dst_type: VyperType,
+        context: GenerationContext,
+    ) -> bool:
+        status, folded = fold_constant_expression_status(src_expr, context.constants)
+        if status == "invalid_constant":
+            return False
+
+        lit_node = folded if status == "value" and folded is not None else src_expr
+        if not self._convert_literal_length_ok(lit_node, dst_type):
+            return False
+
+        if status != "value":
+            return True
+        if not isinstance(dst_type, (IntegerT, AddressT)):
+            return True
+
+        try:
+            value = evaluate_constant_expression(src_expr, context.constants)
+        except ConstEvalNonConstant:
+            return True
+        except ConstEvalError:
+            return False
+        try:
+            builtin_convert(value, dst_type)
+            return True
+        except (ivy_convert_utils.ConvertError, ValueError):
+            return False
+        except Exception:
+            return False
+
     def _convert_type_literal(self, target_type: VyperType) -> ast.Name:
         return ast.Name(id=str(target_type))
 
     def maybe_convert_expr(
-        self, src_expr: ast.VyperNode, target_type: VyperType
+        self,
+        src_expr: ast.VyperNode,
+        target_type: VyperType,
+        context: GenerationContext,
     ) -> Optional[ast.Call]:
         if not self.function_registry:
             return None
@@ -370,7 +411,7 @@ class ExprGenerator(BaseGenerator):
             return None
         if not convert_is_valid(src_type, target_type):
             return None
-        if not self._convert_literal_length_ok(src_expr, target_type):
+        if not self._convert_literal_ok(src_expr, target_type, context):
             return None
 
         func_node = ast.Name(id="convert")
@@ -410,7 +451,7 @@ class ExprGenerator(BaseGenerator):
                 continue
             if not convert_is_valid(src_type, target_type):
                 continue
-            if not self._convert_literal_length_ok(src_expr, target_type):
+            if not self._convert_literal_ok(src_expr, target_type, context):
                 continue
             return src_expr
 
@@ -627,7 +668,7 @@ class ExprGenerator(BaseGenerator):
         )
         if src_expr is None:
             return None
-        return self.maybe_convert_expr(src_expr, ctx.target_type)
+        return self.maybe_convert_expr(src_expr, ctx.target_type, ctx.context)
 
     # -------------------------
     # Shared dereference utils
@@ -1319,7 +1360,7 @@ class ExprGenerator(BaseGenerator):
         src_expr = self._pick_convert_source_expr(target_type, context, depth)
         if src_expr is None:
             return None
-        return self.maybe_convert_expr(src_expr, target_type)
+        return self.maybe_convert_expr(src_expr, target_type, context)
 
     def _builtin_min_max(
         self,
