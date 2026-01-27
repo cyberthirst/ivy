@@ -19,7 +19,6 @@ from vyper.semantics.types import (
 class ConvertRule:
     target: Type[VyperType]
     sources: tuple[Type[VyperType], ...]
-    constraints: str
 
 
 # Phase 1: bool/int/address/bytesM/bytes/string only.
@@ -27,32 +26,26 @@ CONVERT_MATRIX: tuple[ConvertRule, ...] = (
     ConvertRule(
         target=BoolT,
         sources=(IntegerT, BytesM_T, AddressT, BoolT, BytesT, StringT),
-        constraints="Bytes/String require N<=32.",
     ),
     ConvertRule(
         target=IntegerT,
         sources=(IntegerT, BytesM_T, AddressT, BoolT, BytesT),
-        constraints="Bytes[N] require N<=32. Address only to unsigned.",
     ),
     ConvertRule(
         target=BytesM_T,
         sources=(IntegerT, BytesM_T, AddressT, BoolT, BytesT),
-        constraints="Bytes[N] require N<=M. If M*8 < input_bits -> error.",
     ),
     ConvertRule(
         target=AddressT,
         sources=(BytesM_T, IntegerT, BytesT),
-        constraints="Signed integers rejected. Bytes[N] require N<=32.",
     ),
     ConvertRule(
         target=BytesT,
         sources=(BytesT, StringT),
-        constraints="Pointer cast only. Same class cannot widen/same-size.",
     ),
     ConvertRule(
         target=StringT,
         sources=(StringT, BytesT),
-        constraints="Pointer cast only. Same class cannot widen/same-size.",
     ),
 )
 
