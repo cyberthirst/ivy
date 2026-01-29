@@ -488,8 +488,79 @@ class ExprGenerator(BaseGenerator):
         weight="_weight_literal",
     )
     def _generate_literal(self, *, ctx: ExprGenCtx, **_) -> ast.VyperNode:
+        if isinstance(ctx.target_type, (SArrayT, DArrayT)):
+            return self._generate_array_literal(ctx)
+        if isinstance(ctx.target_type, TupleT):
+            return self._generate_tuple_literal(ctx)
+        if isinstance(ctx.target_type, StructT):
+            return self._generate_struct_literal(ctx)
         value = self.literal_generator.generate(ctx.target_type)
         return ast_builder.literal(value, ctx.target_type)
+
+    def _generate_array_literal(self, ctx: ExprGenCtx) -> ast.List:
+        target_type = ctx.target_type
+        assert isinstance(target_type, (SArrayT, DArrayT))
+
+        if isinstance(target_type, DArrayT):
+            max_len = target_type.length
+            if self.rng.random() < 0.01:
+                length = self.rng.randint(0, max_len)
+            else:
+                length = self.rng.randint(0, min(10, max_len))
+        else:
+            length = target_type.length
+
+        next_depth = self.child_depth(ctx.depth)
+        elements = [
+            self.generate(
+                target_type.value_type,
+                ctx.context,
+                next_depth,
+                allow_tuple_literal=ctx.allow_tuple_literal,
+            )
+            for _ in range(length)
+        ]
+        node = ast.List(elements=elements)
+        node._metadata = {"type": target_type}
+        return node
+
+    def _generate_tuple_literal(self, ctx: ExprGenCtx) -> ast.Tuple:
+        target_type = ctx.target_type
+        assert isinstance(target_type, TupleT)
+
+        next_depth = self.child_depth(ctx.depth)
+        elements = [
+            self.generate(
+                member_type,
+                ctx.context,
+                next_depth,
+                allow_tuple_literal=ctx.allow_tuple_literal,
+            )
+            for member_type in target_type.member_types
+        ]
+        node = ast.Tuple(elements=elements)
+        node._metadata = {"type": target_type}
+        return node
+
+    def _generate_struct_literal(self, ctx: ExprGenCtx) -> ast.Call:
+        target_type = ctx.target_type
+        assert isinstance(target_type, StructT)
+
+        call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
+        next_depth = self.child_depth(ctx.depth)
+
+        for field_name, field_type in target_type.members.items():
+            field_expr = self.generate(
+                field_type,
+                ctx.context,
+                next_depth,
+                allow_tuple_literal=ctx.allow_tuple_literal,
+            )
+            keyword = ast.keyword(arg=field_name, value=field_expr)
+            call_node.keywords.append(keyword)
+
+        call_node._metadata = {"type": target_type}
+        return call_node
 
     @strategy(
         name="expr.env_var",
@@ -1168,22 +1239,7 @@ class ExprGenerator(BaseGenerator):
         type_classes=(StructT,),
     )
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
-        target_type = ctx.target_type
-        assert isinstance(target_type, StructT)
-
-        # Create the struct constructor call
-        call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
-
-        for field_name, field_type in target_type.members.items():
-            field_expr = self.generate(
-                field_type, ctx.context, self.child_depth(ctx.depth)
-            )
-
-            keyword = ast.keyword(arg=field_name, value=field_expr)
-            call_node.keywords.append(keyword)
-
-        call_node._metadata["type"] = target_type
-        return call_node
+        return self._generate_struct_literal(ctx)
 
     @strategy(
         name="expr.func_call",
