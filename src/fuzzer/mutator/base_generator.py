@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 from vyper.ast import nodes as ast
 
@@ -13,6 +13,9 @@ from fuzzer.mutator.strategy import (
     StrategyExecutor,
     register_decorated,
 )
+
+
+T = TypeVar("T")
 
 
 class BaseGenerator(ABC):
@@ -46,6 +49,34 @@ class BaseGenerator(ABC):
         if self.at_max_depth(depth):
             return False
         return self.rng.random() < self.depth_cfg.decay_base ** depth
+
+    def _retry(
+        self,
+        *,
+        make_candidate: Callable[[], T],
+        reject_if: Callable[[T], bool],
+        retries: int,
+        fallback: Optional[Callable[[], T]] = None,
+    ) -> T:
+        attempts = max(0, retries)
+        if attempts == 0 and fallback is not None:
+            return fallback()
+
+        if attempts == 0:
+            attempts = 1
+
+        last: Optional[T] = None
+        for _ in range(attempts):
+            candidate = make_candidate()
+            last = candidate
+            if not reject_if(candidate):
+                return candidate
+
+        if fallback is not None:
+            return fallback()
+        if last is None:
+            raise RuntimeError("retry produced no candidates")
+        return last
 
     @abstractmethod
     def generate(self, *args, **kwargs) -> ast.VyperNode:

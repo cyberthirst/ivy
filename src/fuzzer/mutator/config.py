@@ -18,6 +18,7 @@ class ExprGeneratorConfig:
 
     # Terminal generation
     terminal_var_ref_prob: float = 0.95  # Prefer var refs over literals
+    nonconst_expr_retries: int = 3  # Retries for non-constant expressions
 
     # Strategy weights
     literal_weight: float = 0.01

@@ -116,6 +116,7 @@ class ExprGenerator(BaseGenerator):
         depth: int = 0,
         *,
         allow_tuple_literal: bool = False,
+        allow_recursion: bool = False,
     ) -> ast.VyperNode:
         ctx = ExprGenCtx(
             target_type=target_type,
@@ -126,7 +127,7 @@ class ExprGenerator(BaseGenerator):
         )
 
         # Use tag-based filtering for terminal vs recursive strategies
-        if self.should_continue(depth):
+        if allow_recursion or self.should_continue(depth):
             include_tags = ("expr",)
         else:
             include_tags = ("expr", "terminal")
@@ -161,6 +162,34 @@ class ExprGenerator(BaseGenerator):
             expr = self.generate(target_type, context, depth)
             if not constant_folds_to_zero(expr, context.constants):
                 return expr
+
+    def generate_nonconstant_expr(
+        self,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        *,
+        allow_tuple_literal: bool = False,
+        allow_recursion: bool = False,
+        retries: Optional[int] = None,
+    ) -> ast.VyperNode:
+        def reject_if(expr: ast.VyperNode) -> bool:
+            status, _ = fold_constant_expression_status(expr, context.constants)
+            return status != "non_constant"
+
+        attempts = self.cfg.nonconst_expr_retries if retries is None else retries
+
+        return self._retry(
+            make_candidate=lambda: self.generate(
+                target_type,
+                context,
+                depth,
+                allow_tuple_literal=allow_tuple_literal,
+                allow_recursion=allow_recursion,
+            ),
+            reject_if=reject_if,
+            retries=attempts,
+        )
 
     # Applicability/weight helpers
 
@@ -771,11 +800,12 @@ class ExprGenerator(BaseGenerator):
         reject_if: Callable[[ast.VyperNode, int], bool],
         retries: int = 3,
     ) -> ast.VyperNode:
-        for _ in range(retries):
-            candidate = make_candidate()
-            if not reject_if(candidate, seq_length):
-                return candidate
-        return fallback()
+        return self._retry(
+            make_candidate=make_candidate,
+            reject_if=lambda candidate: reject_if(candidate, seq_length),
+            retries=retries,
+            fallback=fallback,
+        )
 
     def _static_index_is_invalid_constant(
         self, idx_expr: ast.VyperNode, _seq_length: int
