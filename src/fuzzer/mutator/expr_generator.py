@@ -75,6 +75,7 @@ class ExprGenCtx:
     depth: int
     gen: ExprGenerator
     allow_tuple_literal: bool
+    allow_empty_list: bool = True
 
 
 class ExprGenerator(BaseGenerator):
@@ -117,6 +118,7 @@ class ExprGenerator(BaseGenerator):
         *,
         allow_tuple_literal: bool = False,
         allow_recursion: bool = False,
+        allow_empty_list: bool = True,
     ) -> ast.VyperNode:
         ctx = ExprGenCtx(
             target_type=target_type,
@@ -124,6 +126,7 @@ class ExprGenerator(BaseGenerator):
             depth=depth,
             gen=self,
             allow_tuple_literal=allow_tuple_literal,
+            allow_empty_list=allow_empty_list,
         )
 
         # Use tag-based filtering for terminal vs recursive strategies
@@ -503,10 +506,11 @@ class ExprGenerator(BaseGenerator):
 
         if isinstance(target_type, DArrayT):
             max_len = target_type.length
+            min_len = 0 if ctx.allow_empty_list else 1
             if self.rng.random() < 0.01:
-                length = self.rng.randint(0, max_len)
+                length = self.rng.randint(min_len, max_len)
             else:
-                length = self.rng.randint(0, min(10, max_len))
+                length = self.rng.randint(min_len, min(10, max_len))
         else:
             length = target_type.length
 
@@ -517,6 +521,7 @@ class ExprGenerator(BaseGenerator):
                 ctx.context,
                 next_depth,
                 allow_tuple_literal=ctx.allow_tuple_literal,
+                allow_empty_list=False,
             )
             for _ in range(length)
         ]
@@ -724,12 +729,14 @@ class ExprGenerator(BaseGenerator):
             ctx.context,
             next_depth,
             allow_tuple_literal=allow_tuple_literal,
+            allow_empty_list=False,
         )
         orelse = self.generate(
             ctx.target_type,
             ctx.context,
             next_depth,
             allow_tuple_literal=allow_tuple_literal,
+            allow_empty_list=False,
         )
 
         node = ast.IfExp(test=test, body=body, orelse=orelse)
