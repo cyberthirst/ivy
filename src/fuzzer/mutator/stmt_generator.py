@@ -18,7 +18,7 @@ from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability,
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.ast_utils import ast_equivalent
+from fuzzer.mutator.ast_utils import ast_equivalent, body_is_terminated
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.type_utils import is_dereferenceable
 from fuzzer.mutator.dereference_utils import (
@@ -330,7 +330,7 @@ class StatementGenerator(BaseGenerator):
             func_type = getattr(parent, "_metadata", {}).get("func_type")
             return_type = getattr(func_type, "return_type", None)
 
-            if return_type is not None and not self.scope_is_terminated(body):
+            if return_type is not None and not body_is_terminated(body):
                 ret_expr = self.expr_generator.generate(
                     return_type,
                     context,
@@ -473,20 +473,13 @@ class StatementGenerator(BaseGenerator):
         return if_node
 
     # TODO add current scope - what if it's module scope
-    def scope_is_terminated(self, body: list) -> bool:
-        if not body:
-            return False
-
-        last_stmt = body[-1]
-        return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return))
-
     def _append_loop_terminator(
         self,
         body: list,
         *,
         rng: Optional[random.Random] = None,
     ) -> None:
-        if self.scope_is_terminated(body):
+        if body_is_terminated(body):
             return
 
         if body and isinstance(body[-1], ast.Pass):
@@ -536,6 +529,7 @@ class StatementGenerator(BaseGenerator):
         return [
             (name, var_info)
             for name, var_info in writable_vars
+            if var_info.modifiability == Modifiability.MODIFIABLE
             if can_reach_augassignable(var_info.typ, max_steps)
         ]
 
@@ -560,6 +554,7 @@ class StatementGenerator(BaseGenerator):
         return [
             (name, var_info)
             for name, var_info in writable_vars
+            if var_info.modifiability == Modifiability.MODIFIABLE
             if self._can_reach_dynarray(var_info.typ)
         ]
 
@@ -665,21 +660,47 @@ class StatementGenerator(BaseGenerator):
         base = ast_builder.var_ref(var_name, var_info)
         base._metadata = {"type": var_info.typ, "varinfo": var_info}
 
-        resolved = self._resolve_target_with_deref(
-            ctx,
-            base,
-            var_info.typ,
-            predicate=lambda t: not isinstance(t, HashMapT),
-        )
-        if resolved is None:
-            return None
-        target_node, target_type = resolved
+        if var_info.modifiability == Modifiability.RUNTIME_CONSTANT:
+            target_node = base
+            target_type = var_info.typ
+        else:
+            resolved = self._resolve_target_with_deref(
+                ctx,
+                base,
+                var_info.typ,
+                predicate=lambda t: not isinstance(t, HashMapT),
+            )
+            if resolved is None:
+                return None
+            target_node, target_type = resolved
 
         value = self._generate_assign_value(
             ctx.context, target_node, target_type, rng=ctx.gen.rng
         )
 
+        if var_info.modifiability == Modifiability.RUNTIME_CONSTANT:
+            ctx.context.mark_immutable_assigned(var_name)
+
         return ast.Assign(targets=[target_node], value=value)
+
+    def generate_immutable_assignments(
+        self,
+        context: GenerationContext,
+        immutables: list[tuple[str, VarInfo]],
+    ) -> list[ast.Assign]:
+        assignments = []
+        for name, var_info in immutables:
+            target = ast_builder.var_ref(name, var_info)
+            target._metadata = {"type": var_info.typ, "varinfo": var_info}
+            value_expr = self.expr_generator.generate(
+                var_info.typ,
+                context,
+                depth=self.expr_generator.root_depth(),
+                allow_tuple_literal=False,
+            )
+            assignments.append(ast.Assign(targets=[target], value=value_expr))
+            context.mark_immutable_assigned(name)
+        return assignments
 
     @strategy(
         name="stmt.vardecl",
@@ -692,6 +713,12 @@ class StatementGenerator(BaseGenerator):
     ) -> Union[ast.VariableDecl, ast.AnnAssign]:
         var_decl, var_name, var_info = self.generate_vardecl(ctx.context, ctx.parent)
         self.add_variable(ctx.context, var_name, var_info)
+        if (
+            ctx.context.is_module_scope
+            and var_info.location == DataLocation.CODE
+            and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
+        ):
+            ctx.context.immutables_to_init[var_name] = var_info
         self._register_constant_value(ctx.context, var_name, var_info, var_decl)
         return var_decl
 

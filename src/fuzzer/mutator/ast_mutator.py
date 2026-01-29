@@ -2,6 +2,7 @@ import copy
 import random
 from typing import List, Optional
 from dataclasses import dataclass, field
+from contextlib import nullcontext
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
@@ -17,6 +18,7 @@ from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
+from fuzzer.mutator.ast_utils import body_is_terminated
 from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
@@ -164,7 +166,14 @@ class AstMutator(VyperNodeTransformer):
             **kwargs,
         )
 
+    def generic_visit(self, node):
+        if self.generate:
+            return node
+        return super().generic_visit(node)
+
     def _try_mutate(self, node: ast.VyperNode, **ctx_kwargs) -> ast.VyperNode:
+        if self.generate:
+            return node
         if not self.should_mutate(node):
             return node
         return self._mutation_engine.mutate(self._build_ctx(node, **ctx_kwargs))
@@ -174,6 +183,10 @@ class AstMutator(VyperNodeTransformer):
 
         if self.generate:
             new_root = self._generate_module()
+            self._maybe_create_init(new_root)
+            self._dispatch_pending_functions(new_root)
+            self._add_interface_definitions(new_root)
+            return new_root
         else:
             # Deep copy the root to avoid modifying the original
             new_root = copy.deepcopy(root)
@@ -186,9 +199,6 @@ class AstMutator(VyperNodeTransformer):
         # Pass 2: visit and mutate selected nodes
         new_root = self.visit(new_root)
         assert isinstance(new_root, ast.Module)
-
-        # Handle immutables initialization after mutation
-        self._ensure_init_with_immutables(new_root)
 
         return new_root
 
@@ -221,7 +231,6 @@ class AstMutator(VyperNodeTransformer):
             visibility=FunctionVisibility.EXTERNAL,
         )
         if func_def is not None:
-            module.body.append(func_def)
             functions_added += 1
 
         for _ in range(num_funcs - functions_added):
@@ -235,7 +244,7 @@ class AstMutator(VyperNodeTransformer):
                 initial=True,
             )
             if func_def is not None:
-                module.body.append(func_def)
+                functions_added += 1
 
         return module
 
@@ -275,9 +284,11 @@ class AstMutator(VyperNodeTransformer):
         )
 
     def visit_Module(self, node: ast.Module):
+        assert not self.generate
         self._preprocess_module(node)
         node = self._try_mutate(node)
         node = super().generic_visit(node)
+        self._maybe_create_init(node)
         self._dispatch_pending_functions(node)
         self._add_interface_definitions(node)
         return node
@@ -302,8 +313,36 @@ class AstMutator(VyperNodeTransformer):
             # Insert at beginning of module body
             node.body = interface_defs + node.body
 
+    def _module_has_init(self, node: ast.Module) -> bool:
+        if "__init__" in self.function_registry.functions:
+            return True
+        return any(
+            isinstance(item, ast.FunctionDef) and item.name == "__init__"
+            for item in node.body
+        )
+
+    def _maybe_create_init(self, node: ast.Module) -> None:
+        has_immutables = bool(self.context.immutables_to_init)
+        if self.generate:
+            if not has_immutables and self.rng.random() >= 0.5:
+                return
+            self.function_registry.create_init(
+                type_generator=self.type_generator,
+                max_args=6,
+            )
+            return
+
+        if not has_immutables or self._module_has_init(node):
+            return
+        self.function_registry.create_init(
+            type_generator=self.type_generator,
+            max_args=6,
+            payable=False,
+        )
+
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
+        assert not self.generate
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 # Register existing function in the registry
@@ -365,6 +404,8 @@ class AstMutator(VyperNodeTransformer):
 
         # Set current function for cycle detection
         self.function_registry.set_current_function(node.name)
+        is_init = node.name == "__init__"
+        init_ctx = self.context.init_assignments() if is_init else nullcontext()
 
         with self.context.new_scope(ScopeType.FUNCTION):
             # Get function arguments from the function type
@@ -375,6 +416,7 @@ class AstMutator(VyperNodeTransformer):
             with (
                 self.context.mutability(expr_mut),
                 self.context.function_mutability(func_state_mut),
+                init_ctx,
             ):
                 for arg in func_type.arguments:
                     if func_type.is_internal:
@@ -411,6 +453,8 @@ class AstMutator(VyperNodeTransformer):
                 # Visit children within mutability context so body mutations
                 # respect @pure/@view constraints
                 node = super().generic_visit(node)
+                if is_init:
+                    self._inject_missing_immutable_assignments(node)
 
         self.function_registry.set_current_function(None)
 
@@ -443,7 +487,10 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Assign(self, node: ast.Assign):
-        node.target = self.visit(node.target)
+        if hasattr(node, "targets"):
+            node.targets = [self.visit(target) for target in node.targets]
+        elif hasattr(node, "target"):
+            node.target = self.visit(node.target)
         node.value = self.visit(node.value)
         return self._try_mutate(node, inferred_type=self._type_of(node.value))
 
@@ -496,44 +543,19 @@ class AstMutator(VyperNodeTransformer):
         # Pass operand type for mutation decisions (result type is always BoolT)
         return self._try_mutate(node, inferred_type=self._type_of(node.left))
 
-    def _ensure_init_with_immutables(self, module: ast.Module):
-        if not self.context.immutables_to_init:
+    def _inject_missing_immutable_assignments(self, node: ast.FunctionDef) -> None:
+        missing = self.context.remaining_immutable_items()
+        if not missing:
             return
-
-        # Find existing __init__ function
-        init_func = None
-        for node in module.body:
-            if isinstance(node, ast.FunctionDef) and node.name == "__init__":
-                init_func = node
-                break
-
-        # Create __init__ if it doesn't exist
-        if init_func is None:
-            deploy_decorator = ast.Name(id="deploy")
-
-            init_func = ast.FunctionDef(
-                name="__init__",
-                args=ast.arguments(args=[], defaults=[]),
-                body=[],
-                decorator_list=[deploy_decorator],
-                returns=None,
-            )
-            module.body.append(init_func)
-
-        # Generate assignment statements for each immutable
-        for name, var_info in self.context.immutables_to_init:
-            value_expr = self.expr_generator.generate(
-                var_info.typ,
-                self.context,
-                depth=self.expr_generator.root_depth(),
-                allow_tuple_literal=False,
-            )
-
-            assign = ast.Assign(targets=[ast.Name(id=name)], value=value_expr)
-
-            init_func.body.append(assign)
-
-        assert init_func.body
+        assignments = self.stmt_generator.generate_immutable_assignments(
+            self.context, missing
+        )
+        if not assignments:
+            return
+        insert_pos = len(node.body)
+        if body_is_terminated(node.body):
+            insert_pos = max(0, insert_pos - 1)
+        node.body[insert_pos:insert_pos] = assignments
 
     def mutate_source_with_compiler_data(
         self, compiler_data: CompilerData

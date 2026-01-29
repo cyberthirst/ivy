@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import Enum, auto
@@ -49,12 +49,14 @@ class GenerationContext:
     scope_stack: List[Scope] = field(default_factory=list)
     all_vars: Dict[str, VarInfo] = field(default_factory=dict)
     constants: Dict[str, Any] = field(default_factory=dict)
-    immutables_to_init: List[tuple[str, VarInfo]] = field(default_factory=list)
+    immutables_to_init: Dict[str, VarInfo] = field(default_factory=dict)
     compilation_xfails: List[XFailExpectation] = field(default_factory=list)
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
     current_mutability: ExprMutability = ExprMutability.STATEFUL
     current_function_mutability: StateMutability = StateMutability.NONPAYABLE
     current_access_mode: AccessMode = AccessMode.READ
+    in_init: bool = False
+    remaining_immutables: Set[str] = field(default_factory=set)
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
@@ -75,12 +77,30 @@ class GenerationContext:
         self.current_scope.vars[name] = var_info
         self.all_vars[name] = var_info
 
-        # Track immutables that need initialization in __init__
-        if (
-            var_info.location == DataLocation.CODE
-            and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
-        ):
-            self.immutables_to_init.append((name, var_info))
+    def mark_immutable_assigned(self, name: str) -> None:
+        self.remaining_immutables.discard(name)
+
+    def remaining_immutable_items(self) -> list[tuple[str, VarInfo]]:
+        return [
+            (name, self.immutables_to_init[name])
+            for name in self.remaining_immutables
+            if name in self.immutables_to_init
+        ]
+
+    @contextmanager
+    def init_assignments(self, immutables: Optional[Iterable[str]] = None):
+        prev_in_init = self.in_init
+        prev_remaining = self.remaining_immutables
+        self.in_init = True
+        if immutables is None:
+            self.remaining_immutables = set(self.immutables_to_init.keys())
+        else:
+            self.remaining_immutables = set(immutables)
+        try:
+            yield
+        finally:
+            self.in_init = prev_in_init
+            self.remaining_immutables = prev_remaining
 
     def add_constant(self, name: str, value: Any) -> None:
         self.constants[name] = value
@@ -129,7 +149,7 @@ class GenerationContext:
         finally:
             self.current_access_mode = prev
 
-    def _is_var_accessible(self, var_info: VarInfo) -> bool:
+    def _is_var_accessible(self, name: str, var_info: VarInfo) -> bool:
         if self.current_mutability == ExprMutability.CONST:
             if var_info.modifiability != Modifiability.CONSTANT:
                 return False
@@ -143,10 +163,16 @@ class GenerationContext:
             ):
                 return False
 
-        if (
-            self.current_access_mode == AccessMode.WRITE
-            and var_info.modifiability != Modifiability.MODIFIABLE
-        ):
+        if self.current_access_mode == AccessMode.WRITE:
+            if var_info.modifiability == Modifiability.MODIFIABLE:
+                return True
+            if (
+                self.in_init
+                and var_info.location == DataLocation.CODE
+                and var_info.modifiability == Modifiability.RUNTIME_CONSTANT
+                and name in self.remaining_immutables
+            ):
+                return True
             return False
 
         return True
@@ -160,7 +186,7 @@ class GenerationContext:
             if want_type is not None and not want_type.compare_type(var_info.typ):
                 continue
 
-            if not self._is_var_accessible(var_info):
+            if not self._is_var_accessible(name, var_info):
                 continue
 
             candidates.append((name, var_info))
@@ -172,5 +198,5 @@ class GenerationContext:
             (name, var_info)
             for name, var_info in self.all_vars.items()
             if isinstance(var_info.typ, (SArrayT, DArrayT))
-            and self._is_var_accessible(var_info)
+            and self._is_var_accessible(name, var_info)
         ]

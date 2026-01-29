@@ -44,3 +44,10 @@ def ast_equivalent(left: Any, right: Any) -> bool:
         return all(ast_equivalent(left[k], right[k]) for k in left)
 
     return left == right
+
+
+def body_is_terminated(body: list[ast.VyperNode]) -> bool:
+    if not body:
+        return False
+    last_stmt = body[-1]
+    return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise))

@@ -293,14 +293,7 @@ class FunctionRegistry:
             self.dynamic_count += 1
 
         name = self.name_generator.generate()
-
-        # Generate arguments (struct fragments are stored in type_generator)
-        num_args = self.rng.randint(0, max_args)
-        positional_args = []
-        for i in range(num_args):
-            arg_type = type_generator.generate_biased_type(skip={HashMapT}, nesting=1)
-            arg_name = f"arg{i}"
-            positional_args.append(PositionalArg(arg_name, arg_type))
+        positional_args = self._generate_positional_args(type_generator, max_args)
 
         # Choose function properties
         if visibility is None:
@@ -325,17 +318,82 @@ class FunctionRegistry:
         assert mutability_options
         state_mutability = self.rng.choice(mutability_options)
 
-        # Create decorators
-        decorator_list = []
-        if visibility.name.lower() in ["external"]:
-            decorator_list.append(ast.Name(id=visibility.name.lower()))
+        return self._create_function_def(
+            name=name,
+            positional_args=positional_args,
+            return_type=return_type,
+            visibility=visibility,
+            state_mutability=state_mutability,
+        )
 
-        if state_mutability.name.lower() in ["view", "pure", "payable"]:
+    def create_init(
+        self,
+        type_generator,
+        max_args: int = 3,
+        *,
+        payable: Optional[bool] = None,
+    ) -> Optional[ast.FunctionDef]:
+        if "__init__" in self.functions:
+            existing = self.functions["__init__"].ast_def
+            if existing is not None:
+                return existing
+            return None
+
+        if payable is None:
+            state_mutability = self.rng.choice(
+                [StateMutability.NONPAYABLE, StateMutability.PAYABLE]
+            )
+        else:
+            state_mutability = (
+                StateMutability.PAYABLE
+                if payable
+                else StateMutability.NONPAYABLE
+            )
+
+        positional_args = self._generate_positional_args(type_generator, max_args)
+
+        return self._create_function_def(
+            name="__init__",
+            positional_args=positional_args,
+            return_type=None,
+            visibility=FunctionVisibility.DEPLOY,
+            state_mutability=state_mutability,
+        )
+
+    def _generate_positional_args(
+        self, type_generator, max_args: int
+    ) -> List[PositionalArg]:
+        num_args = self.rng.randint(0, max_args)
+        positional_args = []
+        for i in range(num_args):
+            arg_type = type_generator.generate_biased_type(skip={HashMapT}, nesting=1)
+            arg_name = f"arg{i}"
+            positional_args.append(PositionalArg(arg_name, arg_type))
+        return positional_args
+
+    def _create_function_def(
+        self,
+        *,
+        name: str,
+        positional_args: List[PositionalArg],
+        return_type: Optional[VyperType],
+        visibility: FunctionVisibility,
+        state_mutability: StateMutability,
+    ) -> ast.FunctionDef:
+        decorator_list = []
+        if visibility == FunctionVisibility.EXTERNAL:
+            decorator_list.append(ast.Name(id="external"))
+        elif visibility == FunctionVisibility.DEPLOY:
+            decorator_list.append(ast.Name(id="deploy"))
+
+        if state_mutability in (
+            StateMutability.VIEW,
+            StateMutability.PURE,
+            StateMutability.PAYABLE,
+        ):
             decorator_list.append(ast.Name(id=state_mutability.name.lower()))
 
-        # Create arguments AST
         args = ast.arguments(args=[], defaults=[], default=None)
-
         for pos_arg in positional_args:
             arg = ast.arg(
                 arg=pos_arg.name,
@@ -343,16 +401,14 @@ class FunctionRegistry:
             )
             args.args.append(arg)
 
-        # Create the function definition with empty body
         func_def = ast.FunctionDef(
             name=name,
             args=args,
-            body=[],  # Empty body - will be filled by visitor
+            body=[],
             decorator_list=decorator_list,
             returns=ast.Name(id=str(return_type)) if return_type else None,
         )
 
-        # Create ContractFunctionT and attach to AST metadata
         func_t = ContractFunctionT(
             name=name,
             positional_args=positional_args,
@@ -365,7 +421,6 @@ class FunctionRegistry:
         )
 
         func_def._metadata["func_type"] = func_t
-
         self.register_function(func_t)
         return func_def
 
