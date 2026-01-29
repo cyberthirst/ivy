@@ -838,6 +838,10 @@ class StatementGenerator(BaseGenerator):
 
         return iter_node, target_type
 
+    # TODO we should just construct target type and ctx and route through
+    # expr_generator.generate()
+    # many issues though - can't use func. calls, const dynarrays, some ifexprs
+    # as the iterables
     def _generate_array_iter(
         self, ctx: StmtGenCtx
     ) -> tuple[ast.VyperNode, VyperType, Optional[str], Optional[VarInfo]]:
