@@ -420,8 +420,11 @@ class StatementGenerator(BaseGenerator):
         weight="_weight_if",
     )
     def generate_if(self, *, ctx: StmtGenCtx, **_) -> ast.If:
-        test_expr = self.expr_generator.generate(
-            BoolT(), ctx.context, depth=self.expr_generator.root_depth()
+        test_expr = self.expr_generator.generate_nonconstant_expr(
+            BoolT(),
+            ctx.context,
+            depth=self.expr_generator.root_depth(),
+            allow_recursion=True,
         )
 
         if_node = ast.If(test=test_expr, body=[], orelse=[])
