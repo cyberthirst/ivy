@@ -198,5 +198,11 @@ class GenerationContext:
             (name, var_info)
             for name, var_info in self.all_vars.items()
             if isinstance(var_info.typ, (SArrayT, DArrayT))
+            # Constant DynArrays fold to literal lists and fail in for-loops.
+            # https://github.com/vyperlang/vyper/issues/4823
+            and not (
+                var_info.modifiability == Modifiability.CONSTANT
+                and isinstance(var_info.typ, DArrayT)
+            )
             and self._is_var_accessible(name, var_info)
         ]
