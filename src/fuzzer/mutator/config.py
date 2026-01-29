@@ -49,17 +49,13 @@ class ExprGeneratorConfig:
     subscript_hashmap_chain_max_steps: int = 1
 
     # Index generation for sequences
-    index_guard_prob: float = 0.60  # Use len()-guarded index
-    index_random_prob: float = 0.35  # Use random expression
-    # Remaining (0.05) -> OOB literal that triggers compilation xfail
+    index_guard_prob: float = 0.60  # Use len()-guarded index; remainder uses random expr
 
     # DynArray index biases
     dynarray_small_literal_in_guard_prob: float = 0.75
     dynarray_last_index_in_guard_prob: float = 0.2
     dynarray_small_literal_in_random_prob: float = 0.6
 
-    # OOB literal generation
-    oob_cap_vs_cap_plus_one_prob: float = 0.5
 
     # Function call generation
     use_builtin_when_both_available_prob: float = 0.4

@@ -85,20 +85,3 @@ def build_dyn_last_index(len_call: ast.VyperNode) -> ast.BinOp:
     max_len = ast.Call(func=ast.Name(id="max"), args=[len_call, one], keywords=[])
     max_len._metadata = {"type": INDEX_TYPE}
     return ast_builder.uint256_binop(max_len, ast.Sub(), one)
-
-
-def pick_oob_value(seq_length: int, rng: random.Random, cap_prob: float) -> int:
-    """Pick an out-of-bounds index value.
-
-    Args:
-        seq_length: The declared length/capacity of the sequence
-        rng: Random number generator
-        cap_prob: Probability of choosing exactly seq_length vs seq_length+1
-
-    Returns:
-        An index value >= seq_length (guaranteed out of bounds)
-    """
-    if rng.random() < cap_prob:
-        return seq_length if seq_length > 0 else 1
-    else:
-        return seq_length + 1 if seq_length > 0 else 1

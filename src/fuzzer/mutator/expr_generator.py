@@ -60,10 +60,8 @@ from fuzzer.mutator.indexing import (
     build_len_call,
     build_guarded_index,
     build_dyn_last_index,
-    pick_oob_value,
     INDEX_TYPE,
 )
-from fuzzer.xfail import XFailExpectation
 from fuzzer.type_generator import TypeGenerator
 from ivy.builtins.builtins import builtin_convert
 
@@ -781,14 +779,10 @@ class ExprGenerator(BaseGenerator):
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
         cfg = self.cfg
-        roll = self.rng.random()
-
-        if roll < cfg.index_guard_prob:
+        if self.rng.random() < cfg.index_guard_prob:
             return self._generate_guarded_index(base_node, seq_t, context, depth)
-        elif roll < cfg.index_guard_prob + cfg.index_random_prob:
-            return self._generate_random_index(seq_t, context, depth)
         else:
-            return self._generate_oob_index(seq_t, context)
+            return self._generate_random_index(seq_t, context, depth)
 
     def _generate_guarded_index(
         self,
@@ -900,23 +894,6 @@ class ExprGenerator(BaseGenerator):
         if status != "value" or not isinstance(folded, ast.Int):
             return False
         return folded.value < 0 or folded.value >= seq_length
-
-    def _generate_oob_index(
-        self,
-        seq_t: _SequenceT,
-        context: GenerationContext,
-    ) -> ast.Int:
-        """Generate an out-of-bounds literal index (triggers compilation xfail)."""
-        cfg = self.cfg
-        val = pick_oob_value(seq_t.length, self.rng, cfg.oob_cap_vs_cap_plus_one_prob)
-
-        context.compilation_xfails.append(
-            XFailExpectation(
-                kind="compilation",
-                reason="generated out-of-bounds array index",
-            )
-        )
-        return ast_builder.literal(val, INDEX_TYPE)
 
     def _apply_dereference_step(
         self,
