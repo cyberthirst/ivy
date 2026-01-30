@@ -5,7 +5,8 @@ Ivy implementation of the scenario runner.
 from typing import Any, Dict, List, Optional
 
 import ivy
-from ivy.frontend.loader import loads_from_solc_json, loads
+from ivy.frontend.loader import loads_from_solc_json, loads_partial
+from ivy.frontend.vyper_contract import VyperContract
 from ivy.types import Address
 
 from fuzzer.runner.base_scenario_runner import BaseScenarioRunner, ScenarioResult
@@ -26,31 +27,41 @@ class IvyScenarioRunner(BaseScenarioRunner):
         self._original_eoa = None
         self.no_solc_json = no_solc_json
 
-    def _deploy_from_source(
+    def _compile_from_source(
         self,
         source: str,
         solc_json: Optional[Dict[str, Any]],
+        compiler_settings: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        if (self.no_solc_json and source) or solc_json is None:
+            compiler_data = loads_partial(
+                source, compiler_args=compiler_settings, get_compiler_data=True
+            )
+        else:
+            compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
+
+        # Force initcode compilation to surface compile-time errors here.
+        _ = compiler_data.bytecode
+
+        return compiler_data
+
+    def _deploy_compiled(
+        self,
+        compiled: Any,
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
         sender = self._get_sender(sender)
-
         with self.env.prank(sender):
             # Ensure deployer has enough balance
             self.env.set_balance(
                 self.env.eoa,
                 self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
             )
-            if (self.no_solc_json and source) or solc_json is None:
-                contract = loads(
-                    source, *args, compiler_args=compiler_settings, **kwargs
-                )
-            else:
-                contract = loads_from_solc_json(solc_json, *args, **kwargs)
-
-            return contract
+            filename = getattr(compiled, "contract_path", None)
+            return VyperContract(compiled, *args, filename=filename, **kwargs)
 
     def _call_method(
         self,

@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
 
+from fuzzer.compilation import CompilationOutcome, classify_compilation_error
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import (
     Trace,
@@ -18,12 +19,11 @@ from fuzzer.trace_types import (
     ClearTransientStorageTrace,
     Env,
 )
-from vyper.exceptions import VyperException, VyperInternalException, ParserException
 from fuzzer.xfail import XFailExpectation
 
 
 @dataclass
-class BaseResult:
+class BaseResult(ABC):
     """Base result class with common fields."""
 
     success: bool
@@ -31,15 +31,10 @@ class BaseResult:
     storage_dump: Optional[Dict[str, Any]] = None
 
     @property
+    @abstractmethod
     def is_runtime_failure(self) -> bool:
-        """Check if this is a runtime failure (not compilation-related)."""
-        if self.success:
-            return False
-        # Runtime failure if error exists and is NOT a Vyper compilation error
-        # Note: ParserException doesn't inherit from VyperException but is a compilation error
-        return self.error is not None and not isinstance(
-            self.error, (VyperException, ParserException)
-        )
+        """Check if this is a runtime failure."""
+        raise NotImplementedError
 
     def _format_error(self) -> Optional[str]:
         """Format error with type, message, and last 3 traceback frames."""
@@ -74,30 +69,33 @@ class DeploymentResult(BaseResult):
         None  # Expected address where contract was deployed
     )
     source_code: Optional[str] = None  # Source code that was attempted to deploy
+    error_phase: Optional[str] = None  # "compile" or "init"
+
+    @property
+    def is_runtime_failure(self) -> bool:
+        """Check if this is a runtime failure (init error)."""
+        if self.success or self.error is None:
+            return False
+        return self.error_phase != "compile"
 
     @property
     def is_compilation_failure(self) -> bool:
         """Check if this is a compilation failure (not runtime)."""
-        if self.success:
+        if self.success or self.error is None or self.error_phase != "compile":
             return False
-
-        # ParserException doesn't inherit from VyperException but is a compilation error
-        if self.error is not None and isinstance(self.error, ParserException):
-            return True
-
         return (
-            self.error is not None
-            and isinstance(self.error, VyperException)
-            and not isinstance(self.error, VyperInternalException)
+            classify_compilation_error(self.error)
+            is CompilationOutcome.COMPILATION_FAILURE
         )
 
     @property
     def is_compiler_crash(self) -> bool:
         """Check if this is a compiler crash (internal error)."""
-        if self.success:
+        if self.success or self.error is None or self.error_phase != "compile":
             return False
-
-        return self.error is not None and isinstance(self.error, VyperInternalException)
+        return (
+            classify_compilation_error(self.error) is CompilationOutcome.COMPILER_CRASH
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
@@ -106,6 +104,7 @@ class DeploymentResult(BaseResult):
             if self.success
             else None
         )
+        result["error_phase"] = self.error_phase
         return result
 
 
@@ -115,6 +114,11 @@ class CallResult(BaseResult):
 
     output: Any = None
     contract: Optional[Any] = None
+
+    @property
+    def is_runtime_failure(self) -> bool:
+        """Calls never compile; any error is runtime."""
+        return not self.success and self.error is not None
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
@@ -175,16 +179,25 @@ class BaseScenarioRunner(ABC):
         self.compiler_settings = compiler_settings or {"enable_decimals": True}
 
     @abstractmethod
-    def _deploy_from_source(
+    def _compile_from_source(
         self,
         source: str,
         solc_json: Optional[Dict[str, Any]],
+        compiler_settings: Optional[Dict[str, Any]] = None,
+    ) -> Any:
+        """Compile source and return a compiled artifact."""
+        pass
+
+    @abstractmethod
+    def _deploy_compiled(
+        self,
+        compiled: Any,
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        """Deploy a contract from source. Must be implemented by subclasses."""
+        """Deploy a contract from a compiled artifact. Must be implemented by subclasses."""
         pass
 
     @abstractmethod
@@ -366,14 +379,35 @@ class BaseScenarioRunner(ABC):
                 **self.compiler_settings,
             }
 
-            contract = self._deploy_from_source(
-                source=source_to_deploy,
-                solc_json=trace.solc_json,
-                args=args,
-                kwargs=kwargs,
-                sender=trace.env.tx.origin if trace.env else None,
-                compiler_settings=merged_settings,
-            )
+            try:
+                compiled = self._compile_from_source(
+                    source=source_to_deploy,
+                    solc_json=trace.solc_json,
+                    compiler_settings=merged_settings,
+                )
+            except Exception as e:
+                return DeploymentResult(
+                    success=False,
+                    error=e,
+                    source_code=source_to_deploy,
+                    error_phase="compile",
+                )
+
+            try:
+                contract = self._deploy_compiled(
+                    compiled=compiled,
+                    args=args,
+                    kwargs=kwargs,
+                    sender=trace.env.tx.origin if trace.env else None,
+                    compiler_settings=merged_settings,
+                )
+            except Exception as e:
+                return DeploymentResult(
+                    success=False,
+                    error=e,
+                    source_code=source_to_deploy,
+                    error_phase="init",
+                )
 
             # Store the deployed contract by its address
             deployed_addr = getattr(trace, "deployed_address", None)
@@ -398,7 +432,10 @@ class BaseScenarioRunner(ABC):
 
         except Exception as e:
             return DeploymentResult(
-                success=False, error=e, source_code=source_to_deploy
+                success=False,
+                error=e,
+                source_code=source_to_deploy,
+                error_phase="init",
             )
 
     def _execute_call(
