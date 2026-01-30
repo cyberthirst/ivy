@@ -40,7 +40,6 @@ from fuzzer.reporter import FuzzerReporter
 from fuzzer.issue_filter import IssueFilter
 
 from vyper.compiler.phases import CompilerData
-from vyper.exceptions import CompilerPanic, VyperException
 
 
 DEFAULT_AST_MUTATIONS = 8
@@ -105,17 +104,10 @@ class BaseFuzzer:
                 CompilerData,
                 loads_from_solc_json(trace.solc_json, get_compiler_data=True),
             )
-        except CompilerPanic as e:
-            logging.error(f"Compiler panic: {e}")
-            self.reporter.record_compiler_crash()
-            return None
-        except VyperException as e:
-            logging.debug(f"Compilation failure (VyperException): {e}")
-            self.reporter.record_compilation_failure()
-            return None
         except Exception as e:
-            logging.error(f"Compiler crash ({type(e).__name__}): {e}")
-            self.reporter.record_compiler_crash()
+            logging.debug(
+                f"Failed to load compiler data ({type(e).__name__}): {e}"
+            )
             return None
 
     def derive_scenario_seed(self, base: str, num: int) -> int:

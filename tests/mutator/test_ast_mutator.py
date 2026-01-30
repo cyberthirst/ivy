@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 from vyper.compiler.phases import CompilerData
-from vyper.exceptions import VyperException, VyperInternalException
 
+from fuzzer.compilation import compile_vyper
 from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
 from fuzzer.trace_types import DeploymentTrace
 from fuzzer.mutator.ast_mutator import AstMutator
@@ -116,43 +116,39 @@ def test_mutator_produces_valid_code(source_code: str, test_id: str):
     mutated_source = mutation_result.source
     compilation_xfails = mutation_result.compilation_xfails
 
-    # Try to parse/compile the mutated source to get its AST
-    # This may fail if compilation_xfails is set
     if not compilation_xfails:
         # No expected compilation failures - must compile successfully
-        try:
-            mutated_compiler_data = CompilerData(mutated_source)
-            mutated_ast_dict = _strip(
-                mutated_compiler_data.annotated_vyper_module.to_dict()
-            )
-        except VyperException as e:
-            # ICE (internal compiler error) is considered a success - we found a compiler bug
-            if isinstance(e, VyperInternalException):
-                return
+        result = compile_vyper(mutated_source)
 
+        if result.is_compiler_crash:
+            return
+
+        if result.is_compilation_failure:
             pytest.fail(
                 f"Mutated code failed to compile but no compilation_xfails was set.\n"
                 f"seed={seed}, max_mutations={max_mutations}\n"
-                f"Error: {e}\n"
+                f"Error: {result.error}\n"
                 f"Mutated source:\n{mutated_source}"
             )
 
         # Something must have changed
+        assert result.compiler_data is not None
+        mutated_ast_dict = _strip(
+            result.compiler_data.annotated_vyper_module.to_dict()
+        )
         assert original_ast_dict != mutated_ast_dict, (
             f"No mutation occurred - AST unchanged. "
             f"seed={seed}, max_mutations={max_mutations}"
         )
     else:
         # Compilation failures expected - verify compilation does fail
-        try:
-            CompilerData(mutated_source)
-            # If we get here, compilation succeeded when it should have failed
+        result = compile_vyper(mutated_source)
+
+        if result.is_success:
             pytest.fail(
                 f"Mutated code compiled successfully but compilation_xfails was set.\n"
                 f"seed={seed}, max_mutations={max_mutations}\n"
                 f"Expected failures: {compilation_xfails}\n"
                 f"Mutated source:\n{mutated_source}"
             )
-        except VyperException:
-            # Expected - compilation failed as predicted
-            pass
+        # Expected - compilation failed or crashed

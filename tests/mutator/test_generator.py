@@ -1,10 +1,9 @@
 import random
 
 import pytest
-from vyper.compiler.phases import CompilerData
 from vyper.ast import nodes as ast
-from vyper.exceptions import VyperException, VyperInternalException
 
+from fuzzer.compilation import compile_vyper
 from fuzzer.mutator.ast_mutator import AstMutator
 from unparser.unparser import unparse
 
@@ -24,7 +23,7 @@ def test_generator_has_external_function():
 
 
 @pytest.mark.xfail(strict=False)
-@pytest.mark.parametrize("_iteration", range(100))
+@pytest.mark.parametrize("_iteration", range(2000))
 def test_generator_produces_valid_code(_iteration: int):
     seed = random.randint(0, 2**32 - 1)
     rng = random.Random(seed)
@@ -35,18 +34,17 @@ def test_generator_produces_valid_code(_iteration: int):
     if mutator.type_generator.source_fragments:
         source = "\n\n".join(mutator.type_generator.source_fragments) + "\n\n" + source
 
-    try:
-        CompilerData(source).bytecode
-    except VyperException as e:
-        # ICE (internal compiler error) is considered a success - we found a compiler bug
-        if isinstance(e, VyperInternalException):
-            return
+    result = compile_vyper(source)
 
-        if mutator.context.compilation_xfails:
-            return
-        pytest.fail(
-            f"Generated code failed to compile.\n"
-            f"seed={seed}\n"
-            f"Error: {e}\n"
-            f"Generated source:\n{source}"
-        )
+    if result.is_success or result.is_compiler_crash:
+        return
+
+    if mutator.context.compilation_xfails:
+        return
+
+    pytest.fail(
+        f"Generated code failed to compile.\n"
+        f"seed={seed}\n"
+        f"Error: {result.error}\n"
+        f"Generated source:\n{source}"
+    )
