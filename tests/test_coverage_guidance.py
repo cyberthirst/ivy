@@ -114,7 +114,9 @@ def test_gatekeeper_rejects_when_all_boa_configs_fail_compile():
                         trace_type="deployment",
                         trace_index=0,
                         result=DeploymentResult(
-                            success=False, error=ParserException("nope")
+                            success=False,
+                            error=ParserException("nope"),
+                            error_phase="compile",
                         ),
                     )
                 ]
