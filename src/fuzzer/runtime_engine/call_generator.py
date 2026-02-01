@@ -7,9 +7,9 @@ from typing import Any, Dict, Deque, List, Optional, Tuple
 
 from vyper.semantics.types.function import ContractFunctionT
 
-from src.fuzzer.mutator.value_mutator import ValueMutator
-from src.fuzzer.mutator.argument_mutator import ArgumentMutator
-from src.fuzzer.trace_types import CallTrace
+from fuzzer.mutator.value_mutator import ValueMutator
+from fuzzer.mutator.argument_mutator import ArgumentMutator
+from fuzzer.trace_types import CallTrace
 
 
 @dataclass
