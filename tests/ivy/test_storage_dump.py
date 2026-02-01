@@ -32,6 +32,69 @@ def get_values() -> (uint256, uint256):
     assert storage_dump["x"] == transient_dump["t"]
 
 
+def test_transient_storage_dump_without_transient_vars(get_contract):
+    src = """
+val: uint256
+
+@external
+def set_val():
+    self.val = 7
+    """
+    c = get_contract(src)
+    c.set_val()
+
+    storage_dump = c.storage_dump()
+    transient_dump = c.transient_storage_dump()
+
+    assert storage_dump["val"] == 7
+    assert transient_dump == {}
+
+
+def test_transient_storage_dump_defaults_without_writes(get_contract):
+    src = """
+t: transient(uint256)
+s: transient(String[8])
+b: transient(Bytes[8])
+arr: transient(uint256[2])
+
+@external
+def touch():
+    assert self.t == 0
+    assert len(self.s) == 0
+    assert len(self.b) == 0
+    assert self.arr[0] == 0
+    """
+    c = get_contract(src)
+    c.touch()
+
+    dump = c.transient_storage_dump()
+    assert dump["t"] == 0
+    assert dump["s"] == ""
+    assert dump["b"] == b""
+    assert dump["arr"] == [0, 0]
+
+
+def test_transient_storage_dump_hashmap_struct_late_field(get_contract):
+    src = """
+struct Foo:
+    a: uint256
+    b: uint256
+    c: uint256
+
+m: transient(HashMap[uint256, Foo])
+
+@external
+def set_c():
+    self.m[1].c = 999
+    """
+    c = get_contract(src)
+    c.set_c()
+
+    dump = c.transient_storage_dump()
+    assert dump["m"][1]["a"] == 0
+    assert dump["m"][1]["c"] == 999
+
+
 def test_storage_dump_single_uint256(get_contract):
     src = """
 x: uint256
@@ -151,6 +214,23 @@ def set_selector(val: bytes4):
     assert dump == {"selector": b"\xde\xad\xbe\xef"}
 
 
+def test_storage_dump_bytes_m(get_contract):
+    src = """
+bm: bytes2
+bytesm_list: bytes1[1]
+
+@external
+def set_bytes():
+    self.bm = 0x1234
+    self.bytesm_list[0] = 0xab
+    """
+    c = get_contract(src)
+    c.set_bytes()
+    dump = c.storage_dump()
+    assert dump["bm"] == b"\x12\x34"
+    assert dump["bytesm_list"] == [b"\xab"]
+
+
 def test_storage_dump_string(get_contract):
     src = """
 name: String[100]
@@ -200,6 +280,20 @@ def set_arr(val: DynArray[uint256, 10]):
     c.set_arr([1, 2, 3])
     dump = c.storage_dump()
     assert dump == {"arr": [1, 2, 3]}
+
+
+def test_storage_dump_nested_dynarray(get_contract):
+    src = """
+d: DynArray[DynArray[uint256, 3], 3]
+
+@external
+def set_vals():
+    self.d = [[1], [2, 3, 4], [5, 6]]
+    """
+    c = get_contract(src)
+    c.set_vals()
+    dump = c.storage_dump()
+    assert dump == {"d": [[1], [2, 3, 4], [5, 6]]}
 
 
 def test_storage_dump_static_array(get_contract):
@@ -323,6 +417,51 @@ def approve(owner: address, token_id: uint256):
     c.approve(addr1, 42)
     dump = c.storage_dump()
     assert dump == {"approvals": {addr1: {42: True}}}
+
+
+def test_storage_dump_hashmap_string_value(get_contract):
+    src = """
+h: HashMap[uint256, String[32]]
+
+@external
+def set_values():
+    for i: uint8 in range(3):
+        self.h[convert(i, uint256)] = uint2str(i)
+    """
+    c = get_contract(src)
+    c.set_values()
+    dump = c.storage_dump()
+    assert dump == {"h": {0: "0", 1: "1", 2: "2"}}
+
+
+def test_storage_dump_hashmap_string_key(get_contract):
+    src = """
+balances: HashMap[String[64], uint256]
+
+@external
+def set_balance(name: String[64], amount: uint256):
+    self.balances[name] = amount
+    """
+    c = get_contract(src)
+    c.set_balance("alice", 1000)
+    c.set_balance("bob", 2000)
+    dump = c.storage_dump()
+    assert dump["balances"]["alice"] == 1000
+    assert dump["balances"]["bob"] == 2000
+
+
+def test_storage_dump_hashmap_bytes_key(get_contract):
+    src = """
+data: HashMap[Bytes[32], uint256]
+
+@external
+def set_data(key: Bytes[32], val: uint256):
+    self.data[key] = val
+    """
+    c = get_contract(src)
+    c.set_data(b"mykey", 42)
+    dump = c.storage_dump()
+    assert dump["data"][b"mykey"] == 42
 
 
 def test_storage_dump_simple_struct(get_contract):
@@ -647,6 +786,36 @@ def create_account(addr: address, bal: uint256):
     key = list(accounts.keys())[0]
     assert str(key) == "0xABCDabcdABcDabcDaBCDAbcdABcdAbCdABcDABCd"
     assert accounts[key] == {"balance": 500, "active": True}
+
+
+def test_storage_dump_interface_storage(get_contract):
+    src = """
+interface Foo:
+    def bar() -> uint256: payable
+    def foobar() -> uint256: view
+
+i: Foo
+
+@external
+def bar() -> uint256:
+    return 1
+
+@external
+def foobar() -> uint256:
+    return 2
+
+@external
+def set_i() -> uint256:
+    a: uint256 = 0
+    self.i = Foo(self)
+    a = extcall self.i.bar()
+    a += staticcall self.i.foobar()
+    return a
+    """
+    c = get_contract(src)
+    assert c.set_i() == 3
+    dump = c.storage_dump()
+    assert dump["i"] == str(c.address)
 
 
 def test_storage_dump_deeply_nested_hashmap(get_contract):

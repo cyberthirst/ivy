@@ -23,8 +23,17 @@ def decode_ivy_object(v, typ):
             v = [decode_ivy_object(x, typ.value_type) for x in v]
     elif isinstance(v, Map):
         v = dict(v)
-        if typ_needs_decode(typ.value_type):
-            v = {k: decode_ivy_object(v, typ.value_type) for k, v in v.items()}
+        key_typ = typ.key_type
+        value_typ = typ.value_type
+        if typ_needs_decode(key_typ) or typ_needs_decode(value_typ):
+            decoded = {}
+            for k, value in v.items():
+                if typ_needs_decode(key_typ):
+                    k = decode_ivy_object(k, key_typ)
+                if typ_needs_decode(value_typ):
+                    value = decode_ivy_object(value, value_typ)
+                decoded[k] = value
+            v = decoded
     elif isinstance(v, Address):
         v = str(v)
     elif isinstance(v, Struct):
