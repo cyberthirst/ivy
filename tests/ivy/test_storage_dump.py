@@ -12,6 +12,26 @@ def foo() -> uint256:
     assert dump == {}
 
 
+def test_transient_storage_dump_defaults_match_storage(get_contract):
+    src = """
+x: uint256
+t: transient(uint256)
+
+@external
+def get_values() -> (uint256, uint256):
+    return self.x, self.t
+    """
+    c = get_contract(src)
+    assert c.get_values() == (0, 0)
+
+    storage_dump = c.storage_dump()
+    transient_dump = c.transient_storage_dump()
+
+    assert storage_dump == {"x": 0}
+    assert transient_dump == {"t": 0}
+    assert storage_dump["x"] == transient_dump["t"]
+
+
 def test_storage_dump_single_uint256(get_contract):
     src = """
 x: uint256
