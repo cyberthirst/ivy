@@ -37,7 +37,7 @@ class HarnessConfig:
     max_fuzz_calls: int = 600
 
     # Plateau and timeout behavior
-    plateau_calls: int = 20
+    plateau_calls: int = 8
     call_timeout_s: float = 5.0
     max_timeouts_per_func: int = 3
 
@@ -78,7 +78,7 @@ class CallOutcome:
 
     @property
     def is_progress(self) -> bool:
-        return self.new_cov > 0 or self.state_modified
+        return self.new_cov > 0
 
 
 @dataclass
