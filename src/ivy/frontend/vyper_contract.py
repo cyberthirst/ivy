@@ -184,27 +184,38 @@ class VyperContract:
         self._execution_output = ret
         return ret.output
 
-    def storage_dump(self) -> dict[str, Any]:
+    def _dump_data_location(self, data_location: DataLocation) -> dict[str, Any]:
         # TODO: add a param to access self._execution_output.touched_accounts
         # and also dump their storage
         acc = self.env.get_account(self._address)
-        storage = acc.storage
+        location = (
+            acc.storage if data_location == DataLocation.STORAGE else acc.transient
+        )
         gvars = acc.contract_data.global_vars
         res = {}
         # Iterate over known declared variables, not raw storage items.
         # This avoids KeyError when storage contains slots from delegatecall
         # (callee writes to caller's storage using callee's slot positions).
         for (pos, loc), gvar in gvars.variables.items():
-            if loc != DataLocation.STORAGE:
+            if loc != data_location:
                 continue
-            if pos not in storage:
+            if pos not in location:
                 continue
-            v = storage[pos]
+            v = location[pos]
             typ = gvar.varinfo.typ
             # Always decode to convert boxed types to Python primitives
             v = decode_ivy_object(v, typ)
-            res[gvars.adrr_to_name[(pos, loc)]] = v
+            name = gvars.adrr_to_name.get((pos, loc))
+            if name is None:
+                continue
+            res[name] = v
         return res
+
+    def storage_dump(self) -> dict[str, Any]:
+        return self._dump_data_location(DataLocation.STORAGE)
+
+    def transient_storage_dump(self) -> dict[str, Any]:
+        return self._dump_data_location(DataLocation.TRANSIENT)
 
     def marshal_to_python(self, execution_output: ExecutionOutput, vyper_typ):
         self._execution_output = execution_output
