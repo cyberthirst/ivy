@@ -112,7 +112,7 @@ class IvyScenarioRunner(BaseScenarioRunner):
         return contract.storage_dump()
 
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
-        if trace_env is None:
+        if trace_env is None or trace_env.block is None:
             return
         self.env.block_number = trace_env.block.number
         self.env.timestamp = trace_env.block.timestamp

@@ -18,6 +18,7 @@ from fuzzer.trace_types import (
     SetBalanceTrace,
 )
 
+from fuzzer.mutator.value_mutator import BOUNDARY_ADDRESSES
 from fuzzer.runtime_engine.call_generator import (
     CallGenerator,
     CallKey,
@@ -158,6 +159,7 @@ class RuntimeFuzzEngine:
         )
         self.edge_map = RuntimeEdgeMap(self.config.map_size)
         self.call_generator = CallGenerator(self.rng)
+        self.sender_pool = BOUNDARY_ADDRESSES
 
     def run(self, scenario: Scenario) -> HarnessResult:
         with self.runner.env.anchor():
@@ -332,8 +334,9 @@ class RuntimeFuzzEngine:
             if total_calls[0] >= self.config.max_total_calls:
                 break
 
+            sender = self.rng.choice(self.sender_pool)
             generated = self.call_generator.generate_call_for_function(
-                func_info.addr, func_info.fn_name, func_info.func_t
+                func_info.addr, func_info.fn_name, func_info.func_t, sender=sender
             )
             trace = self.call_generator.call_trace_from_generated(
                 generated, func_info.addr
@@ -424,6 +427,7 @@ class RuntimeFuzzEngine:
                         args=trace.python_args.get("args", []),
                         kwargs={"value": trace.call_args.get("value", 0)},
                         func_t=None,  # May not have type info from parent
+                        sender=trace.env.tx.origin if trace.env else None,
                     )
                     score = outcome.new_cov + (1 if outcome.state_modified else 0)
                     corpus.add_seed(generated, score=score, step=total_calls[0])
@@ -530,6 +534,12 @@ class RuntimeFuzzEngine:
                 func_info = self.rng.choice(available_funcs)
                 generated = self.call_generator.generate_call_for_function(
                     func_info.addr, func_info.fn_name, func_info.func_t
+                )
+
+            # 10% chance to swap sender
+            if self.rng.random() < 0.1:
+                generated = self.call_generator.mutate_sender(
+                    generated, self.sender_pool
                 )
 
             trace = self.call_generator.call_trace_from_generated(

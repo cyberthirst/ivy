@@ -24,6 +24,27 @@ from vyper.semantics.types import (
 
 from fuzzer.mutator.base_value_generator import BaseValueGenerator
 
+# Addresses that can't be realistic senders (precompiles, zero, etc.)
+# but are useful as function argument boundary values.
+PRECOMPILE_ADDRESSES: List[str] = [
+    to_checksum_address("0x0000000000000000000000000000000000000000"),
+    to_checksum_address("0x0000000000000000000000000000000000000001"),
+    to_checksum_address("0x0000000000000000000000000000000000000002"),
+    to_checksum_address("0x0000000000000000000000000000000000000003"),
+    to_checksum_address("0x0000000000000000000000000000000000000004"),
+]
+
+# Realistic addresses usable as both function args and msg.sender.
+SENDER_ADDRESSES: List[str] = [
+    to_checksum_address("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
+    to_checksum_address("0xdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeF"),
+    to_checksum_address("0xCaFeBAbECaFeBAbECaFeBAbECaFeBAbECaFeBAbE"),
+    to_checksum_address("0x1234567890AbcdEF1234567890aBcdef12345678"),
+    to_checksum_address("0xA0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0A0"),
+]
+
+BOUNDARY_ADDRESSES: List[str] = PRECOMPILE_ADDRESSES + SENDER_ADDRESSES
+
 
 class ValueMutator(BaseValueGenerator):
     """Generates and mutates values with focus on boundary cases for ABI fuzzing."""
@@ -108,15 +129,7 @@ class ValueMutator(BaseValueGenerator):
             return list(set(v for v in values if lo <= v <= hi))
 
         elif isinstance(vyper_type, AddressT):
-            return [
-                to_checksum_address("0x0000000000000000000000000000000000000000"),
-                to_checksum_address("0x0000000000000000000000000000000000000001"),
-                to_checksum_address("0x0000000000000000000000000000000000000002"),
-                to_checksum_address("0x0000000000000000000000000000000000000003"),
-                to_checksum_address("0x0000000000000000000000000000000000000004"),
-                to_checksum_address("0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"),
-                to_checksum_address("0xdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeFdEaDbEeF"),
-            ]
+            return list(BOUNDARY_ADDRESSES)
 
         elif isinstance(vyper_type, BoolT):
             return [True, False]

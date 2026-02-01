@@ -151,7 +151,7 @@ class BoaScenarioRunner(BaseScenarioRunner):
         return contract._storage.dump()
 
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
-        if trace_env is None:
+        if trace_env is None or trace_env.block is None:
             return
         self.env.evm.patch.block_number = trace_env.block.number
         self.env.evm.patch.timestamp = trace_env.block.timestamp

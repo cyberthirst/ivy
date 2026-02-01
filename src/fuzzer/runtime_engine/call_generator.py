@@ -9,7 +9,7 @@ from vyper.semantics.types.function import ContractFunctionT
 
 from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.argument_mutator import ArgumentMutator
-from fuzzer.trace_types import CallTrace
+from fuzzer.trace_types import CallTrace, Env, Tx
 
 
 @dataclass
@@ -19,6 +19,7 @@ class GeneratedCall:
     args: List[Any]
     kwargs: Dict[str, Any]
     func_t: Optional[ContractFunctionT] = None
+    sender: Optional[str] = None
 
 
 CallKey = Tuple[str, str]  # (contract_address, function_name)
@@ -118,6 +119,7 @@ class CallGenerator:
         contract_address: str,
         function_name: str,
         func_t: ContractFunctionT,
+        sender: Optional[str] = None,
     ) -> GeneratedCall:
         args = []
         for arg in func_t.arguments:
@@ -133,6 +135,7 @@ class CallGenerator:
             args=args,
             kwargs={"value": value},
             func_t=func_t,
+            sender=sender,
         )
 
     def mutate_call(self, call: GeneratedCall) -> GeneratedCall:
@@ -151,6 +154,7 @@ class CallGenerator:
             args=mutated_args,
             kwargs={"value": mutated_value},
             func_t=call.func_t,
+            sender=call.sender,
         )
 
     def mutate_single_arg(self, call: GeneratedCall) -> GeneratedCall:
@@ -178,6 +182,7 @@ class CallGenerator:
             args=mutated_args,
             kwargs={"value": mutated_value},
             func_t=call.func_t,
+            sender=call.sender,
         )
 
     def mutate_havoc(self, call: GeneratedCall) -> GeneratedCall:
@@ -212,16 +217,33 @@ class CallGenerator:
             args=mutated_args,
             kwargs={"value": mutated_value},
             func_t=call.func_t,
+            sender=call.sender,
+        )
+
+    def mutate_sender(
+        self, call: GeneratedCall, sender_pool: List[str]
+    ) -> GeneratedCall:
+        new_sender = self.rng.choice(sender_pool)
+        return GeneratedCall(
+            contract_address=call.contract_address,
+            function_name=call.function_name,
+            args=call.args,
+            kwargs=call.kwargs,
+            func_t=call.func_t,
+            sender=new_sender,
         )
 
     def call_trace_from_generated(
         self, call: GeneratedCall, to_address: str
     ) -> CallTrace:
+        env = None
+        if call.sender is not None:
+            env = Env(tx=Tx(origin=call.sender))
         return CallTrace(
             output=None,
             call_args={"to": to_address, "value": call.kwargs.get("value", 0)},
             call_succeeded=None,
-            env=None,
+            env=env,
             python_args={"method": call.function_name, "args": call.args, "kwargs": {}},
             function_name=call.function_name,
         )

@@ -16,9 +16,9 @@ from fuzzer.xfail import XFailExpectation
 @dataclass
 class Tx:
     origin: str
-    gas: int
-    gas_price: int
-    blob_hashes: List[str]
+    gas: int = 10_000_000_000
+    gas_price: int = 0
+    blob_hashes: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -34,7 +34,7 @@ class Env:
     """Represents environment data for a trace."""
 
     tx: Tx
-    block: Block
+    block: Optional[Block] = None
 
 
 @dataclass
