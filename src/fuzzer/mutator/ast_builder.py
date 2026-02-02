@@ -23,6 +23,8 @@ from vyper.semantics.types import (
     TupleT,
     StructT,
     FlagT,
+    InterfaceT,
+    TYPE_T,
 )
 
 
@@ -170,6 +172,16 @@ def literal(value, typ: VyperType) -> ast.VyperNode:
     raise NotImplementedError(
         f"Literal conversion not implemented for {type(typ).__name__}"
     )
+
+
+def interface_cast(iface_type: InterfaceT, address_node: ast.VyperNode) -> ast.Call:
+    """Build InterfaceName(address) with proper type metadata."""
+    iface_name_node = ast.Name(id=iface_type._id)
+    iface_name_node._metadata = {"type": TYPE_T(iface_type)}
+
+    call_node = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
+    call_node._metadata = {"type": iface_type}
+    return call_node
 
 
 # -----------------------------------------------------------------------------

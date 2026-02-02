@@ -19,7 +19,7 @@ from vyper.semantics.types import (
     TupleT,
     HashMapT,
     DecimalT,
-    TYPE_T,
+    InterfaceT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.analysis.base import VarInfo, Modifiability
@@ -495,6 +495,8 @@ class ExprGenerator(BaseGenerator):
             return self._generate_tuple_literal(ctx)
         if isinstance(ctx.target_type, StructT):
             return self._generate_struct_literal(ctx)
+        if isinstance(ctx.target_type, InterfaceT):
+            return self._generate_interface_literal(ctx)
         value = self.literal_generator.generate(ctx.target_type)
         return ast_builder.literal(value, ctx.target_type)
 
@@ -564,6 +566,24 @@ class ExprGenerator(BaseGenerator):
 
         call_node._metadata = {"type": target_type}
         return call_node
+
+    def _generate_interface_literal(self, ctx: ExprGenCtx) -> ast.Call:
+        target_type = ctx.target_type
+        assert isinstance(target_type, InterfaceT)
+
+        allow_self = (
+            not ctx.context.is_module_scope
+            and ctx.context.current_mutability
+            not in (ExprMutability.CONST, ExprMutability.PURE)
+        )
+        if allow_self and self.rng.random() < 0.25:
+            address_node = ast.Name(id="self")
+            address_node._metadata = {"type": AddressT()}
+        else:
+            address_value = self.literal_generator.generate(AddressT())
+            address_node = ast_builder.literal(address_value, AddressT())
+
+        return ast_builder.interface_cast(target_type, address_node)
 
     @strategy(
         name="expr.env_var",
@@ -1337,7 +1357,7 @@ class ExprGenerator(BaseGenerator):
         self, func: ContractFunctionT, args: list
     ) -> Union[ast.StaticCall, ast.ExtCall]:
         """Build AST for an external call through an interface."""
-        iface_name, iface_type = self.interface_registry.create_interface(func)
+        _, iface_type = self.interface_registry.create_interface(func)
 
         # Address is always `self` for now
         # TODO support random addresses
@@ -1345,11 +1365,7 @@ class ExprGenerator(BaseGenerator):
         address_node._metadata = {"type": AddressT()}
 
         # Build: InterfaceName(address)
-        iface_name_node = ast.Name(id=iface_name)
-        iface_name_node._metadata = {"type": TYPE_T(iface_type)}
-
-        iface_cast = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
-        iface_cast._metadata = {"type": iface_type}
+        iface_cast = ast_builder.interface_cast(iface_type, address_node)
 
         # Build: Interface(address).func
         attr_node = ast.Attribute(value=iface_cast, attr=func.name)
