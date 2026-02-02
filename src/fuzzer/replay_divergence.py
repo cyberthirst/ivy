@@ -27,9 +27,10 @@ def _deserialize_env(data: Dict[str, Any] | None) -> Env | None:
     """Deserialize Env from dict."""
     if data is None:
         return None
+    block_data = data.get("block")
     return Env(
         tx=Tx(**data["tx"]),
-        block=Block(**data["block"]),
+        block=None if block_data is None else Block(**block_data),
     )
 
 
