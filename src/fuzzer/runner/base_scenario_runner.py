@@ -29,6 +29,7 @@ class BaseResult(ABC):
     success: bool
     error: Optional[Exception] = None
     storage_dump: Optional[Dict[str, Any]] = None
+    transient_storage_dump: Optional[Dict[str, Any]] = None
 
     @property
     @abstractmethod
@@ -57,6 +58,7 @@ class BaseResult(ABC):
             "success": self.success,
             "error": self._format_error(),
             "storage_dump": self.storage_dump,
+            "transient_storage_dump": self.transient_storage_dump,
         }
 
 
@@ -244,6 +246,11 @@ class BaseScenarioRunner(ABC):
         pass
 
     @abstractmethod
+    def _get_transient_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
+        """Get transient storage dump from a contract. Must be implemented by subclasses."""
+        pass
+
+    @abstractmethod
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
         """Set block environment values from trace. Must be implemented by subclasses."""
         pass
@@ -420,13 +427,16 @@ class BaseScenarioRunner(ABC):
 
             # Get storage dump if requested
             storage_dump = None
+            transient_storage_dump = None
             if self.collect_storage_dumps:
                 storage_dump = self._get_storage_dump(contract)
+                transient_storage_dump = self._get_transient_storage_dump(contract)
 
             return DeploymentResult(
                 success=True,
                 contract=contract,
                 storage_dump=storage_dump,
+                transient_storage_dump=transient_storage_dump,
                 deployed_address=getattr(trace, "deployed_address", None),
             )
 
@@ -508,13 +518,16 @@ class BaseScenarioRunner(ABC):
 
             # Get storage dump if requested (only if we have a contract)
             storage_dump = None
+            transient_storage_dump = None
             if self.collect_storage_dumps and contract is not None:
                 storage_dump = self._get_storage_dump(contract)
+                transient_storage_dump = self._get_transient_storage_dump(contract)
 
             return CallResult(
                 success=True,
                 output=output,
                 storage_dump=storage_dump,
+                transient_storage_dump=transient_storage_dump,
                 contract=contract,
             )
 

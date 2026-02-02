@@ -150,6 +150,9 @@ class BoaScenarioRunner(BaseScenarioRunner):
     def _get_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
         return contract._storage.dump()
 
+    def _get_transient_storage_dump(self, contract: Any) -> Optional[Dict[str, Any]]:
+        return contract._transient_storage.dump()
+
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
         if trace_env is None or trace_env.block is None:
             return

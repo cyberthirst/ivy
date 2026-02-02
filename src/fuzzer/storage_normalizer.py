@@ -1,5 +1,6 @@
 from typing import Any, Dict
 
+from vyper.semantics.data_locations import DataLocation
 from vyper.semantics.types import (
     DArrayT,
     HashMapT,
@@ -14,7 +15,10 @@ from ivy.frontend.decoder_utils import decode_ivy_object
 
 
 def normalize_storage_dump(
-    storage_dump: Dict[str, Any], contract: Any
+    storage_dump: Dict[str, Any],
+    contract: Any,
+    *,
+    location: DataLocation = DataLocation.STORAGE,
 ) -> Dict[str, Any]:
     """Normalize a storage dump by stripping explicit default values.
 
@@ -26,7 +30,7 @@ def normalize_storage_dump(
     if storage_dump is None or contract is None:
         return storage_dump
 
-    type_map = _extract_storage_types(contract)
+    type_map = _extract_storage_types(contract, location)
     normalized: Dict[str, Any] = {}
 
     for name, value in storage_dump.items():
@@ -42,7 +46,9 @@ def normalize_storage_dump(
     return normalized
 
 
-def _extract_storage_types(contract: Any) -> Dict[str, VyperType]:
+def _extract_storage_types(
+    contract: Any, location: DataLocation
+) -> Dict[str, VyperType]:
     """Return a mapping from storage variable name to its Vyper type."""
 
     module_t = contract.compiler_data.global_ctx
@@ -51,8 +57,12 @@ def _extract_storage_types(contract: Any) -> Dict[str, VyperType]:
     storage_types: Dict[str, VyperType] = {}
 
     for name, varinfo in module_variables.items():
-        if varinfo.is_storage:
-            storage_types[name] = varinfo.typ
+        if location == DataLocation.STORAGE:
+            if varinfo.is_storage:
+                storage_types[name] = varinfo.typ
+        elif location == DataLocation.TRANSIENT:
+            if getattr(varinfo, "is_transient", False):
+                storage_types[name] = varinfo.typ
 
     return storage_types
 
