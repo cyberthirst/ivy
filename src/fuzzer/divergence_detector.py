@@ -9,6 +9,8 @@ from functools import cached_property
 from enum import StrEnum
 from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 
+from vyper.semantics.data_locations import DataLocation
+
 from fuzzer.runner.scenario import Scenario
 from fuzzer.runner.base_scenario_runner import (
     ScenarioResult,
@@ -260,7 +262,21 @@ class DivergenceDetector:
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
             if ivy_res.storage_dump != boa_res.storage_dump:
-                if not self._normalized_dumps_match(ivy_res, boa_res):
+                if not self._normalized_dumps_match(
+                    ivy_res, boa_res, location=DataLocation.STORAGE
+                ):
+                    return False
+
+        if (
+            ivy_res.transient_storage_dump is not None
+            and boa_res.transient_storage_dump is not None
+        ):
+            if ivy_res.transient_storage_dump != boa_res.transient_storage_dump:
+                if not self._normalized_dumps_match(
+                    ivy_res,
+                    boa_res,
+                    location=DataLocation.TRANSIENT,
+                ):
                     return False
 
         return True
@@ -282,7 +298,21 @@ class DivergenceDetector:
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
             if ivy_res.storage_dump != boa_res.storage_dump:
-                if not self._normalized_dumps_match(ivy_res, boa_res):
+                if not self._normalized_dumps_match(
+                    ivy_res, boa_res, location=DataLocation.STORAGE
+                ):
+                    return False
+
+        if (
+            ivy_res.transient_storage_dump is not None
+            and boa_res.transient_storage_dump is not None
+        ):
+            if ivy_res.transient_storage_dump != boa_res.transient_storage_dump:
+                if not self._normalized_dumps_match(
+                    ivy_res,
+                    boa_res,
+                    location=DataLocation.TRANSIENT,
+                ):
                     return False
 
         return True
@@ -291,12 +321,24 @@ class DivergenceDetector:
     def _normalized_dumps_match(
         ivy_res: Union[DeploymentResult, CallResult],
         boa_res: Union[DeploymentResult, CallResult],
+        *,
+        location: DataLocation,
     ) -> bool:
         """Logically equivalent storage can be produced by the runners but the dumps can differ.
         That happens e.g. when one materializes default values and the other does not. We compare
         normalized dumps lazily to avoid performance penalty only when the original doesn't compare equal.
         """
-        assert ivy_res.storage_dump is not None and boa_res.storage_dump is not None
-        normalized_ivy = normalize_storage_dump(ivy_res.storage_dump, ivy_res.contract)
-        normalized_boa = normalize_storage_dump(boa_res.storage_dump, boa_res.contract)
+        if location == DataLocation.TRANSIENT:
+            ivy_dump = ivy_res.transient_storage_dump
+            boa_dump = boa_res.transient_storage_dump
+        else:
+            ivy_dump = ivy_res.storage_dump
+            boa_dump = boa_res.storage_dump
+        assert ivy_dump is not None and boa_dump is not None
+        normalized_ivy = normalize_storage_dump(
+            ivy_dump, ivy_res.contract, location=location
+        )
+        normalized_boa = normalize_storage_dump(
+            boa_dump, boa_res.contract, location=location
+        )
         return normalized_ivy == normalized_boa

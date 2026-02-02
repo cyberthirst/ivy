@@ -111,6 +111,9 @@ class IvyScenarioRunner(BaseScenarioRunner):
     def _get_storage_dump(self, contract: Any) -> Dict[str, Any]:
         return contract.storage_dump()
 
+    def _get_transient_storage_dump(self, contract: Any) -> Dict[str, Any]:
+        return contract.transient_storage_dump()
+
     def _set_block_env(self, trace_env: Optional[Env]) -> None:
         if trace_env is None or trace_env.block is None:
             return
