@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 import time
 import json
 import logging
+import traceback
 from pathlib import Path
 from datetime import datetime
 
@@ -30,6 +31,14 @@ def _make_json_serializable(obj):
     if isinstance(obj, bytes):
         return "0x" + obj.hex()
     return obj
+
+
+def _format_traceback(error: Optional[BaseException]) -> Optional[str]:
+    if error is None:
+        return None
+    return "".join(
+        traceback.format_exception(type(error), error, error.__traceback__)
+    )
 
 
 def build_divergence_record(
@@ -130,6 +139,7 @@ class FuzzerReporter:
                     deployment_result.source_code,
                     deployment_result.error,
                     type(deployment_result.error).__name__,
+                    compiler_settings=deployment_result.compiler_settings,
                 )
             elif deployment_result.is_compilation_failure:
                 # Normal compilation failure (syntax, type errors, etc.)
@@ -138,6 +148,7 @@ class FuzzerReporter:
                     deployment_result.source_code,
                     deployment_result.error,
                     type(deployment_result.error).__name__,
+                    compiler_settings=deployment_result.compiler_settings,
                 )
             elif deployment_result.is_runtime_failure:
                 # Actual runtime deployment failure (constructor failed)
@@ -183,11 +194,19 @@ class FuzzerReporter:
 
             if decision.keep:
                 self.save_compiler_crash(
-                    source_code, error, error_type, subfolder="filtered"
+                    source_code,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="filtered",
                 )
             if debug_mode:
                 self.save_compiler_crash(
-                    source_code, error, error_type, subfolder="unfiltered"
+                    source_code,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="unfiltered",
                 )
 
         # Report compilation failures
@@ -202,11 +221,19 @@ class FuzzerReporter:
                     f"compile_fail| new | {item_name} | mut#{scenario_num} | {error_type}"
                 )
                 self.save_compilation_failure(
-                    source_code, error, error_type, subfolder="filtered"
+                    source_code,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="filtered",
                 )
             if debug_mode:
                 self.save_compilation_failure(
-                    source_code, error, error_type, subfolder="unfiltered"
+                    source_code,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="unfiltered",
                 )
 
         # Report divergences
@@ -351,6 +378,7 @@ class FuzzerReporter:
         source_code: str,
         error: Exception,
         error_type: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
         subfolder: Optional[str] = None,
     ):
         """Save a compiler crash with the source code that caused it."""
@@ -370,7 +398,9 @@ class FuzzerReporter:
             "timestamp": datetime.now().isoformat(),
             "error_type": error_type,
             "error_message": str(error),
+            "error_traceback": _format_traceback(error),
             "source_code": source_code,
+            "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,
                 "item_name": self.current_item_name or "unknown",
@@ -389,6 +419,7 @@ class FuzzerReporter:
         source_code: str,
         error: Exception,
         error_type: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
         subfolder: Optional[str] = None,
     ):
         """Save a compilation failure with the source code that caused it."""
@@ -408,7 +439,9 @@ class FuzzerReporter:
             "timestamp": datetime.now().isoformat(),
             "error_type": error_type,
             "error_message": str(error),
+            "error_traceback": _format_traceback(error),
             "source_code": source_code,
+            "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,
                 "item_name": self.current_item_name or "unknown",

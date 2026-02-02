@@ -72,6 +72,7 @@ class DeploymentResult(BaseResult):
     )
     source_code: Optional[str] = None  # Source code that was attempted to deploy
     error_phase: Optional[str] = None  # "compile" or "init"
+    compiler_settings: Optional[Dict[str, Any]] = None
 
     @property
     def is_runtime_failure(self) -> bool:
@@ -107,6 +108,7 @@ class DeploymentResult(BaseResult):
             else None
         )
         result["error_phase"] = self.error_phase
+        result["compiler_settings"] = self.compiler_settings
         return result
 
 
@@ -348,6 +350,10 @@ class BaseScenarioRunner(ABC):
     ) -> DeploymentResult:
         """Execute a deployment trace."""
         self._set_block_env(trace.env)
+        merged_settings = {
+            **(trace.compiler_settings or {}),
+            **self.compiler_settings,
+        }
         try:
             # Use mutated source if provided
             source_to_deploy = (
@@ -381,11 +387,6 @@ class BaseScenarioRunner(ABC):
                     else {"value": trace.value}
                 )
 
-            merged_settings = {
-                **(trace.compiler_settings or {}),
-                **self.compiler_settings,
-            }
-
             try:
                 compiled = self._compile_from_source(
                     source=source_to_deploy,
@@ -398,6 +399,7 @@ class BaseScenarioRunner(ABC):
                     error=e,
                     source_code=source_to_deploy,
                     error_phase="compile",
+                    compiler_settings=merged_settings,
                 )
 
             try:
@@ -414,6 +416,7 @@ class BaseScenarioRunner(ABC):
                     error=e,
                     source_code=source_to_deploy,
                     error_phase="init",
+                    compiler_settings=merged_settings,
                 )
 
             # Store the deployed contract by its address
@@ -438,6 +441,7 @@ class BaseScenarioRunner(ABC):
                 storage_dump=storage_dump,
                 transient_storage_dump=transient_storage_dump,
                 deployed_address=getattr(trace, "deployed_address", None),
+                compiler_settings=merged_settings,
             )
 
         except Exception as e:
@@ -446,6 +450,7 @@ class BaseScenarioRunner(ABC):
                 error=e,
                 source_code=source_to_deploy,
                 error_phase="init",
+                compiler_settings=merged_settings,
             )
 
     def _execute_call(
