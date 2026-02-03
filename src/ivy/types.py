@@ -48,6 +48,12 @@ def boxed(value: T) -> T:
     return value
 
 
+def _assert_compatible_types(left: VyperValue, right: VyperValue, op: str) -> None:
+    assert left.typ.compare_type(right.typ) or right.typ.compare_type(left.typ), (
+        f"{op} type mismatch: {left.typ} vs {right.typ}"
+    )
+
+
 class VyperInt(VyperValue, int):
     """Boxed integer with type info and bounds validation at construction."""
 
@@ -70,23 +76,53 @@ class VyperInt(VyperValue, int):
             return unsigned_to_signed(masked, bits)
         return masked
 
-    def __floordiv__(self, other: int) -> int:
-        if other == 0:
-            raise ZeroDivisionError("Cannot divide by zero")
-        return _trunc_div(int(self), int(other))
+    def _require_int_other(self, other: object, op: str) -> int:
+        if isinstance(other, VyperInt):
+            assert self.typ == other.typ, f"{op} type mismatch: {self.typ} != {other.typ}"
+            return int(other)
+        if isinstance(other, VyperValue):
+            assert False, f"{op} expects integer operands"
+        assert isinstance(other, int) and not isinstance(other, bool), (
+            f"{op} expects int, got {type(other)}"
+        )
+        return int(other)
 
-    def __mod__(self, other: int) -> int:
-        if other == 0:
+
+    def __add__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Add")
+        return int(self) + other_int
+
+    def __sub__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Sub")
+        return int(self) - other_int
+
+    def __mul__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Mul")
+        return int(self) * other_int
+
+    def __truediv__(self, other: object) -> int:
+        assert False, "Use // for integer division"
+
+    def __floordiv__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Floor division")
+        if other_int == 0:
+            raise ZeroDivisionError("Cannot divide by zero")
+        return _trunc_div(int(self), other_int)
+
+    def __mod__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Modulo")
+        if other_int == 0:
             raise ValueError("Cannot modulo by 0")
         n = int(self)
-        d = int(other)
+        d = other_int
         return n - _trunc_div(n, d) * d
 
-    def __pow__(self, other: int, modulo=None) -> int:
+    def __pow__(self, other: object, modulo=None) -> int:
         if modulo is not None:
-            return pow(int(self), int(other), modulo)
+            right = self._require_int_other(other, "Exponentiation")
+            return pow(int(self), right, modulo)
 
-        right = int(other)
+        right = self._require_int_other(other, "Exponentiation")
         if right < 0:
             raise ValueError("Exponentiation by negative number")
 
@@ -96,12 +132,74 @@ class VyperInt(VyperValue, int):
 
         return pow(left, right)
 
-    def __lshift__(self, other: int) -> int:
-        return self._mask_to_bits(int(self) << int(other))
+    def __lshift__(self, other: object) -> int:
+        shift = _require_unsigned_shift_amount(other, "Shift")
+        assert self.typ.bits == 256, "Shift only supported for int256/uint256"
+        return self._mask_to_bits(int(self) << shift)
+
+    def __rshift__(self, other: object) -> int:
+        shift = _require_unsigned_shift_amount(other, "Shift")
+        assert self.typ.bits == 256, "Shift only supported for int256/uint256"
+        return int(self) >> shift
+
+    def __and__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Bitwise and")
+        return self._mask_to_bits(int(self) & other_int)
+
+    def __or__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Bitwise or")
+        return self._mask_to_bits(int(self) | other_int)
+
+    def __xor__(self, other: object) -> int:
+        other_int = self._require_int_other(other, "Bitwise xor")
+        return self._mask_to_bits(int(self) ^ other_int)
 
     def __invert__(self) -> int:
         mask = (1 << self.typ.bits) - 1
-        return mask ^ int(self)
+        return self._mask_to_bits(mask ^ int(self))
+
+    def __neg__(self) -> int:
+        assert self.typ.is_signed, "Unary negation only valid for signed integers"
+        return -int(self)
+
+    def __eq__(self, other: object) -> bool:
+        other_int = self._require_int_other(other, "Equality")
+        return int(self) == other_int
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __lt__(self, other: object) -> bool:
+        other_int = self._require_int_other(other, "Comparison")
+        return int(self) < other_int
+
+    def __le__(self, other: object) -> bool:
+        other_int = self._require_int_other(other, "Comparison")
+        return int(self) <= other_int
+
+    def __gt__(self, other: object) -> bool:
+        other_int = self._require_int_other(other, "Comparison")
+        return int(self) > other_int
+
+    def __ge__(self, other: object) -> bool:
+        other_int = self._require_int_other(other, "Comparison")
+        return int(self) >= other_int
+
+    def __hash__(self) -> int:
+        return int.__hash__(self)
+
+
+def _require_unsigned_shift_amount(value: object, op: str) -> int:
+    if isinstance(value, VyperInt):
+        assert value >= 0, f"{op} expects non-negative shift amount"
+        return int(value)
+    if isinstance(value, VyperValue):
+        assert False, f"{op} expects non-negative shift amount"
+    assert isinstance(value, int) and not isinstance(value, bool), (
+        f"{op} expects int shift amount, got {type(value)}"
+    )
+    assert value >= 0, f"{op} expects non-negative shift amount"
+    return int(value)
 
 
 class VyperBytes(VyperValue, bytes):
@@ -117,6 +215,20 @@ class VyperBytes(VyperValue, bytes):
 
     def __deepcopy__(self, memo):
         return VyperBytes(bytes(self), self.typ)
+
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VyperBytes):
+            _assert_compatible_types(self, other, "Bytes equality")
+            return bytes.__eq__(self, other)
+        if isinstance(other, VyperValue):
+            assert False, "Bytes equality requires Bytes operands"
+        return bytes.__eq__(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return bytes.__hash__(self)
 
 
 class VyperString(VyperValue, bytes):
@@ -150,6 +262,20 @@ class VyperString(VyperValue, bytes):
     def __deepcopy__(self, memo):
         return VyperString(bytes(self), self.typ)
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VyperString):
+            _assert_compatible_types(self, other, "String equality")
+            return bytes.__eq__(self, other)
+        if isinstance(other, VyperValue):
+            assert False, "String equality requires String operands"
+        return bytes.__eq__(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return bytes.__hash__(self)
+
 
 class VyperBytesM(VyperValue, bytes):
     """Boxed fixed-size bytes with type info and length validation at construction."""
@@ -165,6 +291,20 @@ class VyperBytesM(VyperValue, bytes):
     def __deepcopy__(self, memo):
         return VyperBytesM(bytes(self), self.typ)
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, VyperBytesM):
+            self._require_bytesm_other(other)
+            return bytes.__eq__(self, other)
+        if isinstance(other, VyperValue):
+            assert False, "BytesM equality requires BytesM operands"
+        return bytes.__eq__(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return bytes.__hash__(self)
+
     def _require_bytesm_other(self, other: object) -> VyperBytesM:
         if not isinstance(other, VyperBytesM):
             raise TypeError("BytesM operations require BytesM operands")
@@ -178,17 +318,17 @@ class VyperBytesM(VyperValue, bytes):
 
     def __and__(self, other: object):
         other_bytes = self._require_bytesm_other(other)
-        result = bytes(l & r for l, r in zip(self, other_bytes))
+        result = bytes(left_byte & right_byte for left_byte, right_byte in zip(self, other_bytes))
         return VyperBytesM(result, self.typ)
 
     def __or__(self, other: object):
         other_bytes = self._require_bytesm_other(other)
-        result = bytes(l | r for l, r in zip(self, other_bytes))
+        result = bytes(left_byte | right_byte for left_byte, right_byte in zip(self, other_bytes))
         return VyperBytesM(result, self.typ)
 
     def __xor__(self, other: object):
         other_bytes = self._require_bytesm_other(other)
-        result = bytes(l ^ r for l, r in zip(self, other_bytes))
+        result = bytes(left_byte ^ right_byte for left_byte, right_byte in zip(self, other_bytes))
         return VyperBytesM(result, self.typ)
 
     def __invert__(self):
@@ -199,20 +339,18 @@ class VyperBytesM(VyperValue, bytes):
         return VyperBytesM(inverted.to_bytes(self.typ.length, "big"), self.typ)
 
     def __lshift__(self, other: VyperInt):
-        assert isinstance(other, VyperInt)
-        assert not other.typ.is_signed and other >= 0
+        shift = _require_unsigned_shift_amount(other, "Shift")
         self._require_bytes32("Shift")
         val = int.from_bytes(self, "big")
         mask = (1 << (self.typ.length * 8)) - 1
-        shifted = (val << other) & mask
+        shifted = (val << shift) & mask
         return VyperBytesM(shifted.to_bytes(self.typ.length, "big"), self.typ)
 
     def __rshift__(self, other: VyperInt):
-        assert isinstance(other, VyperInt)
-        assert not other.typ.is_signed and other >= 0
+        shift = _require_unsigned_shift_amount(other, "Shift")
         self._require_bytes32("Shift")
         val = int.from_bytes(self, "big")
-        shifted = val >> other
+        shifted = val >> shift
         return VyperBytesM(shifted.to_bytes(self.typ.length, "big"), self.typ)
 
 
@@ -240,7 +378,12 @@ class VyperBool(VyperValue):
             return self._value == other._value
         if isinstance(other, bool):
             return self._value == other
+        if isinstance(other, VyperValue):
+            assert False, "Boolean equality requires bool operands"
         return NotImplemented
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
 
     def __hash__(self) -> int:
         return hash(self._value)
@@ -292,6 +435,19 @@ class Address(VyperValue, str):
         checksum_addr = super().__repr__()
         return f"Address({checksum_addr})"
 
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Address):
+            return str.__eq__(self, other)
+        if isinstance(other, VyperValue):
+            assert False, "Address equality requires Address operands"
+        return str.__eq__(self, other)
+
+    def __ne__(self, other: object) -> bool:
+        return not self.__eq__(other)
+
+    def __hash__(self) -> int:
+        return str.__hash__(self)
+
 
 class Flag(VyperValue):
     def __init__(self, typ: FlagT, source: Union[str, int]):
@@ -306,23 +462,36 @@ class Flag(VyperValue):
             value = source
         self.value = value & self.mask
 
+    def _require_flag_other(self, other: object, op: str) -> "Flag":
+        assert isinstance(other, Flag), f"{op} requires Flag operands"
+        assert self.typ == other.typ, f"{op} flag type mismatch: {self.typ} != {other.typ}"
+        return other
+
     def __eq__(self, other):
-        return self.value == other.value
+        other_flag = self._require_flag_other(other, "Flag equality")
+        return self.value == other_flag.value
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
 
     def __or__(self, other):
-        return Flag(self.typ, self.value | other.value)
+        other_flag = self._require_flag_other(other, "Flag or")
+        return Flag(self.typ, self.value | other_flag.value)
 
     def __and__(self, other):
-        return Flag(self.typ, self.value & other.value)
+        other_flag = self._require_flag_other(other, "Flag and")
+        return Flag(self.typ, self.value & other_flag.value)
 
     def __xor__(self, other):
-        return Flag(self.typ, self.value ^ other.value)
+        other_flag = self._require_flag_other(other, "Flag xor")
+        return Flag(self.typ, self.value ^ other_flag.value)
 
     def __invert__(self):
         return Flag(self.typ, (~self.value) & self.mask)
 
     def __contains__(self, other):
-        return (self.value & other.value) != 0
+        other_flag = self._require_flag_other(other, "Flag membership")
+        return (self.value & other_flag.value) != 0
 
     def __hash__(self):
         return hash(self.value)
@@ -364,14 +533,21 @@ class VyperDecimal(VyperValue):
         if not (self.MIN_VALUE <= self.value <= self.MAX_VALUE):
             raise ValueError("Decimal value out of bounds")
 
-    def __add__(self, other: VyperDecimal) -> VyperDecimal:
-        return VyperDecimal(self.value + other.value, scaled=True)
+    def _require_decimal_other(self, other: object, op: str) -> VyperDecimal:
+        assert isinstance(other, VyperDecimal), f"{op} requires decimal operands"
+        return other
 
-    def __sub__(self, other: VyperDecimal) -> VyperDecimal:
-        return VyperDecimal(self.value - other.value, scaled=True)
+    def __add__(self, other: object) -> VyperDecimal:
+        other_dec = self._require_decimal_other(other, "Decimal add")
+        return VyperDecimal(self.value + other_dec.value, scaled=True)
 
-    def __mul__(self, other: VyperDecimal) -> VyperDecimal:
-        product = self.value * other.value
+    def __sub__(self, other: object) -> VyperDecimal:
+        other_dec = self._require_decimal_other(other, "Decimal sub")
+        return VyperDecimal(self.value - other_dec.value, scaled=True)
+
+    def __mul__(self, other: object) -> VyperDecimal:
+        other_dec = self._require_decimal_other(other, "Decimal mul")
+        product = self.value * other_dec.value
         scaled = _trunc_div(product, self.SCALING_FACTOR)
 
         if not (self.MIN_VALUE <= scaled <= self.MAX_VALUE):
@@ -379,44 +555,39 @@ class VyperDecimal(VyperValue):
 
         return VyperDecimal(scaled, scaled=True)
 
-    def __truediv__(self, other: VyperDecimal) -> VyperDecimal:
-        if other.value == 0:
+    def __truediv__(self, other: object) -> VyperDecimal:
+        other_dec = self._require_decimal_other(other, "Decimal div")
+        if other_dec.value == 0:
             raise ZeroDivisionError("Division by zero")
 
-        scaled = _trunc_div(self.value * self.SCALING_FACTOR, other.value)
+        scaled = _trunc_div(self.value * self.SCALING_FACTOR, other_dec.value)
 
         if not (self.MIN_VALUE <= scaled <= self.MAX_VALUE):
             raise ValueError("Decimal division overflow")
 
         return VyperDecimal(scaled, scaled=True)
 
-    def __floordiv__(self, other: VyperDecimal) -> VyperDecimal:
-        if other.value == 0:
-            raise ZeroDivisionError("Division by zero")
+    def __floordiv__(self, other: object) -> VyperDecimal:
+        assert False, "Floor division is invalid for decimal types"
 
-        q = _trunc_div(self.value * self.SCALING_FACTOR, other.value)
-        q = (q // self.SCALING_FACTOR) * self.SCALING_FACTOR  # drop frac part
-
-        if not (self.MIN_VALUE <= q <= self.MAX_VALUE):
-            raise ValueError("Decimal floor‑division overflow")
-
-        return VyperDecimal(q, scaled=True)
-
-    def __mod__(self, other: VyperDecimal) -> VyperDecimal:
-        if other.value == 0:
+    def __mod__(self, other: object) -> VyperDecimal:
+        other_dec = self._require_decimal_other(other, "Decimal mod")
+        if other_dec.value == 0:
             raise ZeroDivisionError("Cannot modulo by zero")
 
-        rem = self.value - _trunc_div(self.value, other.value) * other.value
+        rem = self.value - _trunc_div(self.value, other_dec.value) * other_dec.value
         return VyperDecimal(rem, scaled=True)
 
     def __neg__(self) -> VyperDecimal:
         return VyperDecimal(-self.value, scaled=True)
 
-    def __lt__(self, other: VyperDecimal) -> bool:
-        return self.value < other.value
+    def __lt__(self, other: object) -> bool:
+        other_dec = self._require_decimal_other(other, "Decimal comparison")
+        return self.value < other_dec.value
 
-    def __le__(self, other: VyperDecimal) -> bool:
-        return self.value <= other.value
+    def __le__(self, other: object) -> bool:
+        other_dec = self._require_decimal_other(other, "Decimal comparison")
+        return self.value <= other_dec.value
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, VyperDecimal):
@@ -426,16 +597,24 @@ class VyperDecimal(VyperValue):
             self_as_decimal = Decimal(str(self))
             return self_as_decimal == other
 
+        if isinstance(other, VyperValue):
+            assert False, "Decimal equality requires decimal operands"
+
         return False
 
     def __ne__(self, other: object) -> bool:
         return not self == other
 
-    def __ge__(self, other: VyperDecimal) -> bool:
-        return self.value >= other.value
+    def __ge__(self, other: object) -> bool:
+        other_dec = self._require_decimal_other(other, "Decimal comparison")
+        return self.value >= other_dec.value
 
-    def __gt__(self, other: VyperDecimal) -> bool:
-        return self.value > other.value
+    def __gt__(self, other: object) -> bool:
+        other_dec = self._require_decimal_other(other, "Decimal comparison")
+        return self.value > other_dec.value
+
+    def __hash__(self) -> int:
+        return hash(Decimal(str(self)))
 
     def truncate(self) -> VyperDecimal:
         truncated_int = (
@@ -487,12 +666,21 @@ class _Sequence(_Container, Generic[T]):
         self.capacity = typ.length
         self.length = 0
 
+    def _normalize_index(self, idx: int) -> int:
+        if isinstance(idx, VyperValue) and not isinstance(idx, VyperInt):
+            assert False, f"Sequence index must be integer, got {type(idx)}"
+        assert isinstance(idx, int) and not isinstance(idx, bool), (
+            f"Sequence index must be integer, got {type(idx)}"
+        )
+        return int(idx)
+
     def _raise_index_error(self, idx: int):
         raise IndexError(
             f"Sequence index out of range: {idx} not in [0, {self.length})"
         )
 
     def __getitem__(self, idx: int) -> T:
+        idx = self._normalize_index(idx)
         if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
         # TODO: should we journal None or default value?
@@ -505,6 +693,7 @@ class _Sequence(_Container, Generic[T]):
 
     def __setitem__(self, idx: int, value: T, loc: Optional[DataLocation] = None):
         assert isinstance(value, VyperValue)
+        idx = self._normalize_index(idx)
         if idx >= self.length or idx < 0:
             self._raise_index_error(idx)
 
@@ -524,6 +713,13 @@ class _Sequence(_Container, Generic[T]):
                 index += 1
             except IndexError:
                 break
+
+    def __contains__(self, item: object) -> bool:
+        assert isinstance(item, VyperValue), "Membership requires a VyperValue operand"
+        assert self.value_type.compare_type(item.typ), (
+            f"Membership type mismatch: {item.typ} not compatible with {self.value_type}"
+        )
+        return any(item == value for value in self)
 
     def __str__(self):
         values = [str(self[i]) for i in range(self.length)]
