@@ -3,15 +3,10 @@ import random
 from pathlib import Path
 
 import pytest
-from vyper.compiler.phases import CompilerData
 
 from fuzzer.compilation import compile_vyper
-from fuzzer.export_utils import (
-    load_all_exports,
-    filter_exports,
-    get_primary_source,
-    TestFilter,
-)
+from ivy.frontend.loader import loads_from_solc_json
+from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
 from fuzzer.trace_types import DeploymentTrace
 from fuzzer.mutator.ast_mutator import AstMutator
 
@@ -49,14 +44,8 @@ def _strip(obj):
     return obj
 
 
-def _as_clean_dict(source_code: str):
-    """Convert source code to a normalized AST dict for comparison."""
-    ast = CompilerData(source_code).annotated_vyper_module
-    return _strip(ast.to_dict())
-
-
 def get_mutator_test_filter() -> TestFilter:
-    test_filter = TestFilter(exclude_multi_module=True)
+    test_filter = TestFilter()
     test_filter.exclude_source(r"#\s*@version")  # Skip version pragmas
     return test_filter
 
@@ -73,21 +62,21 @@ def get_mutator_test_cases():
             for trace in item.traces:
                 if isinstance(trace, DeploymentTrace):
                     if trace.deployment_type == "source" and trace.solc_json:
-                        _, source = get_primary_source(trace.solc_json)
-                        # Deduplicate by source code hash
-                        source_hash = hash(source)
-                        if source_hash in seen_sources:
+                        integrity = trace.solc_json.get("integrity")
+                        if not isinstance(integrity, str):
+                            raise ValueError("solc_json missing integrity")
+                        if integrity in seen_sources:
                             continue
-                        seen_sources.add(source_hash)
+                        seen_sources.add(integrity)
 
                         test_id = f"{Path(path).stem}::{item_name}"
-                        cases.append(pytest.param(source, test_id, id=test_id))
+                        cases.append(pytest.param(trace.solc_json, test_id, id=test_id))
     return cases
 
 
 @pytest.mark.xfail(reason="mutator WIP - many mutations cause compilation failures", strict=False)
-@pytest.mark.parametrize("source_code,test_id", get_mutator_test_cases())
-def test_mutator_produces_valid_code(source_code: str, test_id: str):
+@pytest.mark.parametrize("solc_json,test_id", get_mutator_test_cases())
+def test_mutator_produces_valid_code(solc_json: dict, test_id: str):
     """Test that the AST mutator produces semantically valid Vyper code.
 
     For each source:
@@ -105,8 +94,8 @@ def test_mutator_produces_valid_code(source_code: str, test_id: str):
     # Random number of mutations in range [1, 16]
     max_mutations = rng.randint(1, 16)
 
-    # Create compiler data from original source
-    original_compiler_data = CompilerData(source_code)
+    # Create compiler data from original solc_json
+    original_compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
     original_ast_dict = _strip(original_compiler_data.annotated_vyper_module.to_dict())
 
     # Create mutator and mutate

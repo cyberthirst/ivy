@@ -9,7 +9,6 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
 
-from vyper.cli.vyper_json import get_output_formats
 from vyper.compiler.settings import Settings
 
 from fuzzer.trace_types import (
@@ -74,59 +73,25 @@ def normalize_compiler_settings(
     return result if result else None
 
 
-def _source_entry_content(entry: Any) -> Optional[str]:
-    if isinstance(entry, dict):
-        return entry.get("content")
-    if isinstance(entry, str):
-        return entry
-    return None
-
-
-def get_source_contents(solc_json: Dict[str, Any]) -> Dict[str, str]:
-    sources = solc_json.get("sources", {})
-    contents: Dict[str, str] = {}
+def _iter_source_contents(solc_json: Dict[str, Any]) -> List[str]:
+    sources = solc_json.get("sources")
+    if not isinstance(sources, dict):
+        raise ValueError("solc_json missing sources mapping")
+    contents: List[str] = []
     for name, entry in sources.items():
-        content = _source_entry_content(entry)
-        if content is not None:
-            contents[str(name)] = content
+        if not isinstance(entry, dict):
+            raise ValueError(f"solc_json source entry for {name} must be a dict")
+        content = entry.get("content")
+        if not isinstance(content, str):
+            raise ValueError(f"solc_json source entry for {name} missing content")
+        contents.append(content)
     return contents
-
-
-def get_primary_source(solc_json: Dict[str, Any]) -> tuple[str, str]:
-    contents = get_source_contents(solc_json)
-    if not contents:
-        raise ValueError("solc_json has no sources")
-
-    target_key: Optional[str] = None
-    try:
-        output_formats = get_output_formats(solc_json)
-    except Exception:
-        output_formats = {}
-
-    if output_formats:
-        target = next(iter(output_formats.keys()))
-        target_key = str(target)
-        if target_key not in contents:
-            posix = getattr(target, "as_posix", None)
-            if posix:
-                posix_key = posix()
-                if posix_key in contents:
-                    target_key = posix_key
-        if target_key not in contents and getattr(target, "name", None):
-            name_key = target.name
-            if name_key in contents:
-                target_key = name_key
-
-    if not target_key or target_key not in contents:
-        target_key = next(iter(contents.keys()))
-
-    return target_key, contents[target_key]
 
 
 def solc_json_source_size(solc_json: Optional[Dict[str, Any]]) -> int:
     if not solc_json:
         return 0
-    return sum(len(content) for content in get_source_contents(solc_json).values())
+    return sum(len(content) for content in _iter_source_contents(solc_json))
 
 
 class TestFilter:
@@ -257,7 +222,7 @@ class TestFilter:
 
                 # Check source code filters
                 if trace.solc_json:
-                    sources = list(get_source_contents(trace.solc_json).values())
+                    sources = _iter_source_contents(trace.solc_json)
                     # Check excludes
                     for pattern in self.source_excludes:
                         if any(pattern.search(source) for source in sources):
@@ -498,39 +463,3 @@ def filter_exports(
 
     return filtered
 
-
-def extract_test_cases(exports: Dict[Path, TestExport]) -> List[tuple[str, List[str]]]:
-    """Extract (source_code, calldatas) pairs from test exports."""
-    test_cases = []
-
-    for path, export in exports.items():
-        for item_name, item in export.items.items():
-            # Group traces by deployment
-            current_source = None
-            current_calldatas = []
-
-            for trace in item.traces:
-                if isinstance(trace, DeploymentTrace):
-                    # If we have accumulated calldatas, save the previous test case
-                    if current_source and current_calldatas:
-                        test_cases.append((current_source, current_calldatas))
-
-                    # Start new test case
-                    if trace.deployment_type == "source" and trace.solc_json:
-                        _, source = get_primary_source(trace.solc_json)
-                        current_source = source
-                        current_calldatas = []
-                    else:
-                        current_source = None
-
-                elif isinstance(trace, CallTrace) and current_source:
-                    # Add calldata from this call
-                    calldata = trace.call_args.get("calldata", "")
-                    if calldata:
-                        current_calldatas.append(calldata)
-
-            # Don't forget the last accumulated test case
-            if current_source and current_calldatas:
-                test_cases.append((current_source, current_calldatas))
-
-    return test_cases

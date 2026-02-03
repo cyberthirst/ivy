@@ -10,7 +10,6 @@ from pathlib import Path
 from datetime import datetime
 
 from fuzzer.runner.base_scenario_runner import ScenarioResult
-from fuzzer.export_utils import get_primary_source
 
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
@@ -42,16 +41,6 @@ def _format_traceback(error: Optional[BaseException]) -> Optional[str]:
     )
 
 
-def _primary_source_from_solc_json(
-    solc_json: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, str]]:
-    if not solc_json:
-        return None
-    try:
-        path, content = get_primary_source(solc_json)
-    except Exception:
-        return None
-    return {"path": path, "content": content}
 
 
 def build_divergence_record(
@@ -413,7 +402,6 @@ class FuzzerReporter:
             "error_message": str(error),
             "error_traceback": _format_traceback(error),
             "solc_json": solc_json,
-            "primary_source": _primary_source_from_solc_json(solc_json),
             "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,
@@ -455,7 +443,6 @@ class FuzzerReporter:
             "error_message": str(error),
             "error_traceback": _format_traceback(error),
             "solc_json": solc_json,
-            "primary_source": _primary_source_from_solc_json(solc_json),
             "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,
