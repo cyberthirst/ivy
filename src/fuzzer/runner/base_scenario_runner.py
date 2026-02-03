@@ -169,6 +169,11 @@ class ScenarioResult:
 class BaseScenarioRunner(ABC):
     """Base class for scenario runners that handle all trace types and dependencies."""
 
+    # Default tx.origin used when a trace has no env/sender.
+    # Must be the same across all runners so differential results aren't
+    # caused by differing default senders.
+    DEFAULT_TX_ORIGIN = "0xC28B8a66397691f40C92271a9EBC04Cabc1ACcA1"
+
     def __init__(
         self,
         env: Any,
@@ -257,10 +262,10 @@ class BaseScenarioRunner(ABC):
         pass
 
     def _get_sender(self, sender: Optional[str]) -> str:
-        """Get the sender address, defaulting to env.eoa if not provided."""
+        """Get the sender address, defaulting to DEFAULT_TX_ORIGIN if not provided."""
         if sender:
             return sender
-        return self.env.eoa
+        return self.DEFAULT_TX_ORIGIN
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         """Run a complete scenario (including dependencies)"""
