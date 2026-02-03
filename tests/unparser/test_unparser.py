@@ -5,7 +5,12 @@ import vyper
 from vyper.compiler.phases import CompilerData
 
 from unparser.unparser import unparse
-from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
+from fuzzer.export_utils import (
+    load_all_exports,
+    filter_exports,
+    get_primary_source,
+    TestFilter,
+)
 from fuzzer.trace_types import DeploymentTrace
 
 # attributes that never affect semantics
@@ -61,15 +66,16 @@ def get_unparser_test_cases():
         for item_name, item in export.items.items():
             for trace in item.traces:
                 if isinstance(trace, DeploymentTrace):
-                    if trace.deployment_type == "source" and trace.source_code:
+                    if trace.deployment_type == "source" and trace.solc_json:
+                        _, source = get_primary_source(trace.solc_json)
                         # Deduplicate by source code hash
-                        source_hash = hash(trace.source_code)
+                        source_hash = hash(source)
                         if source_hash in seen_sources:
                             continue
                         seen_sources.add(source_hash)
 
                         test_id = f"{Path(path).stem}::{item_name}"
-                        cases.append(pytest.param(trace.source_code, id=test_id))
+                        cases.append(pytest.param(source, id=test_id))
     return cases
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 
 from fuzzer.runner.base_scenario_runner import ScenarioResult
+from fuzzer.export_utils import get_primary_source
 
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
@@ -39,6 +40,18 @@ def _format_traceback(error: Optional[BaseException]) -> Optional[str]:
     return "".join(
         traceback.format_exception(type(error), error, error.__traceback__)
     )
+
+
+def _primary_source_from_solc_json(
+    solc_json: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    if not solc_json:
+        return None
+    try:
+        path, content = get_primary_source(solc_json)
+    except Exception:
+        return None
+    return {"path": path, "content": content}
 
 
 def build_divergence_record(
@@ -136,7 +149,7 @@ class FuzzerReporter:
                 # Compiler crash (CompilerPanic, CodegenPanic, etc.)
                 self.record_compiler_crash()
                 self.save_compiler_crash(
-                    deployment_result.source_code,
+                    deployment_result.solc_json,
                     deployment_result.error,
                     type(deployment_result.error).__name__,
                     compiler_settings=deployment_result.compiler_settings,
@@ -145,7 +158,7 @@ class FuzzerReporter:
                 # Normal compilation failure (syntax, type errors, etc.)
                 self.record_compilation_failure()
                 self.save_compilation_failure(
-                    deployment_result.source_code,
+                    deployment_result.solc_json,
                     deployment_result.error,
                     type(deployment_result.error).__name__,
                     compiler_settings=deployment_result.compiler_settings,
@@ -183,7 +196,7 @@ class FuzzerReporter:
         # Report crashes
         for deployment_result, decision in analysis.crashes:
             self.compiler_crashes += 1
-            source_code = deployment_result.source_code
+            solc_json = deployment_result.solc_json
             error = deployment_result.error
             error_type = type(error).__name__
 
@@ -194,7 +207,7 @@ class FuzzerReporter:
 
             if decision.keep:
                 self.save_compiler_crash(
-                    source_code,
+                    solc_json,
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
@@ -202,7 +215,7 @@ class FuzzerReporter:
                 )
             if debug_mode:
                 self.save_compiler_crash(
-                    source_code,
+                    solc_json,
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
@@ -212,7 +225,7 @@ class FuzzerReporter:
         # Report compilation failures
         for deployment_result, decision in analysis.compile_failures:
             self.compilation_failures += 1
-            source_code = deployment_result.source_code
+            solc_json = deployment_result.solc_json
             error = deployment_result.error
             error_type = type(error).__name__
 
@@ -221,7 +234,7 @@ class FuzzerReporter:
                     f"compile_fail| new | {item_name} | mut#{scenario_num} | {error_type}"
                 )
                 self.save_compilation_failure(
-                    source_code,
+                    solc_json,
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
@@ -229,7 +242,7 @@ class FuzzerReporter:
                 )
             if debug_mode:
                 self.save_compilation_failure(
-                    source_code,
+                    solc_json,
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
@@ -375,7 +388,7 @@ class FuzzerReporter:
 
     def save_compiler_crash(
         self,
-        source_code: str,
+        solc_json: Optional[Dict[str, Any]],
         error: Exception,
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
@@ -399,7 +412,8 @@ class FuzzerReporter:
             "error_type": error_type,
             "error_message": str(error),
             "error_traceback": _format_traceback(error),
-            "source_code": source_code,
+            "solc_json": solc_json,
+            "primary_source": _primary_source_from_solc_json(solc_json),
             "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,
@@ -416,7 +430,7 @@ class FuzzerReporter:
 
     def save_compilation_failure(
         self,
-        source_code: str,
+        solc_json: Optional[Dict[str, Any]],
         error: Exception,
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
@@ -440,7 +454,8 @@ class FuzzerReporter:
             "error_type": error_type,
             "error_message": str(error),
             "error_traceback": _format_traceback(error),
-            "source_code": source_code,
+            "solc_json": solc_json,
+            "primary_source": _primary_source_from_solc_json(solc_json),
             "compiler_settings": compiler_settings,
             "reproduction_info": {
                 "seed": self.seed,

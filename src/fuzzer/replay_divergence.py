@@ -49,15 +49,18 @@ def _deserialize_deployment_trace(data: Dict[str, Any]) -> DeploymentTrace:
     env = _deserialize_env(env_data)
     assert env is not None
 
+    solc_json = data.get("solc_json")
+    if data["deployment_type"] == "source" and not solc_json:
+        raise ValueError("source deployment trace missing solc_json")
+
     return DeploymentTrace(
         deployment_type=data["deployment_type"],
         contract_abi=data["contract_abi"],
         initcode=data["initcode"],
         calldata=data.get("calldata"),
         value=data["value"],
-        source_code=data.get("source_code"),
         annotated_ast=data.get("annotated_ast"),
-        solc_json=data.get("solc_json"),
+        solc_json=solc_json,
         raw_ir=data.get("raw_ir"),
         blueprint_initcode_prefix=data.get("blueprint_initcode_prefix"),
         deployed_address=data["deployed_address"],
@@ -112,7 +115,7 @@ def replay_divergence(divergence_path: Path) -> bool:
 
 def _run_and_check(scenario: Scenario) -> bool:
     """Run scenario and check for divergences."""
-    multi_runner = MultiRunner(collect_storage_dumps=True, no_solc_json=True)
+    multi_runner = MultiRunner(collect_storage_dumps=True)
     detector = DivergenceDetector()
 
     results = multi_runner.run(scenario)

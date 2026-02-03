@@ -5,7 +5,7 @@ Ivy implementation of the scenario runner.
 from typing import Any, Dict, List, Optional
 
 import ivy
-from ivy.frontend.loader import loads_from_solc_json, loads_partial
+from ivy.frontend.loader import loads_from_solc_json
 from ivy.frontend.vyper_contract import VyperContract
 from ivy.types import Address
 
@@ -20,25 +20,17 @@ class IvyScenarioRunner(BaseScenarioRunner):
     def __init__(
         self,
         collect_storage_dumps: bool = False,
-        no_solc_json: bool = False,
         compiler_settings: Optional[Dict[str, Any]] = None,
     ):
         super().__init__(ivy.env, collect_storage_dumps, compiler_settings)
         self._original_eoa = None
-        self.no_solc_json = no_solc_json
 
-    def _compile_from_source(
+    def _compile_from_solc_json(
         self,
-        source: str,
-        solc_json: Optional[Dict[str, Any]],
+        solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        if (self.no_solc_json and source) or solc_json is None:
-            compiler_data = loads_partial(
-                source, compiler_args=compiler_settings, get_compiler_data=True
-            )
-        else:
-            compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
+        compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
 
         # Force initcode compilation to surface compile-time errors here.
         _ = compiler_data.bytecode

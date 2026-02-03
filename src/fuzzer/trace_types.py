@@ -46,7 +46,6 @@ class DeploymentTrace:
     initcode: str
     calldata: Optional[str]
     value: int
-    source_code: Optional[str]
     annotated_ast: Optional[Dict[str, Any]]
     solc_json: Optional[Dict[str, Any]]
     raw_ir: Optional[str]
@@ -62,8 +61,6 @@ class DeploymentTrace:
 
     def to_trace_info(self, index: int) -> Dict[str, Any]:
         info: Dict[str, Any] = {"type": self.__class__.__name__, "index": index}
-        if self.source_code:
-            info["source_code"] = self.source_code
         if self.python_args:
             info["args"] = self.python_args
         return info

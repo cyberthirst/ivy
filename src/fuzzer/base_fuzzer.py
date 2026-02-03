@@ -82,7 +82,6 @@ class BaseFuzzer:
         if self._multi_runner is None:
             self._multi_runner = MultiRunner(
                 collect_storage_dumps=True,
-                no_solc_json=True,
             )
         return self._multi_runner
 

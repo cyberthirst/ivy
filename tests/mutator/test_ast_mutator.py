@@ -6,7 +6,12 @@ import pytest
 from vyper.compiler.phases import CompilerData
 
 from fuzzer.compilation import compile_vyper
-from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
+from fuzzer.export_utils import (
+    load_all_exports,
+    filter_exports,
+    get_primary_source,
+    TestFilter,
+)
 from fuzzer.trace_types import DeploymentTrace
 from fuzzer.mutator.ast_mutator import AstMutator
 
@@ -67,15 +72,16 @@ def get_mutator_test_cases():
         for item_name, item in export.items.items():
             for trace in item.traces:
                 if isinstance(trace, DeploymentTrace):
-                    if trace.deployment_type == "source" and trace.source_code:
+                    if trace.deployment_type == "source" and trace.solc_json:
+                        _, source = get_primary_source(trace.solc_json)
                         # Deduplicate by source code hash
-                        source_hash = hash(trace.source_code)
+                        source_hash = hash(source)
                         if source_hash in seen_sources:
                             continue
                         seen_sources.add(source_hash)
 
                         test_id = f"{Path(path).stem}::{item_name}"
-                        cases.append(pytest.param(trace.source_code, test_id, id=test_id))
+                        cases.append(pytest.param(source, test_id, id=test_id))
     return cases
 
 
@@ -113,7 +119,7 @@ def test_mutator_produces_valid_code(source_code: str, test_id: str):
         f"seed={seed}, max_mutations={max_mutations}"
     )
 
-    mutated_source = mutation_result.source
+    mutated_source = next(iter(mutation_result.sources.values()))
     compilation_xfails = mutation_result.compilation_xfails
 
     if not compilation_xfails:

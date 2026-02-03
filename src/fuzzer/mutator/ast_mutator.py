@@ -1,6 +1,6 @@
 import copy
 import random
-from typing import List, Optional
+from typing import List, Optional, Dict
 from dataclasses import dataclass, field
 from contextlib import nullcontext
 
@@ -32,7 +32,7 @@ from fuzzer.xfail import XFailExpectation
 
 @dataclass
 class MutationResult:
-    source: str
+    sources: Dict[str, str]
     compilation_xfails: List[XFailExpectation] = field(default_factory=list)
     runtime_xfails: List[XFailExpectation] = field(default_factory=list)
 
@@ -581,10 +581,18 @@ class AstMutator(VyperNodeTransformer):
 
             final_result = "\n\n".join(parts)
 
+            file_input = compiler_data.file_input
+            resolved_path = getattr(file_input, "resolved_path", None) or getattr(
+                file_input, "path", None
+            )
+            if resolved_path is None:
+                raise ValueError("CompilerData missing file path")
+            source_key = str(resolved_path)
+
             print(final_result)
             print("===============")
             return MutationResult(
-                source=final_result,
+                sources={source_key: final_result},
                 compilation_xfails=list(self.context.compilation_xfails),
                 runtime_xfails=list(self.context.runtime_xfails),
             )

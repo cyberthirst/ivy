@@ -70,7 +70,7 @@ class DeploymentResult(BaseResult):
     deployed_address: Optional[str] = (
         None  # Expected address where contract was deployed
     )
-    source_code: Optional[str] = None  # Source code that was attempted to deploy
+    solc_json: Optional[Dict[str, Any]] = None  # Compilation input attempted
     error_phase: Optional[str] = None  # "compile" or "init"
     compiler_settings: Optional[Dict[str, Any]] = None
 
@@ -183,13 +183,12 @@ class BaseScenarioRunner(ABC):
         self.compiler_settings = compiler_settings or {"enable_decimals": True}
 
     @abstractmethod
-    def _compile_from_source(
+    def _compile_from_solc_json(
         self,
-        source: str,
-        solc_json: Optional[Dict[str, Any]],
+        solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        """Compile source and return a compiled artifact."""
+        """Compile solc_json and return a compiled artifact."""
         pass
 
     @abstractmethod
@@ -343,7 +342,6 @@ class BaseScenarioRunner(ABC):
     def _execute_deployment(
         self,
         trace: DeploymentTrace,
-        mutated_source: Optional[str] = None,
         mutated_args: Optional[List[Any]] = None,
         mutated_kwargs: Optional[Dict[str, Any]] = None,
         use_python_args: bool = False,
@@ -355,12 +353,15 @@ class BaseScenarioRunner(ABC):
             **self.compiler_settings,
         }
         try:
-            # Use mutated source if provided
-            source_to_deploy = (
-                mutated_source if mutated_source is not None else trace.source_code
-            )
-            if not source_to_deploy:
-                raise ValueError("No source code available for deployment")
+            solc_json = trace.solc_json
+            if not solc_json:
+                return DeploymentResult(
+                    success=False,
+                    error=ValueError("No solc_json available for deployment"),
+                    solc_json=None,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                )
 
             # Prepare constructor arguments
             if use_python_args and trace.python_args:
@@ -388,16 +389,15 @@ class BaseScenarioRunner(ABC):
                 )
 
             try:
-                compiled = self._compile_from_source(
-                    source=source_to_deploy,
-                    solc_json=trace.solc_json,
+                compiled = self._compile_from_solc_json(
+                    solc_json=solc_json,
                     compiler_settings=merged_settings,
                 )
             except Exception as e:
                 return DeploymentResult(
                     success=False,
                     error=e,
-                    source_code=source_to_deploy,
+                    solc_json=solc_json,
                     error_phase="compile",
                     compiler_settings=merged_settings,
                 )
@@ -414,7 +414,7 @@ class BaseScenarioRunner(ABC):
                 return DeploymentResult(
                     success=False,
                     error=e,
-                    source_code=source_to_deploy,
+                    solc_json=solc_json,
                     error_phase="init",
                     compiler_settings=merged_settings,
                 )
@@ -441,6 +441,7 @@ class BaseScenarioRunner(ABC):
                 storage_dump=storage_dump,
                 transient_storage_dump=transient_storage_dump,
                 deployed_address=getattr(trace, "deployed_address", None),
+                solc_json=solc_json,
                 compiler_settings=merged_settings,
             )
 
@@ -448,7 +449,7 @@ class BaseScenarioRunner(ABC):
             return DeploymentResult(
                 success=False,
                 error=e,
-                source_code=source_to_deploy,
+                solc_json=trace.solc_json,
                 error_phase="init",
                 compiler_settings=merged_settings,
             )

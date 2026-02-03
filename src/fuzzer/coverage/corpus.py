@@ -11,13 +11,14 @@ from typing import Dict, List, Optional, Set
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import DeploymentTrace
 from fuzzer.coverage.tracker import GlobalEdgeTracker
+from fuzzer.export_utils import solc_json_source_size
 
 
 def scenario_source_size(scenario: Scenario) -> int:
     size = 0
     for trace in scenario.traces:
-        if isinstance(trace, DeploymentTrace) and trace.source_code:
-            size += len(trace.source_code)
+        if isinstance(trace, DeploymentTrace):
+            size += solc_json_source_size(trace.solc_json)
     return size
 
 

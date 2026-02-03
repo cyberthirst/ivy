@@ -47,7 +47,6 @@ class HarnessConfig:
 
     # Runner behavior
     collect_storage_dumps: bool = False  # Disabled during exploration
-    no_solc_json: bool = True
 
     # Corpus settings
     max_seeds_per_func: int = 16
@@ -155,7 +154,6 @@ class RuntimeFuzzEngine:
         self.rng = random.Random(seed)
         self.runner = IvyScenarioRunner(
             collect_storage_dumps=self.config.collect_storage_dumps,
-            no_solc_json=self.config.no_solc_json,
         )
         self.edge_map = RuntimeEdgeMap(self.config.map_size)
         self.call_generator = CallGenerator(self.rng)

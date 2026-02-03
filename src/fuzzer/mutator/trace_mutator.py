@@ -101,18 +101,37 @@ class TraceMutator:
         ):
             return
 
-        if trace.source_code and compiler_data:
+        if trace.solc_json and compiler_data:
             mutation_result = self.ast_mutator.mutate_source_with_compiler_data(
                 compiler_data
             )
-            if mutation_result and mutation_result.source != trace.source_code:
-                trace.source_code = mutation_result.source
-                trace.compilation_xfails = list(trace.compilation_xfails) + list(
-                    mutation_result.compilation_xfails
-                )
-                trace.runtime_xfails = list(trace.runtime_xfails) + list(
-                    mutation_result.runtime_xfails
-                )
+            if mutation_result:
+                sources = trace.solc_json.get("sources")
+                if sources is None:
+                    sources = {}
+                    trace.solc_json["sources"] = sources
+                changed = False
+                for filename, content in mutation_result.sources.items():
+                    entry = sources.get(filename)
+                    if isinstance(entry, dict):
+                        if entry.get("content") != content:
+                            entry["content"] = content
+                            changed = True
+                    else:
+                        if entry != content:
+                            sources[filename] = {"content": content}
+                            changed = True
+
+                if changed:
+                    # TODO: Vyper solc_json may include per-source sha256sum and
+                    # top-level integrity metadata. Mutation updates content only,
+                    # so hashes can become stale unless recomputed or cleared.
+                    trace.compilation_xfails = list(trace.compilation_xfails) + list(
+                        mutation_result.compilation_xfails
+                    )
+                    trace.runtime_xfails = list(trace.runtime_xfails) + list(
+                        mutation_result.runtime_xfails
+                    )
 
         if trace.python_args and compiler_data:
             module_t = compiler_data.annotated_vyper_module._metadata["type"]

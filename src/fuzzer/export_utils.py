@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Callable
 
+from vyper.cli.vyper_json import get_output_formats
 from vyper.compiler.settings import Settings
 
 from fuzzer.trace_types import (
@@ -71,6 +72,61 @@ def normalize_compiler_settings(
     settings = Settings.from_dict(raw)
     result = settings_to_kwargs(settings)
     return result if result else None
+
+
+def _source_entry_content(entry: Any) -> Optional[str]:
+    if isinstance(entry, dict):
+        return entry.get("content")
+    if isinstance(entry, str):
+        return entry
+    return None
+
+
+def get_source_contents(solc_json: Dict[str, Any]) -> Dict[str, str]:
+    sources = solc_json.get("sources", {})
+    contents: Dict[str, str] = {}
+    for name, entry in sources.items():
+        content = _source_entry_content(entry)
+        if content is not None:
+            contents[str(name)] = content
+    return contents
+
+
+def get_primary_source(solc_json: Dict[str, Any]) -> tuple[str, str]:
+    contents = get_source_contents(solc_json)
+    if not contents:
+        raise ValueError("solc_json has no sources")
+
+    target_key: Optional[str] = None
+    try:
+        output_formats = get_output_formats(solc_json)
+    except Exception:
+        output_formats = {}
+
+    if output_formats:
+        target = next(iter(output_formats.keys()))
+        target_key = str(target)
+        if target_key not in contents:
+            posix = getattr(target, "as_posix", None)
+            if posix:
+                posix_key = posix()
+                if posix_key in contents:
+                    target_key = posix_key
+        if target_key not in contents and getattr(target, "name", None):
+            name_key = target.name
+            if name_key in contents:
+                target_key = name_key
+
+    if not target_key or target_key not in contents:
+        target_key = next(iter(contents.keys()))
+
+    return target_key, contents[target_key]
+
+
+def solc_json_source_size(solc_json: Optional[Dict[str, Any]]) -> int:
+    if not solc_json:
+        return 0
+    return sum(len(content) for content in get_source_contents(solc_json).values())
 
 
 class TestFilter:
@@ -200,17 +256,18 @@ class TestFilter:
                         return True
 
                 # Check source code filters
-                if trace.source_code:
+                if trace.solc_json:
+                    sources = list(get_source_contents(trace.solc_json).values())
                     # Check excludes
                     for pattern in self.source_excludes:
-                        if pattern.search(trace.source_code):
+                        if any(pattern.search(source) for source in sources):
                             return True
 
                     # Check includes (if any specified, must match at least one)
                     if self.source_includes:
                         matched = False
                         for pattern in self.source_includes:
-                            if pattern.search(trace.source_code):
+                            if any(pattern.search(source) for source in sources):
                                 matched = True
                                 break
                         if not matched:
@@ -326,15 +383,18 @@ def load_export(
                         trace_data.get("compiler_settings")
                     )
 
+                solc_json = trace_data.get("solc_json")
+                if trace_data["deployment_type"] == "source" and not solc_json:
+                    raise ValueError("source deployment trace missing solc_json")
+
                 trace = DeploymentTrace(
                     deployment_type=trace_data["deployment_type"],
                     contract_abi=trace_data["contract_abi"],
                     initcode=trace_data["initcode"],
                     calldata=trace_data.get("calldata"),
                     value=trace_data["value"],
-                    source_code=trace_data.get("source_code"),
                     annotated_ast=trace_data.get("annotated_ast"),
-                    solc_json=trace_data.get("solc_json"),
+                    solc_json=solc_json,
                     raw_ir=trace_data.get("raw_ir"),
                     blueprint_initcode_prefix=trace_data.get(
                         "blueprint_initcode_prefix"
@@ -456,8 +516,9 @@ def extract_test_cases(exports: Dict[Path, TestExport]) -> List[tuple[str, List[
                         test_cases.append((current_source, current_calldatas))
 
                     # Start new test case
-                    if trace.deployment_type == "source" and trace.source_code:
-                        current_source = trace.source_code
+                    if trace.deployment_type == "source" and trace.solc_json:
+                        _, source = get_primary_source(trace.solc_json)
+                        current_source = source
                         current_calldatas = []
                     else:
                         current_source = None

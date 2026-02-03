@@ -63,32 +63,19 @@ class BoaScenarioRunner(BaseScenarioRunner):
         self.coverage_collector = coverage_collector
         self.config_name = config_name
 
-    def _compile_from_source(
+    def _compile_from_solc_json(
         self,
-        source: str,
-        solc_json: Optional[Dict[str, Any]],
+        solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """Compile source in Boa and return a deployer."""
-        if solc_json is not None and len(solc_json.get("sources", {})) > 1:
-            if self.coverage_collector is None:
-                return _deployer_from_solc_json(
-                    solc_json, compiler_args=compiler_settings
-                )
-            with self.coverage_collector.collect_compile(config_name=self.config_name):
-                return _deployer_from_solc_json(
-                    solc_json, compiler_args=compiler_settings
-                )
-
         if self.coverage_collector is None:
-            return boa.loads_partial(source, compiler_args=compiler_settings)
+            return _deployer_from_solc_json(solc_json, compiler_args=compiler_settings)
 
         # Track coverage of Vyper's codegen/IR/venom passes during compilation.
-        # loads_partial triggers full compilation via VyperDeployer.__init__.
+        # VyperDeployer initialization triggers full compilation.
         with self.coverage_collector.collect_compile(config_name=self.config_name):
-            return boa.loads_partial(
-                source, compiler_args=compiler_settings, no_vvm=True
-            )
+            return _deployer_from_solc_json(solc_json, compiler_args=compiler_settings)
 
     def _deploy_compiled(
         self,

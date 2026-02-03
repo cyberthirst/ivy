@@ -47,11 +47,9 @@ class MultiRunner:
     def __init__(
         self,
         collect_storage_dumps: bool = False,
-        no_solc_json: bool = False,
     ):
         self.boa_configs = self.BOA_CONFIGS
         self.collect_storage_dumps = collect_storage_dumps
-        self.no_solc_json = no_solc_json
 
     def run(
         self,
@@ -62,7 +60,6 @@ class MultiRunner:
         """Run scenario on all runners, creating fresh runner instances."""
         ivy_runner = IvyScenarioRunner(
             collect_storage_dumps=self.collect_storage_dumps,
-            no_solc_json=self.no_solc_json,
         )
         ivy_result = ivy_runner.run(scenario)
         boa_results = self._run_boa_configs(scenario, coverage_collector)
