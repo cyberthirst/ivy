@@ -212,11 +212,7 @@ class ExprVisitor(BaseVisitor):
 
     def _eval_op(self, node, *args):
         handler = get_operator_handler(node.op)
-        if isinstance(node.op, (ast.LShift, ast.Invert)):
-            typ = node._metadata["type"]
-            res = handler(*args, typ=typ)
-        else:
-            res = handler(*args)
+        res = handler(*args)
         return box_value_from_node(node, res)
 
     def visit_BinOp(self, node: ast.BinOp):

@@ -1,10 +1,6 @@
 # ivy/evaluator/operators.py
 from typing import Any, Callable, Type
 from vyper.ast import nodes as ast
-from vyper.semantics.types.primitives import IntegerT, BytesM_T
-from vyper.semantics.types.user import FlagT
-from vyper.utils import unsigned_to_signed
-from ivy.types import VyperBytesM, VyperDecimal
 
 
 OPERATOR_REGISTRY: dict[Type[ast.VyperNode], Callable[..., Any]] = {}
@@ -63,45 +59,17 @@ def div_op(left: Any, right: Any) -> Any:
 
 @register_operator(ast.FloorDiv)
 def floor_div_op(left: Any, right: Any) -> Any:
-    if isinstance(left, VyperDecimal):
-        assert isinstance(right, VyperDecimal)
-        return left // right
-    # ints: truncate toward zero
-    if right == 0:
-        raise ZeroDivisionError("Cannot divide by zero")
-    sign = -1 if (left * right) < 0 else 1
-    return sign * (abs(left) // abs(right))
+    return left // right
 
 
 @register_operator(ast.Mod)
 def mod_op(left: Any, right: Any) -> Any:
-    if isinstance(left, VyperDecimal):
-        assert isinstance(right, VyperDecimal)
-        return left % right
-    if right == 0:
-        raise ValueError("Cannot modulo by 0")
-    sgn = -1 if left < 0 else 1
-    return sgn * (abs(left) % abs(right))
+    return left % right
 
 
 @register_operator(ast.Pow)
 def pow_op(left: Any, right: Any) -> Any:
-    # exponentiation by negative number is not allowed as negative numbers
-    # are represented via two's complement in EVM and thus the exponentiation
-    # would lead to overflow for any base but 0, 1, -1
-    # for consistency, Vyper disallows it for all bases and we follow this
-    # so this is basically just a quick path out
-    if right < 0:
-        raise ValueError("Exponentiation by negative number")
-
-    # optimization - calling `pow` with large numbers is computationally expensive
-    # when we're sure the result won't fit in 256 bits, we raise an error early
-    if left not in (0, 1, -1) and abs(right) > 256:
-        raise ValueError(
-            f"Exponentiation {left} ** {right} too large for the given type"
-        )
-
-    return pow(left, right)
+    return left ** right
 
 
 # ----------------------------------------------------------------------------
@@ -110,19 +78,8 @@ def pow_op(left: Any, right: Any) -> Any:
 
 
 @register_operator(ast.LShift)
-def lshift_op(left: Any, right: int, *, typ=None) -> Any:
-    if isinstance(left, VyperBytesM):
-        return left << right
-
-    if typ is None and hasattr(left, "typ"):
-        typ = left.typ
-    assert isinstance(typ, IntegerT), f"Shift not supported for {typ}"
-
-    bits = typ.bits
-    result = (left << right) % 2**bits
-    if typ.is_signed:
-        result = unsigned_to_signed(result, bits)
-    return result
+def lshift_op(left: Any, right: int) -> Any:
+    return left << right
 
 
 @register_operator(ast.RShift)
@@ -201,18 +158,8 @@ def usub_op(operand: Any) -> Any:
 
 
 @register_operator(ast.Invert)
-def invert_op(operand: Any, *, typ) -> Any:
-    assert isinstance(typ, (IntegerT, BytesM_T, FlagT)), f"Invert not supported for {typ}"
-
-    if isinstance(typ, FlagT):
-        return ~operand
-
-    if isinstance(typ, BytesM_T):
-        assert isinstance(operand, VyperBytesM)
-        return ~operand
-
-    mask = (1 << typ.bits) - 1
-    return mask ^ operand
+def invert_op(operand: Any) -> Any:
+    return ~operand
 
 
 # ----------------------------------------------------------------------------

@@ -25,6 +25,7 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.data_locations import DataLocation
+from vyper.utils import unsigned_to_signed
 
 from ivy.utils import lrudict, _trunc_div
 from ivy.journal import Journal, JournalEntryType
@@ -61,6 +62,46 @@ class VyperInt(VyperValue, int):
 
     def __deepcopy__(self, memo):
         return VyperInt(int(self), self.typ)
+
+    def _mask_to_bits(self, value: int) -> int:
+        bits = self.typ.bits
+        masked = value & ((1 << bits) - 1)
+        if self.typ.is_signed:
+            return unsigned_to_signed(masked, bits)
+        return masked
+
+    def __floordiv__(self, other: int) -> int:
+        if other == 0:
+            raise ZeroDivisionError("Cannot divide by zero")
+        return _trunc_div(int(self), int(other))
+
+    def __mod__(self, other: int) -> int:
+        if other == 0:
+            raise ValueError("Cannot modulo by 0")
+        n = int(self)
+        d = int(other)
+        return n - _trunc_div(n, d) * d
+
+    def __pow__(self, other: int, modulo=None) -> int:
+        if modulo is not None:
+            return pow(int(self), int(other), modulo)
+
+        right = int(other)
+        if right < 0:
+            raise ValueError("Exponentiation by negative number")
+
+        left = int(self)
+        if left not in (0, 1, -1) and abs(right) > 256:
+            raise ValueError(f"Exponentiation {left} ** {right} too large for the given type")
+
+        return pow(left, right)
+
+    def __lshift__(self, other: int) -> int:
+        return self._mask_to_bits(int(self) << int(other))
+
+    def __invert__(self) -> int:
+        mask = (1 << self.typ.bits) - 1
+        return mask ^ int(self)
 
 
 class VyperBytes(VyperValue, bytes):
