@@ -140,7 +140,13 @@ def _encode_int(abi_t: ABI_GIntM, value: Union[int, Flag]) -> bytes:
     if isinstance(value, VyperDecimal):
         value = value.value
     if isinstance(value, decimal.Decimal):
-        value = int(value * decimal.Decimal("10") ** 10)
+        if abi_t.m_bits != 168 or not abi_t.signed:
+            raise EncodeError("Decimal values are only supported for int168")
+        with decimal.localcontext(decimal.Context(prec=128)) as ctx:
+            scaled_value = value.scaleb(10).to_integral_exact()
+            if ctx.flags[decimal.Inexact]:
+                raise EncodeError("Precision of value is greater than allowed")
+        value = int(scaled_value)
     if not isinstance(value, int):
         raise EncodeError(f"Expected int, got {type(value)}")
 
