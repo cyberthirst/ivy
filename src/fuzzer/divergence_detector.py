@@ -98,6 +98,33 @@ def _get_xfail_reasons(expectations: list[XFailExpectation]) -> list[str]:
     return [xf.reason or "(unspecified)" for xf in expectations]
 
 
+def _deployment_outcome_label(result: DeploymentResult) -> str:
+    if result.is_compilation_failure:
+        return "compilation_failure"
+    if result.is_compiler_crash:
+        return "compiler_crash"
+    if result.success:
+        return "success"
+    return "runtime_failure"
+
+
+def _execution_outcome_label(
+    result: Optional[Union[DeploymentResult, CallResult]],
+) -> str:
+    if result is None:
+        return "no_result"
+    if result.is_runtime_failure:
+        return "runtime_failure"
+    if result.success:
+        return "success"
+    if isinstance(result, DeploymentResult):
+        if result.is_compilation_failure:
+            return "compilation_failure"
+        if result.is_compiler_crash:
+            return "compiler_crash"
+    return "runtime_failure"
+
+
 class DivergenceDetector:
     """Detects divergences between execution results."""
 
@@ -166,7 +193,10 @@ class DivergenceDetector:
                 deployment_result = trace_result.result
                 if isinstance(deployment_result, DeploymentResult):
                     reasons = _get_xfail_reasons(trace_result.compilation_xfails)
-                    if reasons and not deployment_result.is_compilation_failure:
+                    if reasons and not (
+                        deployment_result.is_compilation_failure
+                        or deployment_result.is_compiler_crash
+                    ):
                         return Divergence(
                             type=DivergenceType.XFAIL,
                             step=trace_result.trace_index,
@@ -174,7 +204,10 @@ class DivergenceDetector:
                             divergent_runner=xfail_runner_name,
                             divergent_config=xfail_config,
                             xfail_expected="compilation",
-                            xfail_actual=f"{xfail_runner_name}: {'compilation_failure' if deployment_result.is_compilation_failure else ('success' if deployment_result.success else 'runtime_failure')}",
+                            xfail_actual=(
+                                f"{xfail_runner_name}: "
+                                f"{_deployment_outcome_label(deployment_result)}"
+                            ),
                             xfail_reasons=reasons,
                         )
 
@@ -193,7 +226,10 @@ class DivergenceDetector:
                             divergent_runner=xfail_runner_name,
                             divergent_config=xfail_config,
                             xfail_expected="runtime",
-                            xfail_actual=f"{xfail_runner_name}: {'runtime_failure' if exec_result.is_runtime_failure else ('success' if exec_result.success else 'compilation_failure')}",
+                            xfail_actual=(
+                                f"{xfail_runner_name}: "
+                                f"{_execution_outcome_label(exec_result)}"
+                            ),
                             xfail_reasons=runtime_reasons,
                         )
 
