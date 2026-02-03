@@ -124,6 +124,56 @@ class VyperBytesM(VyperValue, bytes):
     def __deepcopy__(self, memo):
         return VyperBytesM(bytes(self), self.typ)
 
+    def _require_bytesm_other(self, other: object) -> VyperBytesM:
+        if not isinstance(other, VyperBytesM):
+            raise TypeError("BytesM operations require BytesM operands")
+        if other.typ.length != self.typ.length:
+            raise ValueError("BytesM length mismatch")
+        return other
+
+    def _require_bytes32(self, op: str) -> None:
+        if self.typ.length != 32:
+            raise ValueError(f"{op} only supported for bytes32")
+
+    def __and__(self, other: object):
+        other_bytes = self._require_bytesm_other(other)
+        result = bytes(l & r for l, r in zip(self, other_bytes))
+        return VyperBytesM(result, self.typ)
+
+    def __or__(self, other: object):
+        other_bytes = self._require_bytesm_other(other)
+        result = bytes(l | r for l, r in zip(self, other_bytes))
+        return VyperBytesM(result, self.typ)
+
+    def __xor__(self, other: object):
+        other_bytes = self._require_bytesm_other(other)
+        result = bytes(l ^ r for l, r in zip(self, other_bytes))
+        return VyperBytesM(result, self.typ)
+
+    def __invert__(self):
+        self._require_bytes32("Invert")
+        val = int.from_bytes(self, "big")
+        mask = (1 << (self.typ.length * 8)) - 1
+        inverted = mask ^ val
+        return VyperBytesM(inverted.to_bytes(self.typ.length, "big"), self.typ)
+
+    def __lshift__(self, other: VyperInt):
+        assert isinstance(other, VyperInt)
+        assert not other.typ.is_signed and other >= 0
+        self._require_bytes32("Shift")
+        val = int.from_bytes(self, "big")
+        mask = (1 << (self.typ.length * 8)) - 1
+        shifted = (val << other) & mask
+        return VyperBytesM(shifted.to_bytes(self.typ.length, "big"), self.typ)
+
+    def __rshift__(self, other: VyperInt):
+        assert isinstance(other, VyperInt)
+        assert not other.typ.is_signed and other >= 0
+        self._require_bytes32("Shift")
+        val = int.from_bytes(self, "big")
+        shifted = val >> other
+        return VyperBytesM(shifted.to_bytes(self.typ.length, "big"), self.typ)
+
 
 # Singleton BoolT instance for VyperBool
 _BOOL_T = BoolT()
