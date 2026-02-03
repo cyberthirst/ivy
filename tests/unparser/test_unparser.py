@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from vyper.compiler.phases import CompilerData
+from vyper.compiler.input_bundle import FileInput
 
 from unparser.unparser import unparse
 from ivy.frontend.loader import loads_from_solc_json
@@ -38,9 +39,23 @@ def _strip(obj):
     return obj
 
 
-def _as_clean_dict(code: str) -> dict:
+def _as_clean_dict(
+    code: str,
+    *,
+    file_input: FileInput | None = None,
+    input_bundle=None,
+) -> dict:
     """Convert source code to a normalized AST dict for comparison."""
-    ast = CompilerData(code).annotated_vyper_module
+    if file_input is None:
+        ast = CompilerData(code).annotated_vyper_module
+    else:
+        roundtrip_input = FileInput(
+            source_id=file_input.source_id,
+            path=file_input.path,
+            resolved_path=file_input.resolved_path,
+            contents=code,
+        )
+        ast = CompilerData(roundtrip_input, input_bundle).annotated_vyper_module
     return _strip(ast.to_dict())
 
 
@@ -85,7 +100,11 @@ def test_unparser(solc_json):
 
     # Compare normalized ASTs
     original_dict = _strip(original_ast.to_dict())
-    roundtrip_dict = _as_clean_dict(roundtrip_source)
+    roundtrip_dict = _as_clean_dict(
+        roundtrip_source,
+        file_input=compiler_data.file_input,
+        input_bundle=compiler_data.input_bundle,
+    )
 
     assert original_dict == roundtrip_dict, (
         f"AST mismatch after roundtrip.\n"
