@@ -4,7 +4,7 @@ from vyper.ast import nodes as ast
 from vyper.semantics.types.primitives import IntegerT, BytesM_T
 from vyper.semantics.types.user import FlagT
 from vyper.utils import unsigned_to_signed
-from ivy.types import VyperDecimal
+from ivy.types import VyperBytesM, VyperDecimal
 
 
 OPERATOR_REGISTRY: dict[Type[ast.VyperNode], Callable[..., Any]] = {}
@@ -110,7 +110,14 @@ def pow_op(left: Any, right: Any) -> Any:
 
 
 @register_operator(ast.LShift)
-def lshift_op(left: int, right: int, *, typ) -> int:
+def lshift_op(left: Any, right: int, *, typ=None) -> Any:
+    if isinstance(left, VyperBytesM):
+        return left << right
+
+    if typ is None and hasattr(left, "typ"):
+        typ = left.typ
+    assert isinstance(typ, IntegerT), f"Shift not supported for {typ}"
+
     bits = typ.bits
     result = (left << right) % 2**bits
     if typ.is_signed:
@@ -119,22 +126,22 @@ def lshift_op(left: int, right: int, *, typ) -> int:
 
 
 @register_operator(ast.RShift)
-def rshift_op(left: int, right: int) -> int:
+def rshift_op(left: Any, right: int) -> Any:
     return left >> right
 
 
 @register_operator(ast.BitOr)
-def bitor_op(left: int, right: int) -> int:
+def bitor_op(left: Any, right: Any) -> Any:
     return left | right
 
 
 @register_operator(ast.BitXor)
-def bitxor_op(left: int, right: int) -> int:
+def bitxor_op(left: Any, right: Any) -> Any:
     return left ^ right
 
 
 @register_operator(ast.BitAnd)
-def bitand_op(left: int, right: int) -> int:
+def bitand_op(left: Any, right: Any) -> Any:
     return left & right
 
 
@@ -201,10 +208,8 @@ def invert_op(operand: Any, *, typ) -> Any:
         return ~operand
 
     if isinstance(typ, BytesM_T):
-        val = int.from_bytes(operand, "big")
-        mask = (1 << typ.m_bits) - 1
-        inverted = mask ^ val
-        return inverted.to_bytes(typ.length, "big")
+        assert isinstance(operand, VyperBytesM)
+        return ~operand
 
     mask = (1 << typ.bits) - 1
     return mask ^ operand
