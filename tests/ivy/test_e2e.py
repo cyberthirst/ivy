@@ -21,6 +21,22 @@ def foo() -> uint256:
     assert c.foo() == 44
 
 
+def test_if_body_ignores_internal_return():
+    src = """
+@internal
+def priv() -> uint256:
+    return 0
+
+@external
+def dont_doit():
+    if True:
+        self.priv()
+    """
+
+    c = loads(src)
+    assert c.dont_doit() is None
+
+
 def test_if_block_shadowing():
     src = """
 @external

@@ -190,12 +190,6 @@ class StmtVisitor(BaseVisitor):
     def visit_body(self, body: list[VyperNode]):
         for stmt in body:
             result = self.visit(stmt)
-            if (
-                result == "continue"
-                or result == "break"
-                or isinstance(result, Exception)
-            ):
-                return result
         return None
 
     @abstractmethod
