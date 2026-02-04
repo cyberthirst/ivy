@@ -1,4 +1,5 @@
 from typing import Any, Union, Optional
+import hashlib
 import math
 
 from vyper.exceptions import UnimplementedException
@@ -27,7 +28,14 @@ from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
 from ivy.exceptions import Assert, GasReference, Revert, UnsupportedFeature
-from ivy.types import Address, VyperDecimal, VyperBytes, VyperInt, VyperString
+from ivy.types import (
+    Address,
+    VyperDecimal,
+    VyperBytes,
+    VyperBytesM,
+    VyperInt,
+    VyperString,
+)
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
 from ivy.builtins import unsafe_math_utils as unsafe_math
@@ -570,6 +578,21 @@ def builtin_keccak256(value: Union[str, bytes]) -> bytes:
         raise TypeError(f"keccak256 expects bytes or string, got {type(value)}")
 
     return keccak(value)
+
+
+def builtin_sha256(value: Union[VyperBytes, VyperBytesM, VyperString]) -> bytes:
+    if isinstance(value, VyperString):
+        data = bytes(value)
+    elif isinstance(value, VyperBytes):
+        data = bytes(value)
+    elif isinstance(value, VyperBytesM):
+        if value.typ.length != 32:
+            raise TypeError("sha256 expects bytes32 for fixed-size bytes input")
+        data = bytes(value)
+    else:
+        raise TypeError(f"sha256 expects Bytes/String/bytes32, got {type(value)}")
+
+    return hashlib.sha256(data).digest()
 
 
 def builtin_extract32(
