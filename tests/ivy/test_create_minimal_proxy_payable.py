@@ -106,6 +106,12 @@ def create_proxy_with_all_balance() -> uint256:
     assert env.get_balance(c.address) == 0
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create_minimal_proxy_value_with_salt(get_contract, env):
     """create_minimal_proxy_to with value and salt (CREATE2) should work."""
     src = """
