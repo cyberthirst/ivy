@@ -26,7 +26,7 @@ import ivy.builtins.create_utils as create_utils
 from ivy.evm.precompiles import precompile_ecrecover
 from ivy.context import ExecutionOutput
 from ivy.expr.default_values import get_default_value
-from ivy.exceptions import Assert, GasReference, Revert
+from ivy.exceptions import Assert, GasReference, Revert, UnsupportedFeature
 from ivy.types import Address, VyperDecimal, VyperBytes, VyperInt, VyperString
 import ivy.builtins.convert_utils as convert_utils
 from ivy.evm.evm_core import EVMCore
@@ -355,6 +355,11 @@ def builtin_create_copy_of(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
+    if salt is not None:
+        raise UnsupportedFeature(
+            "create_copy_of with salt (CREATE2) is unsupported in Ivy: "
+            "https://github.com/cyberthirst/ivy/issues/21"
+        )
     code = create_utils.deepcopy_code(evm.state, target)
     if code is None:
         # Target has no code to copy - this is an extcodesize check failure
@@ -381,6 +386,11 @@ def builtin_create_from_blueprint(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
+    if salt is not None:
+        raise UnsupportedFeature(
+            "create_from_blueprint with salt (CREATE2) is unsupported in Ivy: "
+            "https://github.com/cyberthirst/ivy/issues/21"
+        )
     # reset_global_vars=True because blueprint creation runs the constructor
     # which will allocate fresh variables
     code = create_utils.deepcopy_code(evm.state, target, reset_global_vars=True)

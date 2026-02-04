@@ -601,6 +601,12 @@ def deploy_and_destroy(recipient: address) -> address:
     )
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_factory_create2_child_selfdestruct_same_tx(get_contract, env):
     """
     EIP-6780 regression: factory creates child via CREATE2, child selfdestructs in same tx.

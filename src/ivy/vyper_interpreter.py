@@ -40,6 +40,7 @@ from ivy.exceptions import (
     FunctionNotFound,
     PayabilityViolation,
     StaticCallViolation,
+    UnsupportedFeature,
 )
 from ivy.tracer import Tracer
 from ivy.types import (
@@ -492,6 +493,11 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise NotImplementedError(f"Assignment to {type(target)} not implemented")
 
     def _handle_address_variable(self, node: ast.Attribute):
+        if node.attr in ("code", "codesize", "codehash"):
+            raise UnsupportedFeature(
+                "Address code access (code/codesize/codehash) is unsupported in Ivy: "
+                "https://github.com/cyberthirst/ivy/issues/21"
+            )
         # x.address
         if node.attr == "address":
             return self.visit(node.value)

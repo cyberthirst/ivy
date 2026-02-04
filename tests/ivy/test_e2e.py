@@ -3887,6 +3887,12 @@ def inner() -> uint256:
     assert result == 42
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_codesize(get_contract, env):
     """Test codesize returns the bytecode size for various address types."""
     src = """
@@ -3921,6 +3927,12 @@ def get_self_codesize() -> uint256:
     assert c.get_codesize(arbitrary) == 0
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_codesize_another_contract(get_contract, env):
     """Test codesize works for querying another deployed contract."""
     src1 = """
@@ -3943,6 +3955,12 @@ def get_codesize(addr: address) -> uint256:
     assert c1_codesize > 0
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_codehash(get_contract, env, keccak):
     """Test codehash returns the keccak256 hash of the bytecode."""
     src = """
@@ -3980,6 +3998,12 @@ def get_self_codehash() -> bytes32:
     assert c.get_codehash(arbitrary) == b"\x00" * 32
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_codehash_another_contract(get_contract, env):
     """Test codehash works for querying another deployed contract."""
     src1 = """
@@ -4006,6 +4030,12 @@ def get_codehash(addr: address) -> bytes32:
     assert c1_codehash != c2_self_codehash
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_address_code(get_contract, env):
     """Test address.code returns the runtime bytecode (via slice)."""
     src = """
@@ -4040,6 +4070,12 @@ def get_self_codesize() -> uint256:
     assert c.get_codesize(eoa) == 0
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_address_code_slice(get_contract, env):
     """Test address.code via slice with specific lengths."""
     src = """
@@ -4062,6 +4098,12 @@ def get_self_code_slice() -> Bytes[32]:
     assert c.get_code_slice(c.address) == self_code
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_address_code_another_contract(get_contract, env):
     """Test address.code works for querying another deployed contract."""
     src1 = """
@@ -4088,6 +4130,12 @@ def get_code_slice(addr: address) -> Bytes[16]:
     assert c1_code != c2_self_code
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_code_codesize_consistency(get_contract, env):
     """Test that codesize works correctly."""
     src = """
@@ -4122,6 +4170,12 @@ def get_self_code_slice() -> Bytes[100]:
     assert c.get_codesize(eoa) == 0
 
 
+@pytest.mark.xfail(
+    reason=(
+        "Address code access unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_codehash_consistency(get_contract, env, keccak):
     """Test that codehash returns correct values."""
     src = """
@@ -4209,6 +4263,12 @@ def test_static_value(middle: address, target: address) -> bool:
 # ============================================================================
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_copy_of_address(get_contract, keccak):
     """Test that create_copy_of with salt produces the correct CREATE2 address."""
     src = """
@@ -4236,6 +4296,12 @@ def create_with_salt(salt: bytes32) -> address:
     assert created_addr.canonical_address == expected_addr
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_copy_of_different_salts(get_contract):
     """Test that different salts produce different addresses."""
     src = """
@@ -4257,6 +4323,12 @@ def create_with_salt(salt: bytes32) -> address:
     assert addr1 != addr2
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_copy_of_deterministic(get_contract, env, keccak):
     """Test that CREATE2 is deterministic - same inputs produce same address."""
     # Deploy two separate factory contracts
@@ -4324,6 +4396,12 @@ def create_proxy(target: address, salt: bytes32) -> address:
     assert created_proxy.canonical_address == expected_addr
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_from_blueprint_address(get_contract, make_input_bundle, keccak):
     """Test that create_from_blueprint with salt produces correct CREATE2 address.
 
@@ -4391,6 +4469,12 @@ def create_from_bp(bp: address, salt: bytes32, init_val: uint256) -> address:
     assert created_addr_2.canonical_address == expected_addr_2
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_same_salt_same_sender_same_code(get_contract, keccak):
     """Test that CREATE2 with same salt, sender, and code always gives same address."""
     src = """
@@ -4415,6 +4499,12 @@ def get_create2_addr(salt: bytes32) -> address:
     assert addr1.canonical_address == expected
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_nonce_incremented(get_contract):
     """Test that nonce is incremented for CREATE2 just like CREATE.
 
@@ -4454,6 +4544,12 @@ def create_without_salt() -> address:
     assert addr2 != addr3
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_created_contract_works(get_contract):
     """Test that contracts created via CREATE2 work correctly."""
     src = """

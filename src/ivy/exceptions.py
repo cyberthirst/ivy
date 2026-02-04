@@ -14,7 +14,12 @@ class SelfDestruct(EVMException):
     pass
 
 
-class GasReference(EVMException):
+class UnsupportedFeature(EVMException):
+    def __init__(self, message="Unsupported feature in Ivy"):
+        super().__init__(message)
+
+
+class GasReference(UnsupportedFeature):
     def __init__(self, message="Gas is not a supported concept in Ivy"):
         super().__init__(message)
 
