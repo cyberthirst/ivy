@@ -49,6 +49,7 @@ from ivy.types import (
     VyperBytesM,
     VyperString,
 )
+from ivy.utils import calldata_slice
 
 # Union of all possible decoded types
 DecodedValue = Union[
@@ -80,18 +81,10 @@ def _strict_slice(payload, start, length, from_calldata=False):
     payload_len = len(payload)
 
     if from_calldata:
-        # For calldata, zero-extend if reading beyond the payload
-        if start >= payload_len:
-            # Entirely out of bounds - return zeros
-            return b"\x00" * length
-        elif end > payload_len:
-            # Partially out of bounds - return available data + zeros
-            available = payload[start:payload_len]
-            padding = b"\x00" * (end - payload_len)
-            return available + padding
-        else:
-            # Within bounds
-            return payload[start:end]
+        try:
+            return calldata_slice(payload, start, length)
+        except ValueError as exc:
+            raise DecodeError(str(exc)) from exc
     else:
         # For regular payloads, enforce strict bounds
         if end > payload_len:

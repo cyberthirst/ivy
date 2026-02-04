@@ -79,6 +79,25 @@ def compute_create2_address(sender: bytes, salt: bytes, init_code: bytes) -> byt
     return computed_address[-20:]
 
 
+def calldata_slice(payload: bytes, start: int, length: int) -> bytes:
+    """Slice calldata with zero-extension beyond the payload length."""
+    if length == 0:
+        return b""
+    if start < 0:
+        raise ValueError(f"OOB {start}")
+
+    payload_len = len(payload)
+    end = start + length
+
+    if start >= payload_len:
+        return b"\x00" * length
+    if end > payload_len:
+        available = payload[start:payload_len]
+        padding = b"\x00" * (end - payload_len)
+        return available + padding
+    return payload[start:end]
+
+
 def _trunc_div(n: int, d: int) -> int:
     """
     Integer division rounded **toward 0** for all sign combinations.
