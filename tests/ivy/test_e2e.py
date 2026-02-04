@@ -21,6 +21,21 @@ def foo() -> uint256:
     assert c.foo() == 44
 
 
+def test_if_block_shadowing():
+    src = """
+@external
+def foo(a: int128) -> uint256:
+    if True:
+        gen_var0: Bytes[64] = b"\\x01\\x02"
+        gen_var0 = concat(b"", b"\\xff", b"\\x00" if False else b"")
+    gen_var0: Bytes[64] = concat(b"", b"", b"\\x00", b"\\xff")
+    return as_wei_value(a, "grand")
+    """
+
+    c = loads(src)
+    assert c.foo(127) == 127000000000000000000000
+
+
 def test_for_control_flow():
     src = """
 @external

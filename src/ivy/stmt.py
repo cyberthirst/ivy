@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from contextlib import contextmanager
 
 from vyper.ast.nodes import VyperNode
 from vyper.ast import nodes as ast
@@ -31,6 +32,14 @@ class BreakException(Exception):
 
 
 class StmtVisitor(BaseVisitor):
+    @contextmanager
+    def _scoped(self):
+        self._push_scope()
+        try:
+            yield
+        finally:
+            self._pop_scope()
+
     def visit_Expr(self, node: ast.Expr):
         return self.visit(node.value)
 
@@ -55,9 +64,11 @@ class StmtVisitor(BaseVisitor):
         taken = bool(condition)
         self._on_branch(node, taken)
         if taken:
-            return self.visit_body(node.body)
+            with self._scoped():
+                return self.visit_body(node.body)
         elif node.orelse:
-            return self.visit_body(node.orelse)
+            with self._scoped():
+                return self.visit_body(node.orelse)
         return None
 
     def _revert_with_msg(self, msg_node, is_assert=False):
