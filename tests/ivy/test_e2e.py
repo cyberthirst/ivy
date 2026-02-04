@@ -4371,6 +4371,12 @@ def compute_create2_addr(salt: bytes32) -> address:
     assert created_addr.canonical_address == expected_addr
 
 
+@pytest.mark.xfail(
+    reason=(
+        "CREATE2 with salt unsupported in Ivy: "
+        "https://github.com/cyberthirst/ivy/issues/21"
+    )
+)
 def test_create2_minimal_proxy_address(get_contract, keccak):
     """Test that create_minimal_proxy_to with salt produces correct CREATE2 address."""
     target_src = """

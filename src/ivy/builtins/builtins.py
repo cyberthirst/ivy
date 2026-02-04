@@ -431,6 +431,11 @@ def builtin_create_minimal_proxy_to(
     revert_on_failure: bool = True,
     salt: Optional[bytes] = None,
 ) -> Address:
+    if salt is not None:
+        raise UnsupportedFeature(
+            "create_minimal_proxy_to with salt (CREATE2) is unsupported in Ivy: "
+            "https://github.com/cyberthirst/ivy/issues/21"
+        )
     # target is an Address which has .typ
     encoded_target = builtin_abi_encode(target)
     code = create_utils.MinimalProxyFactory.get_proxy_contract_data()
