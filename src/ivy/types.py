@@ -135,6 +135,8 @@ class VyperInt(VyperValue, int):
     def __lshift__(self, other: object) -> int:
         shift = _require_unsigned_shift_amount(other, "Shift")
         assert self.typ.bits == 256, "Shift only supported for int256/uint256"
+        if shift >= self.typ.bits:
+            return 0
         return self._mask_to_bits(int(self) << shift)
 
     def __rshift__(self, other: object) -> int:
@@ -341,6 +343,8 @@ class VyperBytesM(VyperValue, bytes):
     def __lshift__(self, other: VyperInt):
         shift = _require_unsigned_shift_amount(other, "Shift")
         self._require_bytes32("Shift")
+        if shift >= 256:
+            return VyperBytesM(b"\x00" * self.typ.length, self.typ)
         val = int.from_bytes(self, "big")
         mask = (1 << (self.typ.length * 8)) - 1
         shifted = (val << shift) & mask

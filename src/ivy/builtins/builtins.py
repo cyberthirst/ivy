@@ -532,10 +532,15 @@ def builtin_shift(x: int, shift: int) -> int:
     """Shift x by shift bits. Positive = left shift, negative = right shift.
     For signed types, converts the result to signed representation when >= 2^255.
     """
-    if shift >= 0:
+    if shift >= 256:
+        result = 0
+    elif shift >= 0:
         result = (x << shift) % 2**256
     else:
-        result = x >> (-shift)
+        if -shift >= 256:
+            result = -1 if x.typ.is_signed and int(x) < 0 else 0
+        else:
+            result = x >> (-shift)
 
     if x.typ.is_signed and result >= 2**255:
         result -= 2**256

@@ -188,10 +188,15 @@ def _builtin_shift(call: ast.Call, args: tuple[Any, ...]) -> Any:
         raise ConstEvalError("shift expects int value")
     shift = int(args[1])
 
-    if shift >= 0:
+    if shift >= 256:
+        result = 0
+    elif shift >= 0:
         result = (int(value) << shift) % 2**256
     else:
-        result = int(value) >> (-shift)
+        if -shift >= 256:
+            result = -1 if value.typ.is_signed and int(value) < 0 else 0
+        else:
+            result = int(value) >> (-shift)
 
     if value.typ.is_signed and result >= 2**255:
         result -= 2**256
