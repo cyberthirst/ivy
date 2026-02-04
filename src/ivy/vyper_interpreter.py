@@ -193,21 +193,26 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def _prologue(self, func_t, args):
         self._push_fun_ctx(func_t)
         self._push_scope()
+        try:
+            if func_t.nonreentrant:
+                self.lock(func_t.mutability)
 
-        if func_t.nonreentrant:
-            self.lock(func_t.mutability)
-
-        func_args = func_t.arguments
-        for arg, param in zip(args, func_args):
-            self._new_local(param.name, param.typ)
-            self.set_variable(param.name, arg)
-
-        # check if we need to assign default values
-        if len(args) < len(func_args):
-            for param in func_args[len(args) :]:
+            func_args = func_t.arguments
+            for arg, param in zip(args, func_args):
                 self._new_local(param.name, param.typ)
-                default_value = self.visit(param.default_value)
-                self.set_variable(param.name, default_value)
+                self.set_variable(param.name, arg)
+
+            # check if we need to assign default values
+            if len(args) < len(func_args):
+                for param in func_args[len(args) :]:
+                    self._new_local(param.name, param.typ)
+                    default_value = self.visit(param.default_value)
+                    self.set_variable(param.name, default_value)
+        except Exception:
+            # Ensure interpreter state is unwound if prologue setup fails.
+            self._pop_scope()
+            self._pop_fun_ctx()
+            raise
 
     def _epilogue(self, func_t):
         if func_t.nonreentrant:
@@ -364,15 +369,23 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # TODO: rewrite this using a ctx manager?
         self._prologue(func_t, args)
         ret = None
+        success = False
 
-        for stmt in func_t.decl_node.body:
-            try:
-                self.visit(stmt)
-            except ReturnException as e:
-                ret = e.value
-                break
-
-        self._epilogue(func_t)
+        try:
+            for stmt in func_t.decl_node.body:
+                try:
+                    self.visit(stmt)
+                except ReturnException as e:
+                    ret = e.value
+                    break
+            success = True
+        finally:
+            if success:
+                self._epilogue(func_t)
+            else:
+                # On failure, unwind interpreter scopes without touching EVM state.
+                self._pop_scope()
+                self._pop_fun_ctx()
 
         if func_t.is_deploy:
             return self.current_context.contract
