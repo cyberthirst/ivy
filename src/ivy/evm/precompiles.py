@@ -1,7 +1,10 @@
+import hashlib
+
 import coincurve
 from eth_utils import keccak
 
 from ivy.types import Address
+from ivy.utils import calldata_slice
 
 
 SECP256K1N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
@@ -49,7 +52,39 @@ def precompile_identity(data: bytes) -> bytes:
     return data
 
 
+def precompile_sha256(data: bytes) -> bytes:
+    return hashlib.sha256(data).digest()
+
+
+def precompile_ripemd160(data: bytes) -> bytes:
+    hash_bytes = hashlib.new("ripemd160", data).digest()
+    return hash_bytes.rjust(32, b"\x00")
+
+
+def precompile_modexp(data: bytes) -> bytes:
+    base_len = int.from_bytes(calldata_slice(data, 0, 32), "big")
+    exp_len = int.from_bytes(calldata_slice(data, 32, 32), "big")
+    mod_len = int.from_bytes(calldata_slice(data, 64, 32), "big")
+
+    if base_len == 0 and mod_len == 0:
+        return b""
+
+    base = int.from_bytes(calldata_slice(data, 96, base_len), "big")
+    exp_start = 96 + base_len
+    exp = int.from_bytes(calldata_slice(data, exp_start, exp_len), "big")
+    mod_start = exp_start + exp_len
+    modulus = int.from_bytes(calldata_slice(data, mod_start, mod_len), "big")
+
+    if modulus == 0:
+        return b"\x00" * mod_len
+
+    return pow(base, exp, modulus).to_bytes(mod_len, "big")
+
+
 PRECOMPILE_REGISTRY = {
     Address(0x1): precompile_ecrecover,
+    Address(0x2): precompile_sha256,
+    Address(0x3): precompile_ripemd160,
     Address(0x4): precompile_identity,
+    Address(0x5): precompile_modexp,
 }
