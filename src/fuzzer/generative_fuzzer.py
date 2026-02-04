@@ -163,7 +163,7 @@ class GenerativeFuzzer(BaseFuzzer):
 
                 # Add to evolved corpus if no compilation failures
                 # (divergences are fine - we want to keep exploring that space)
-                if not analysis.compile_failures:
+                if not analysis.compile_failures and not analysis.crashes:
                     self.corpus.add_evolved(mutated_scenario)
 
                 if self._iteration % log_interval == 0:
