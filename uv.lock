@@ -1531,7 +1531,7 @@ wheels = [
 [[package]]
 name = "titanoboa"
 version = "0.2.8"
-source = { git = "https://github.com/cyberthirst/titanoboa.git?rev=fuzzing#7faa57938b443268f1067a0dbebcd31cc694802a" }
+source = { git = "https://github.com/cyberthirst/titanoboa.git?rev=fuzzing#34e0aff13480ddb63e62eb7c3c7708614a84518f" }
 dependencies = [
     { name = "eth-abi" },
     { name = "eth-account" },
