@@ -196,6 +196,13 @@ def main():
 
     test_filter = TestFilter(exclude_multi_module=True)
     exclude_unsupported_patterns(test_filter)
+    # Exclude `send(...)` because its success depends on EVM gas stipend semantics.
+    # The EVM adds a 2300 gas stipend only when `value > 0` for CALL, so
+    # `send(to, 0)` executes the callee with *zero* gas. Whether the call succeeds
+    # then depends on the callee's gas needs (e.g., precompiles require gas to run).
+    # Ivy does not model gas, so it cannot decide if 2300 is enough (or if 0 is too
+    # little) for the recipient to execute, leading to systematic divergences.
+    test_filter.exclude_source(r"\bsend\s*\(")
     test_filter.include_path("functional/builtins/codegen/")
     test_filter.exclude_name("zero_length_side_effects")
 
