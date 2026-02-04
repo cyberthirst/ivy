@@ -87,8 +87,6 @@ class Divergence:
             result["traces"] = []
             for trace in self.scenario.traces[: self.step + 1]:
                 trace_dict = asdict(trace)
-                # Remove large fields that aren't needed for replay
-                trace_dict.pop("annotated_ast", None)
                 result["traces"].append(trace_dict)
 
         return result

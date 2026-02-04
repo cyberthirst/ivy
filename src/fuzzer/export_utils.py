@@ -354,18 +354,13 @@ def load_export(
 
                 trace = DeploymentTrace(
                     deployment_type=trace_data["deployment_type"],
-                    contract_abi=trace_data["contract_abi"],
-                    initcode=trace_data["initcode"],
                     calldata=trace_data.get("calldata"),
                     value=trace_data["value"],
-                    annotated_ast=trace_data.get("annotated_ast"),
                     solc_json=solc_json,
-                    raw_ir=trace_data.get("raw_ir"),
                     blueprint_initcode_prefix=trace_data.get(
                         "blueprint_initcode_prefix"
                     ),
                     deployed_address=trace_data["deployed_address"],
-                    runtime_bytecode=trace_data["runtime_bytecode"],
                     deployment_succeeded=trace_data["deployment_succeeded"],
                     env=env,
                     python_args=trace_data.get("python_args"),
@@ -462,4 +457,3 @@ def filter_exports(
             filtered[path] = filtered_export
 
     return filtered
-

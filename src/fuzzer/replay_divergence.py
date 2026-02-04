@@ -55,16 +55,11 @@ def _deserialize_deployment_trace(data: Dict[str, Any]) -> DeploymentTrace:
 
     return DeploymentTrace(
         deployment_type=data["deployment_type"],
-        contract_abi=data["contract_abi"],
-        initcode=data["initcode"],
         calldata=data.get("calldata"),
         value=data["value"],
-        annotated_ast=data.get("annotated_ast"),
         solc_json=solc_json,
-        raw_ir=data.get("raw_ir"),
         blueprint_initcode_prefix=data.get("blueprint_initcode_prefix"),
         deployed_address=data["deployed_address"],
-        runtime_bytecode=data["runtime_bytecode"],
         deployment_succeeded=data["deployment_succeeded"],
         env=env,
         python_args=data.get("python_args"),

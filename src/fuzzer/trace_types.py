@@ -42,16 +42,11 @@ class DeploymentTrace:
     """Represents a contract deployment trace."""
 
     deployment_type: str  # "source", "ir", "blueprint", "raw_bytecode"
-    contract_abi: List[Dict[str, Any]]
-    initcode: str
     calldata: Optional[str]
     value: int
-    annotated_ast: Optional[Dict[str, Any]]
     solc_json: Optional[Dict[str, Any]]
-    raw_ir: Optional[str]
     blueprint_initcode_prefix: Optional[str]
     deployed_address: str
-    runtime_bytecode: str
     deployment_succeeded: bool
     env: Env
     python_args: Optional[Dict[str, Any]] = None  # {"args": [], "kwargs": {}}
