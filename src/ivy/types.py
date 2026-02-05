@@ -500,6 +500,9 @@ class Flag(VyperValue):
     def __hash__(self):
         return hash(self.value)
 
+    def __deepcopy__(self, _):
+        return Flag(self.typ, self.value)
+
 
 class VyperDecimal(VyperValue):
     """Fixed‑point decimal matching Vyper/EVM 10‑dec semantics."""
