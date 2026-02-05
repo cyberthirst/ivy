@@ -97,7 +97,11 @@ def solc_json_source_size(solc_json: Optional[Dict[str, Any]]) -> int:
 class TestFilter:
     """Filters for selecting which tests to use."""
 
-    def __init__(self, exclude_multi_module: bool = False):
+    def __init__(
+        self,
+        exclude_multi_module: bool = False,
+        exclude_deps: bool = False,
+    ):
         self.path_includes: List[re.Pattern[str]] = []
         self.path_excludes: List[re.Pattern[str]] = []
         self.source_excludes: List[re.Pattern[str]] = []
@@ -105,6 +109,7 @@ class TestFilter:
         self.name_includes: List[re.Pattern[str]] = []
         self.name_excludes: List[re.Pattern[str]] = []
         self.exclude_multi_module = exclude_multi_module
+        self.exclude_deps = exclude_deps
 
     def include_path(self, pattern: Union[str, re.Pattern[str]]) -> TestFilter:
         """Only include tests from paths matching the pattern."""
@@ -205,6 +210,9 @@ class TestFilter:
         for pattern in self.name_excludes:
             if pattern.search(item.name):
                 return True
+
+        if self.exclude_deps and item.deps:
+            return True
 
         # Check source code filters
         for trace in item.traces:

@@ -225,7 +225,7 @@ def main():
     from fuzzer.export_utils import apply_unsupported_exclusions
     from fuzzer.issue_filter import default_issue_filter
 
-    test_filter = TestFilter(exclude_multi_module=True)
+    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
     apply_unsupported_exclusions(test_filter)
 
     issue_filter = default_issue_filter()

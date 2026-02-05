@@ -194,7 +194,7 @@ def main():
 
     boa.interpret.disable_cache()
 
-    test_filter = TestFilter(exclude_multi_module=True)
+    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
     exclude_unsupported_patterns(test_filter)
     # Exclude `send(...)` because its success depends on EVM gas stipend semantics.
     # The EVM adds a 2300 gas stipend only when `value > 0` for CALL, so
