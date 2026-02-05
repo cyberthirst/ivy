@@ -236,6 +236,9 @@ class DivergenceDetector:
                 ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
                 assert isinstance(ivy_res, DeploymentResult)
                 assert isinstance(boa_res, DeploymentResult)
+                # Compiler crashes invalidate comparison for this trace.
+                if ivy_res.is_compiler_crash or boa_res.is_compiler_crash:
+                    break
                 if not self._compare_deployment_results(ivy_res, boa_res):
                     return Divergence(
                         type=DivergenceType.DEPLOYMENT,
@@ -246,6 +249,9 @@ class DivergenceDetector:
                         ivy_result=ivy_trace_result.result,
                         boa_result=boa_trace_result.result,
                     )
+                # Compilation failures end comparability after this trace.
+                if ivy_res.is_compilation_failure or boa_res.is_compilation_failure:
+                    break
 
             # Compare call results
             elif ivy_trace_result.trace_type == "call":
