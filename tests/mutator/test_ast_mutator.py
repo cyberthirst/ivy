@@ -74,6 +74,38 @@ def get_mutator_test_cases():
     return cases
 
 
+def test_preprocess_module_seeds_existing_internal_calls():
+    source = """
+@internal
+def _leaf() -> uint256:
+    return 1
+
+@internal
+def _mid() -> uint256:
+    return self._leaf()
+
+@external
+@nonreentrant
+def top() -> uint256:
+    return self._mid()
+"""
+
+    result = compile_vyper(source)
+    assert result.is_success
+    assert result.compiler_data is not None
+
+    module = result.compiler_data.annotated_vyper_module
+    mutator = AstMutator(random.Random(0))
+    mutator._preprocess_module(module)
+
+    registry = mutator.function_registry
+    assert registry.internal_call_graph["top"] == {"_mid"}
+    assert registry.internal_call_graph["_mid"] == {"_leaf"}
+    assert registry.reachable_from_nonreentrant("top")
+    assert registry.reachable_from_nonreentrant("_mid")
+    assert registry.reachable_from_nonreentrant("_leaf")
+
+
 @pytest.mark.xfail(reason="mutator WIP - many mutations cause compilation failures", strict=False)
 @pytest.mark.parametrize("solc_json,test_id", get_mutator_test_cases())
 def test_mutator_produces_valid_code(solc_json: dict, test_id: str):

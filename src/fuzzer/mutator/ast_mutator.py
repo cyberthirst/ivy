@@ -343,12 +343,18 @@ class AstMutator(VyperNodeTransformer):
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
         assert not self.generate
+        settings = getattr(node, "settings", None)
+        self.function_registry.set_nonreentrancy_by_default(
+            bool(getattr(settings, "nonreentrancy_by_default", False))
+        )
+        function_types: List[ContractFunctionT] = []
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 # Register existing function in the registry
                 func_type = item._metadata.get("func_type")
                 if func_type and isinstance(func_type, ContractFunctionT):
                     self.function_registry.register_function(func_type)
+                    function_types.append(func_type)
 
             elif isinstance(item, ast.VariableDecl):
                 # Register module-level variable
@@ -371,6 +377,15 @@ class AstMutator(VyperNodeTransformer):
                             pass
                         else:
                             self.context.add_constant(item.target.id, const_value)
+
+        # Seed call graph with calls already present in the annotated module.
+        for fn_t in function_types:
+            for callee_t in fn_t.called_functions:
+                self.function_registry.add_call(
+                    fn_t.name,
+                    callee_t.name,
+                    internal=True,
+                )
 
     def visit_VariableDecl(self, node: ast.VariableDecl):
         # VariableDecl is module-level only (storage, immutables, transient, constants).
