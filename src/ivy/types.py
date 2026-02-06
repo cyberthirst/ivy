@@ -54,6 +54,14 @@ def _assert_compatible_types(left: VyperValue, right: VyperValue, op: str) -> No
     )
 
 
+def _coerce_value(value: VyperValue, typ: VyperType) -> VyperValue:
+    from ivy.expr.clamper import box_value
+
+    boxed_value = box_value(value, typ)
+    assert isinstance(boxed_value, VyperValue)
+    return boxed_value
+
+
 class VyperInt(VyperValue, int):
     """Boxed integer with type info and bounds validation at construction."""
 
@@ -706,7 +714,7 @@ class _Sequence(_Container, Generic[T]):
 
         self._journal(idx, loc)
 
-        self._values[idx] = value
+        self._values[idx] = _coerce_value(value, self.value_type)
 
     def __len__(self) -> int:
         return self.length
@@ -786,7 +794,7 @@ class DynamicArray(_Sequence[T]):
         self._journal_length(loc)
         idx = self.length
         self._journal(idx, loc)
-        self._values[idx] = value
+        self._values[idx] = _coerce_value(value, self.value_type)
         self.length += 1
 
     def pop(self, loc: Optional[DataLocation] = None) -> T:

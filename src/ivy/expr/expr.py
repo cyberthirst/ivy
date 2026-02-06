@@ -29,7 +29,7 @@ from ivy.types import (
     Tuple as IvyTuple,
 )
 from ivy.expr.operators import get_operator_handler
-from ivy.expr.clamper import box_value_from_node
+from ivy.expr.clamper import box_value, box_value_from_node
 
 ENVIRONMENT_VARIABLES = {"block", "msg", "tx", "chain"}
 ADDRESS_VARIABLES = {
@@ -252,12 +252,16 @@ class ExprVisitor(BaseVisitor):
         return self._eval_op(node, operand)
 
     def visit_List(self, node: ast.List):
+        typ = node._metadata["type"]
+        assert isinstance(typ, (SArrayT, DArrayT))
+
         idx = 0
         values = {}
         for elem in node.elements:
-            values[idx] = self.visit(elem)
+            value = self.visit(elem)
+            values[idx] = box_value(value, typ.value_type)
             idx += 1
-        typ = node._metadata["type"]
+
         if isinstance(typ, SArrayT):
             return StaticArray(typ, values)
         assert isinstance(typ, DArrayT)

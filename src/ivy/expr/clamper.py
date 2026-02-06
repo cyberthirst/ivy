@@ -6,6 +6,8 @@ from vyper.semantics.types import (
     BytesM_T,
     StringT,
     BoolT,
+    SArrayT,
+    DArrayT,
     TupleT,
     VyperType,
 )
@@ -17,8 +19,39 @@ from ivy.types import (
     VyperBytesM,
     VyperString,
     VyperBool,
+    StaticArray,
+    DynamicArray,
     Tuple as IvyTuple,
 )
+
+
+def _box_sequence_value(value: Any, typ: SArrayT | DArrayT) -> Any:
+    if isinstance(typ, SArrayT) and isinstance(value, StaticArray) and value.typ == typ:
+        return value
+    if isinstance(typ, DArrayT) and isinstance(value, DynamicArray) and value.typ == typ:
+        return value
+
+    if isinstance(value, (StaticArray, DynamicArray)):
+        assert typ.compare_type(value.typ) or value.typ.compare_type(typ), (
+            f"Sequence type mismatch: {value.typ} not compatible with {typ}"
+        )
+        items = [value[i] for i in range(value.length)]
+    else:
+        assert isinstance(value, (list, tuple)), (
+            f"Expected sequence for {typ}, got {type(value)}"
+        )
+        items = list(value)
+
+    if isinstance(typ, SArrayT):
+        if len(items) != typ.length:
+            raise ValueError(
+                f"Expected static array length {typ.length}, got {len(items)}"
+            )
+        return StaticArray(typ, {i: box_value(v, typ.value_type) for i, v in enumerate(items)})
+
+    if len(items) > typ.length:
+        raise ValueError(f"Cannot exceed maximum length {typ.length}")
+    return DynamicArray(typ, {i: box_value(v, typ.value_type) for i, v in enumerate(items)})
 
 
 def box_value(value: Any, typ: VyperType) -> Any:
@@ -77,6 +110,9 @@ def box_value(value: Any, typ: VyperType) -> Any:
             return value
         return VyperBool(value)
 
+    if isinstance(typ, (SArrayT, DArrayT)):
+        return _box_sequence_value(value, typ)
+
     if isinstance(typ, TupleT):
         if isinstance(value, IvyTuple):
             return value
@@ -91,7 +127,6 @@ def box_value(value: Any, typ: VyperType) -> Any:
 
     # These types are either already validated or can't be invalid:
     # - DecimalT: VyperDecimal already validates
-    # - SArrayT, DArrayT: Already boxed with validation
     # - StructT: Already boxed
     # - FlagT: Already boxed
     # - AddressT: Already boxed

@@ -1654,6 +1654,64 @@ def foo() -> DynArray[uint256, 10]:
     assert c.foo() == [1]
 
 
+def test_darray_list_literal_coerces_inner_capacity(get_contract):
+    src = """
+@external
+def foo() -> uint256:
+    inner: DynArray[bool, 1] = [not True]
+    outer: DynArray[DynArray[bool, 16], 6] = [inner, inner]
+    outer[1 % 6].append(False)
+    return len(outer[1])
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 2
+
+
+def test_darray_assignment_coerces_capacity(get_contract):
+    src = """
+@external
+def foo() -> uint256:
+    inner: DynArray[bool, 1] = [False]
+    widened: DynArray[bool, 16] = inner
+    widened.append(False)
+    return len(widened)
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 2
+
+
+def test_nested_darray_append_coerces_inner_capacity(get_contract):
+    src = """
+@external
+def foo() -> uint256:
+    inner: DynArray[bool, 1] = [False]
+    outer: DynArray[DynArray[bool, 16], 6] = []
+    outer.append(inner)
+    outer[0].append(True)
+    return len(outer[0])
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 2
+
+
+def test_nested_darray_setitem_coerces_inner_capacity(get_contract):
+    src = """
+@external
+def foo() -> uint256:
+    inner: DynArray[bool, 1] = [False]
+    outer: DynArray[DynArray[bool, 16], 6] = [[]]
+    outer[0] = inner
+    outer[0].append(True)
+    return len(outer[0])
+    """
+
+    c = get_contract(src)
+    assert c.foo() == 2
+
+
 def test_darray_pop(get_contract):
     src = """
 a: public(DynArray[DynArray[uint256, 1], 2])

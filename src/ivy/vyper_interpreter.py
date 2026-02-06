@@ -29,7 +29,7 @@ from vyper.semantics.types.shortcuts import UINT256_T
 from vyper.utils import keccak256
 
 from ivy.expr.expr import ExprVisitor
-from ivy.expr.clamper import box_value_from_node
+from ivy.expr.clamper import box_value, box_value_from_node
 from ivy.stmt import ReturnException, StmtVisitor
 from ivy.builtins.builtin_registry import BuiltinRegistry
 from ivy.utils import compute_call_abi_data
@@ -50,7 +50,6 @@ from ivy.types import (
     DynamicArray,
     Map,
     Tuple as IvyTuple,
-    VyperValue,
     boxed,
 )
 from ivy.allocator import Allocator
@@ -426,9 +425,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         varinfo, is_global = self._resolve_variable_info(node)
         if is_global:
             assert varinfo is not None
+            value = box_value(value, varinfo.typ)
             var = self.globals[varinfo]
             var.value = value
         else:
+            if name in self.memory:
+                value = box_value(value, self.memory[name].typ)
+            elif node is not None:
+                value = box_value(value, node._expr_info.typ)  # type: ignore[attr-defined]
             self.memory[name] = value
 
     # we want to decouple variables from the references to the actual storage location
