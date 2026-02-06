@@ -93,7 +93,7 @@ class GenerativeFuzzer(BaseFuzzer):
             analysis = self.run_scenario(mutated, seed=scenario_seed)
             self.reporter.report(analysis, debug_mode=self.debug_mode)
 
-            if not analysis.compile_failures:
+            if not analysis.compile_failures and not analysis.crashes:
                 self.corpus.add_evolved(mutated)
                 count += 1
 

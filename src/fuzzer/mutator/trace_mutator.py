@@ -134,16 +134,24 @@ class TraceMutator:
                     )
 
         if trace.python_args and compiler_data:
-            module_t = compiler_data.annotated_vyper_module._metadata["type"]
-            init_function = module_t.init_function
+            try:
+                module_t = compiler_data.annotated_vyper_module._metadata["type"]
+                init_function = module_t.init_function
 
-            deploy_args = trace.python_args.get("args", [])
+                deploy_args = trace.python_args.get("args", [])
 
-            mutated_args, mutated_value = self.argument_mutator.mutate_deployment_args(
-                init_function,
-                deploy_args,
-                trace.value,
-            )
+                mutated_args, mutated_value = (
+                    self.argument_mutator.mutate_deployment_args(
+                        init_function,
+                        deploy_args,
+                        trace.value,
+                    )
+                )
 
-            trace.python_args["args"] = mutated_args
-            trace.value = mutated_value
+                trace.python_args["args"] = mutated_args
+                trace.value = mutated_value
+            except Exception as e:
+                # Log and keep existing constructor args/value
+                import logging
+
+                logging.debug(f"Failed to mutate deployment args: {e}")
