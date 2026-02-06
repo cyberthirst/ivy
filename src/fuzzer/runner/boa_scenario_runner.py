@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 
 import boa
 from boa.contracts.vyper.vyper_contract import VyperDeployer
+from boa.util.abi import Address as BoaAddress
 from vyper.cli.vyper_json import (
     get_inputs,
     get_output_formats,
@@ -118,6 +119,14 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
     def _get_balance(self, address: str) -> int:
         return self.env.get_balance(address)
+
+    def _set_nonce(self, address: str, value: int) -> None:
+        addr = BoaAddress(address).canonical_address
+        self.env.evm.vm.state.set_nonce(addr, value)
+
+    def _get_nonce(self, address: str) -> int:
+        addr = BoaAddress(address).canonical_address
+        return self.env.evm.vm.state.get_nonce(addr)
 
     def _raw_call(
         self,

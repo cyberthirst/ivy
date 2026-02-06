@@ -166,6 +166,11 @@ class ScenarioResult:
         ]
 
 
+@dataclass
+class DeploymentExecutionContext:
+    compiled: Any
+
+
 class BaseScenarioRunner(ABC):
     """Base class for scenario runners that handle all trace types and dependencies."""
 
@@ -242,6 +247,16 @@ class BaseScenarioRunner(ABC):
         pass
 
     @abstractmethod
+    def _set_nonce(self, address: str, value: int) -> None:
+        """Set nonce of an address. Must be implemented by subclasses."""
+        pass
+
+    @abstractmethod
+    def _get_nonce(self, address: str) -> int:
+        """Get nonce of an address. Must be implemented by subclasses."""
+        pass
+
+    @abstractmethod
     def _clear_transient_storage(self) -> None:
         """Clear transient storage. Must be implemented by subclasses."""
         pass
@@ -266,6 +281,59 @@ class BaseScenarioRunner(ABC):
         if sender:
             return sender
         return self.DEFAULT_TX_ORIGIN
+
+    def _get_merged_compiler_settings(self, trace: DeploymentTrace) -> Dict[str, Any]:
+        return {
+            **(trace.compiler_settings or {}),
+            **self.compiler_settings,
+        }
+
+    def prepare_deployment_context(
+        self,
+        trace: DeploymentTrace,
+        trace_index: int,
+    ) -> TraceResult | DeploymentExecutionContext:
+        self._set_block_env(trace.env)
+        merged_settings = self._get_merged_compiler_settings(trace)
+        solc_json = trace.solc_json
+        if not solc_json:
+            return TraceResult(
+                trace_type="deployment",
+                trace_index=trace_index,
+                result=DeploymentResult(
+                    success=False,
+                    error=ValueError("No solc_json available for deployment"),
+                    solc_json=None,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+                compilation_xfails=list(trace.compilation_xfails),
+                runtime_xfails=list(trace.runtime_xfails),
+            )
+
+        try:
+            compiled = self._compile_from_solc_json(
+                solc_json=solc_json,
+                compiler_settings=merged_settings,
+            )
+        except Exception as e:
+            return TraceResult(
+                trace_type="deployment",
+                trace_index=trace_index,
+                result=DeploymentResult(
+                    success=False,
+                    error=e,
+                    solc_json=solc_json,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+                compilation_xfails=list(trace.compilation_xfails),
+                runtime_xfails=list(trace.runtime_xfails),
+            )
+
+        return DeploymentExecutionContext(
+            compiled=compiled,
+        )
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         """Run a complete scenario (including dependencies)"""
@@ -299,11 +367,13 @@ class BaseScenarioRunner(ABC):
         trace: Trace,
         trace_index: int,
         use_python_args: bool,
+        deployment_ctx: Optional[DeploymentExecutionContext] = None,
     ) -> TraceResult:
         if isinstance(trace, DeploymentTrace):
             deployment_result = self._execute_deployment(
                 trace=trace,
                 use_python_args=use_python_args,
+                deployment_ctx=deployment_ctx,
             )
             return TraceResult(
                 trace_type="deployment",
@@ -347,16 +417,12 @@ class BaseScenarioRunner(ABC):
     def _execute_deployment(
         self,
         trace: DeploymentTrace,
-        mutated_args: Optional[List[Any]] = None,
-        mutated_kwargs: Optional[Dict[str, Any]] = None,
         use_python_args: bool = False,
+        deployment_ctx: Optional[DeploymentExecutionContext] = None,
     ) -> DeploymentResult:
         """Execute a deployment trace."""
         self._set_block_env(trace.env)
-        merged_settings = {
-            **(trace.compiler_settings or {}),
-            **self.compiler_settings,
-        }
+        merged_settings = self._get_merged_compiler_settings(trace)
         try:
             solc_json = trace.solc_json
             if not solc_json:
@@ -368,44 +434,30 @@ class BaseScenarioRunner(ABC):
                     compiler_settings=merged_settings,
                 )
 
-            # Prepare constructor arguments
             if use_python_args and trace.python_args:
-                # Use python args from trace or mutations
-                args = (
-                    mutated_args
-                    if mutated_args is not None
-                    else trace.python_args.get("args", [])
-                )
-                kwargs = (
-                    mutated_kwargs
-                    if mutated_kwargs is not None
-                    else trace.python_args.get("kwargs", {})
-                )
-                # Add value from trace if not in kwargs
+                args = trace.python_args.get("args", [])
+                kwargs = trace.python_args.get("kwargs", {})
                 if "value" not in kwargs:
                     kwargs["value"] = trace.value
             else:
-                # Use empty args/kwargs for raw deployment
-                args = mutated_args if mutated_args is not None else []
-                kwargs = (
-                    mutated_kwargs
-                    if mutated_kwargs is not None
-                    else {"value": trace.value}
-                )
+                args = []
+                kwargs = {"value": trace.value}
 
-            try:
-                compiled = self._compile_from_solc_json(
-                    solc_json=solc_json,
-                    compiler_settings=merged_settings,
-                )
-            except Exception as e:
-                return DeploymentResult(
-                    success=False,
-                    error=e,
-                    solc_json=solc_json,
-                    error_phase="compile",
-                    compiler_settings=merged_settings,
-                )
+            compiled = deployment_ctx.compiled if deployment_ctx is not None else None
+            if compiled is None:
+                try:
+                    compiled = self._compile_from_solc_json(
+                        solc_json=solc_json,
+                        compiler_settings=merged_settings,
+                    )
+                except Exception as e:
+                    return DeploymentResult(
+                        success=False,
+                        error=e,
+                        solc_json=solc_json,
+                        error_phase="compile",
+                        compiler_settings=merged_settings,
+                    )
 
             try:
                 contract = self._deploy_compiled(

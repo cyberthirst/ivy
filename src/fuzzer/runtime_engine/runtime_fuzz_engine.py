@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Optional, Set
 import ivy
 from ivy.execution_metadata import ExecutionMetadata
 
-from fuzzer.runner.base_scenario_runner import CallResult, ScenarioResult, TraceResult
+from fuzzer.runner.base_scenario_runner import (
+    CallResult,
+    DeploymentResult,
+    ScenarioResult,
+    TraceResult,
+)
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import (
     CallTrace,
@@ -47,6 +52,7 @@ class HarnessConfig:
 
     # Runner behavior
     collect_storage_dumps: bool = False  # Disabled during exploration
+    max_deploy_retries: int = 30
 
     # Corpus settings
     max_seeds_per_func: int = 16
@@ -180,8 +186,10 @@ class RuntimeFuzzEngine:
             for trace in scenario.traces:
                 if isinstance(trace, DeploymentTrace):
                     finalized_traces.append(trace)
-                    trace_result = self.runner.execute_trace(
-                        trace, trace_index, scenario.use_python_args
+                    trace_result = self._execute_deployment_with_retries(
+                        trace=trace,
+                        trace_index=trace_index,
+                        use_python_args=scenario.use_python_args,
                     )
                     trace_results.append(trace_result)
                     if trace_result.result and trace_result.result.success:
@@ -268,6 +276,87 @@ class RuntimeFuzzEngine:
                 stats=stats,
                 runtime_edge_ids=tracker._seen,
             )
+
+    def _get_constructor_function(self, compiled: Any) -> Any:
+        return getattr(getattr(compiled, "global_ctx", None), "init_function", None)
+
+    def _execute_deployment_with_retries(
+        self,
+        trace: DeploymentTrace,
+        trace_index: int,
+        use_python_args: bool,
+    ) -> TraceResult:
+        prepared = self.runner.prepare_deployment_context(trace, trace_index)
+        if isinstance(prepared, TraceResult):
+            return prepared
+
+        deployment_ctx = prepared
+        sender = self.runner._get_sender(trace.env.tx.origin if trace.env else None)
+        attempt_budget = max(1, self.config.max_deploy_retries)
+        last_trace_result: Optional[TraceResult] = None
+
+        base_args = (
+            list(trace.python_args.get("args", []))
+            if use_python_args and trace.python_args
+            else []
+        )
+        base_kwargs = (
+            dict(trace.python_args.get("kwargs", {}))
+            if use_python_args and trace.python_args
+            else {}
+        )
+        base_value = trace.value
+        init_function = (
+            self._get_constructor_function(deployment_ctx.compiled)
+            if use_python_args and trace.python_args
+            else None
+        )
+
+        for attempt in range(attempt_budget):
+            if attempt == 0:
+                attempt_args = list(base_args)
+                attempt_value = base_value
+            else:
+                attempt_args, attempt_value = (
+                    self.call_generator.argument_mutator.mutate_deployment_args(
+                        init_function=init_function,
+                        deploy_args=base_args,
+                        deploy_value=base_value,
+                    )
+                )
+            if use_python_args and trace.python_args is not None:
+                trace.python_args["args"] = list(attempt_args)
+                trace.python_args["kwargs"] = dict(base_kwargs)
+            trace.value = attempt_value
+
+            nonce_before = self.runner._get_nonce(sender)
+            balance_before = self.runner._get_balance(sender)
+
+            trace_result = self.runner.execute_trace(
+                trace=trace,
+                trace_index=trace_index,
+                use_python_args=use_python_args,
+                deployment_ctx=deployment_ctx,
+            )
+            last_trace_result = trace_result
+
+            deployment_result = trace_result.result
+            assert isinstance(deployment_result, DeploymentResult)
+
+            if deployment_result.success:
+                if use_python_args and trace.python_args is not None:
+                    trace.python_args["kwargs"] = dict(base_kwargs)
+                return trace_result
+
+            if deployment_result.error_phase == "compile":
+                return trace_result
+
+            if attempt + 1 < attempt_budget:
+                self.runner._set_nonce(sender, nonce_before)
+                self.runner._set_balance(sender, balance_before)
+
+        assert last_trace_result is not None
+        return last_trace_result
 
     def _execute_call_and_measure(
         self,
