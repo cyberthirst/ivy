@@ -270,6 +270,13 @@ def test_runtime_retries_cap_at_max_attempts():
     assert deployment_result.success is False
     assert runner.compile_calls == 1
     assert runner.deploy_calls == 30
+    assert runner.deployment_start_states == [(0, DEFAULT_BALANCE)] * 30
+
+    # Terminal failed attempt is committed (no rollback after final retry).
+    sender = runner._get_sender(trace.env.tx.origin)
+    final_value = runner.deployment_kwargs_seen[-1]["value"]
+    assert runner._get_nonce(sender) == 1
+    assert runner._get_balance(sender) == DEFAULT_BALANCE - final_value - 1
 
 
 def test_runtime_retries_restore_sender_nonce_and_balance():

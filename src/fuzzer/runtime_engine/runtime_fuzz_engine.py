@@ -351,8 +351,9 @@ class RuntimeFuzzEngine:
             if deployment_result.error_phase == "compile":
                 return trace_result
 
-            self.runner._set_nonce(sender, nonce_before)
-            self.runner._set_balance(sender, balance_before)
+            if attempt + 1 < attempt_budget:
+                self.runner._set_nonce(sender, nonce_before)
+                self.runner._set_balance(sender, balance_before)
 
         assert last_trace_result is not None
         return last_trace_result
