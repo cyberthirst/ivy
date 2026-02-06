@@ -32,7 +32,7 @@ class GenerativeFuzzer(BaseFuzzer):
         debug_mode: bool = False,
         seed_selection_prob: float = 0.3,
         generate_prob: float = 1e-4,
-        harness_config: Optional[HarnessConfig] = None,
+        harness_config: HarnessConfig = HarnessConfig(),
         issue_filter: Optional[IssueFilter] = None,
     ):
         super().__init__(

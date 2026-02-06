@@ -14,9 +14,6 @@ from typing import Dict, Optional
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig
 
 from fuzzer.mutator.ast_mutator import AstMutator
-from fuzzer.mutator.value_mutator import ValueMutator
-from fuzzer.mutator.trace_mutator import TraceMutator
-from fuzzer.mutator.argument_mutator import ArgumentMutator
 from fuzzer.export_utils import (
     load_all_exports,
     filter_exports,
@@ -25,9 +22,6 @@ from fuzzer.export_utils import (
 )
 from fuzzer.trace_types import (
     DeploymentTrace,
-    CallTrace,
-    SetBalanceTrace,
-    ClearTransientStorageTrace,
     TestExport,
 )
 from ivy.frontend.loader import loads_from_solc_json
@@ -56,7 +50,7 @@ class BaseFuzzer:
         seed: Optional[int] = None,
         debug_mode: bool = True,
         issue_filter: Optional[IssueFilter] = None,
-        harness_config: Optional[HarnessConfig] = None,
+        harness_config: HarnessConfig = HarnessConfig(),
     ):
         self.exports_dir = exports_dir
         self.seed = seed if seed is not None else secrets.randbits(64)
@@ -68,11 +62,6 @@ class BaseFuzzer:
         self.reporter = FuzzerReporter(seed=self.seed)
         self.issue_filter = issue_filter
         self.result_analyzer = ResultAnalyzer(self.deduper, issue_filter)
-
-        # Mutation probabilities
-        self.call_drop_prob = 0.1
-        self.call_mutate_args_prob = 0.3
-        self.call_duplicate_prob = 0.1
 
         # Multi-runner (created lazily or by subclass)
         self._multi_runner: Optional[MultiRunner] = None
@@ -124,62 +113,61 @@ class BaseFuzzer:
         n_mutations: int = DEFAULT_AST_MUTATIONS,
     ) -> Scenario:
         """
-        Apply mutations to a scenario's traces.
+        Apply AST source mutations to deployment traces in a scenario.
 
-        Takes a scenario and returns a new scenario with mutated traces.
+        Non-deployment traces (calls, set-balance, etc.) pass through unchanged;
+        call-level mutations are handled by RuntimeFuzzEngine.
         """
         rng = random.Random(scenario_seed) if scenario_seed else self.rng
-
         ast_mutator = AstMutator(rng, max_mutations=n_mutations)
-        value_mutator = ValueMutator(rng)
-        argument_mutator = ArgumentMutator(rng, value_mutator)
-        trace_mutator = TraceMutator(
-            rng, value_mutator, argument_mutator, ast_mutator=ast_mutator
-        )
 
         new_scenario = deepcopy(scenario)
-        new_traces = []
-        deployment_compiler_data = {}
 
         for trace in new_scenario.traces:
-            if isinstance(trace, DeploymentTrace) and trace.deployment_type == "source":
-                compiler_data = self.get_compiler_data(trace)
+            if not (
+                isinstance(trace, DeploymentTrace)
+                and trace.deployment_type == "source"
+            ):
+                continue
 
-                trace_mutator.mutate_deployment_trace(trace, compiler_data)
+            compiler_data = self.get_compiler_data(trace)
 
-                if compiler_data and hasattr(compiler_data, "settings"):
-                    settings = settings_to_kwargs(compiler_data.settings)
-                    # TODO the ast mutator should return the settings
-                    # this is a temporary fix to avoid compilation failures
-                    settings["enable_decimals"] = True
-                    trace.compiler_settings = settings
-
-                new_traces.append(trace)
-
-                if compiler_data:
-                    deployment_compiler_data[trace.deployed_address] = compiler_data
-
-            # TODO disable mutations when harness is on
-            # maybe we should remove the mutation all together
-            elif isinstance(trace, CallTrace):
-                if rng.random() < self.call_drop_prob:
-                    continue
-
-                mutate_args = rng.random() < self.call_mutate_args_prob
-
-                trace_mutator.mutate_call_args(
-                    trace, mutate_args, deployment_compiler_data
+            if trace.solc_json and compiler_data:
+                mutation_result = ast_mutator.mutate_source_with_compiler_data(
+                    compiler_data
                 )
-                new_traces.append(trace)
+                if mutation_result:
+                    sources = trace.solc_json.get("sources")
+                    if sources is None:
+                        sources = {}
+                        trace.solc_json["sources"] = sources
+                    changed = False
+                    for filename, content in mutation_result.sources.items():
+                        entry = sources.get(filename)
+                        if isinstance(entry, dict):
+                            if entry.get("content") != content:
+                                entry["content"] = content
+                                changed = True
+                        else:
+                            if entry != content:
+                                sources[filename] = {"content": content}
+                                changed = True
 
-                if rng.random() < self.call_duplicate_prob:
-                    new_traces.append(deepcopy(trace))
+                    if changed:
+                        trace.compilation_xfails = list(
+                            trace.compilation_xfails
+                        ) + list(mutation_result.compilation_xfails)
+                        trace.runtime_xfails = list(
+                            trace.runtime_xfails
+                        ) + list(mutation_result.runtime_xfails)
 
-            else:
-                assert isinstance(trace, (SetBalanceTrace, ClearTransientStorageTrace))
-                new_traces.append(trace)
+            if compiler_data and hasattr(compiler_data, "settings"):
+                settings = settings_to_kwargs(compiler_data.settings)
+                # TODO the ast mutator should return the settings
+                # this is a temporary fix to avoid compilation failures
+                settings["enable_decimals"] = True
+                trace.compiler_settings = settings
 
-        new_scenario.traces = new_traces
         return new_scenario
 
     def run_scenario(
@@ -189,25 +177,20 @@ class BaseFuzzer:
         seed: Optional[int] = None,
     ):
         """Run a scenario and analyze results."""
-        if self.harness_config is not None:
-            from fuzzer.runtime_engine.runtime_fuzz_engine import RuntimeFuzzEngine
+        from fuzzer.runtime_engine.runtime_fuzz_engine import RuntimeFuzzEngine
 
-            harness = RuntimeFuzzEngine(self.harness_config, seed)
-            harness_result = harness.run(scenario)
+        harness = RuntimeFuzzEngine(self.harness_config, seed)
+        harness_result = harness.run(scenario)
 
-            results = self.multi_runner.run_boa_only(
-                harness_result.finalized_scenario,
-                harness_result.ivy_result,
-            )
-            scenario_for_analysis = harness_result.finalized_scenario
-            ivy_result = harness_result.ivy_result
-        else:
-            results = self.multi_runner.run(scenario)
-            scenario_for_analysis = scenario
-            ivy_result = results.ivy_result
+        results = self.multi_runner.run_boa_only(
+            harness_result.finalized_scenario,
+            harness_result.ivy_result,
+        )
 
         analysis = self.result_analyzer.analyze_run(
-            scenario_for_analysis, ivy_result, results.boa_results
+            harness_result.finalized_scenario,
+            harness_result.ivy_result,
+            results.boa_results,
         )
 
         return analysis
