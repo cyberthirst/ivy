@@ -39,6 +39,10 @@ class FunctionRegistry:
         rng: random.Random,
         max_initial_functions: int = 5,
         max_dynamic_functions: int = 5,
+        nonreentrant_external_prob: float = 0.04,
+        nonreentrant_internal_prob: float = 0.01,
+        nonreentrancy_by_default: bool = False,
+        external_cycle_allow_prob: float = 1 / 500,
     ):
         self.rng = rng
         self.functions: Dict[str, ContractFunctionT] = {}
@@ -46,8 +50,9 @@ class FunctionRegistry:
         self.functions_by_return_type: Dict[type, Set[str]] = {}
         # Keep builtin function objects by name (e.g., "min")
         self.builtins: Dict[str, BuiltinFunctionT] = {}
-        # Track call graph to prevent cycles
-        self.call_graph: Dict[str, Set[str]] = {}  # caller -> callees
+        # Track call graphs to prevent cycles
+        self.call_graph: Dict[str, Set[str]] = {}  # caller -> callees (all edges)
+        self.internal_call_graph: Dict[str, Set[str]] = {}  # internal-only edges
         self.current_function: Optional[str] = (
             None  # Track which function we're currently generating
         )
@@ -55,8 +60,13 @@ class FunctionRegistry:
         # Separate budgets for initial (generate mode) and dynamic (during generation)
         self.max_initial_functions = max_initial_functions
         self.max_dynamic_functions = max_dynamic_functions
+        self.nonreentrant_external_prob = nonreentrant_external_prob
+        self.nonreentrant_internal_prob = nonreentrant_internal_prob
+        self.nonreentrancy_by_default = nonreentrancy_by_default
+        self.external_cycle_allow_prob = external_cycle_allow_prob
         self.initial_count = 0
         self.dynamic_count = 0
+        self._reachable_from_nonreentrant: Set[str] = set()
         self._initialize_builtins()
 
     @staticmethod
@@ -183,15 +193,91 @@ class FunctionRegistry:
         # Initialize call graph entry
         if func.name not in self.call_graph:
             self.call_graph[func.name] = set()
+        if func.name not in self.internal_call_graph:
+            self.internal_call_graph[func.name] = set()
+        self._recompute_reachable_from_nonreentrant()
 
-    def add_call(self, caller: str, callee: str):
+    def set_nonreentrancy_by_default(self, value: bool) -> None:
+        self.nonreentrancy_by_default = bool(value)
+
+    def add_call(self, caller: str, callee: str, *, internal: bool):
         """Record a function call in the call graph."""
         if caller not in self.call_graph:
             self.call_graph[caller] = set()
         self.call_graph[caller].add(callee)
+        if internal:
+            if caller not in self.internal_call_graph:
+                self.internal_call_graph[caller] = set()
+            self.internal_call_graph[caller].add(callee)
+        self._recompute_reachable_from_nonreentrant()
 
-    def would_create_cycle(self, caller: str, callee: str) -> bool:
-        """Check if adding call from caller to callee would create a cycle."""
+    def _recompute_reachable_from_nonreentrant(self) -> None:
+        """Track functions reachable from any @nonreentrant function."""
+        self._reachable_from_nonreentrant.clear()
+        stack = [name for name, f in self.functions.items() if f.nonreentrant]
+        while stack:
+            name = stack.pop()
+            if name in self._reachable_from_nonreentrant:
+                continue
+            self._reachable_from_nonreentrant.add(name)
+            for callee in self.internal_call_graph.get(name, ()):
+                stack.append(callee)
+
+    def reachable_from_nonreentrant(self, name: Optional[str]) -> bool:
+        if name is None:
+            return False
+        return name in self._reachable_from_nonreentrant
+
+    def refresh_reachable_from_nonreentrant(self) -> None:
+        self._recompute_reachable_from_nonreentrant()
+
+    def _reaches_nonreentrant(self, name: str) -> bool:
+        """Return True if name can reach any nonreentrant function via call graph."""
+        visited = set()
+        stack = [name]
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            func = self.functions.get(current)
+            if func is not None and func.nonreentrant:
+                return True
+            stack.extend(self.internal_call_graph.get(current, ()))
+        return False
+
+    def reaches_nonreentrant(self, name: str) -> bool:
+        return self._reaches_nonreentrant(name)
+
+    def nonreentrant_probability(
+        self,
+        *,
+        visibility: FunctionVisibility,
+        mutability: StateMutability,
+    ) -> float:
+        if self.nonreentrancy_by_default and visibility == FunctionVisibility.EXTERNAL:
+            return 0.0
+        if visibility == FunctionVisibility.DEPLOY:
+            return 0.0
+        if mutability == StateMutability.PURE:
+            return 0.0
+        if visibility == FunctionVisibility.INTERNAL:
+            return self.nonreentrant_internal_prob
+        if visibility == FunctionVisibility.EXTERNAL:
+            return self.nonreentrant_external_prob
+        return 0.0
+
+    def would_create_internal_cycle(self, caller: str, callee: str) -> bool:
+        """Check if adding an internal call would create a cycle."""
+        return self._would_create_cycle(self.internal_call_graph, caller, callee)
+
+    def would_create_any_cycle(self, caller: str, callee: str) -> bool:
+        """Check if adding any call would create a cycle."""
+        return self._would_create_cycle(self.call_graph, caller, callee)
+
+    def _would_create_cycle(
+        self, graph: Dict[str, Set[str]], caller: str, callee: str
+    ) -> bool:
         if caller == callee:
             return True
 
@@ -206,10 +292,24 @@ class FunctionRegistry:
             if current in visited:
                 continue
             visited.add(current)
-            if current in self.call_graph:
-                stack.extend(self.call_graph[current])
+            if current in graph:
+                stack.extend(graph[current])
 
         return False
+
+    def _allow_external_cycle(
+        self, *, caller: str, callee: ContractFunctionT
+    ) -> bool:
+        caller_func = self.functions.get(caller)
+        if (
+            caller_func is not None
+            and caller_func.nonreentrant
+            and callee.nonreentrant
+        ):
+            return True
+        # Probabilistic allowance can still yield external recursion
+        # and may cause EVM stack overflows.
+        return self.rng.random() < self.external_cycle_allow_prob
 
     def get_callable_functions(
         self,
@@ -239,11 +339,29 @@ class FunctionRegistry:
                 continue
 
             # Check for cycles if we have a caller context
-            if from_function and self.would_create_cycle(from_function, name):
-                continue
+            if from_function:
+                if func.is_internal:
+                    if self.would_create_internal_cycle(from_function, name):
+                        continue
+                    if self.would_create_any_cycle(from_function, name):
+                        if not self._allow_external_cycle(
+                            caller=from_function, callee=func
+                        ):
+                            continue
+                else:
+                    if self.would_create_any_cycle(from_function, name):
+                        if not self._allow_external_cycle(
+                            caller=from_function, callee=func
+                        ):
+                            continue
 
             if not self._is_mutability_compatible(caller_mutability, func.mutability):
                 continue
+
+            if from_function and func.is_internal:
+                if self.reachable_from_nonreentrant(from_function):
+                    if self._reaches_nonreentrant(name):
+                        continue
 
             callable_funcs.append(func)
 
@@ -272,6 +390,7 @@ class FunctionRegistry:
         *,
         initial: bool = False,
         visibility: Optional[FunctionVisibility] = None,
+        allow_nonreentrant: bool = True,
     ) -> Optional[ast.FunctionDef]:
         """Create a new function with empty body and ContractFunctionT in metadata.
         The body is created later, once we have more information. That allows
@@ -281,6 +400,7 @@ class FunctionRegistry:
             initial: If True, counts against initial_functions budget (generate mode).
                      If False, counts against dynamic_functions budget.
             visibility: Force a specific visibility when provided.
+            allow_nonreentrant: If False, never mark the new function @nonreentrant.
         """
         # Check the appropriate budget
         if initial:
@@ -318,12 +438,36 @@ class FunctionRegistry:
         assert mutability_options
         state_mutability = self.rng.choice(mutability_options)
 
+        default_nonreentrant = (
+            self.nonreentrancy_by_default
+            and visibility == FunctionVisibility.EXTERNAL
+            and state_mutability != StateMutability.PURE
+        )
+        nonreentrant = default_nonreentrant
+        reentrant = False
+        emit_nonreentrant = False
+
+        if default_nonreentrant and not allow_nonreentrant:
+            reentrant = True
+            nonreentrant = False
+        elif allow_nonreentrant and not default_nonreentrant:
+            prob = self.nonreentrant_probability(
+                visibility=visibility,
+                mutability=state_mutability,
+            )
+            if prob > 0 and self.rng.random() < prob:
+                nonreentrant = True
+                emit_nonreentrant = True
+
         return self._create_function_def(
             name=name,
             positional_args=positional_args,
             return_type=return_type,
             visibility=visibility,
             state_mutability=state_mutability,
+            nonreentrant=nonreentrant,
+            emit_nonreentrant=emit_nonreentrant,
+            reentrant=reentrant,
         )
 
     def create_init(
@@ -379,7 +523,11 @@ class FunctionRegistry:
         return_type: Optional[VyperType],
         visibility: FunctionVisibility,
         state_mutability: StateMutability,
+        nonreentrant: bool = False,
+        emit_nonreentrant: bool = True,
+        reentrant: bool = False,
     ) -> ast.FunctionDef:
+        assert not (nonreentrant and reentrant)
         decorator_list = []
         if visibility == FunctionVisibility.EXTERNAL:
             decorator_list.append(ast.Name(id="external"))
@@ -392,6 +540,10 @@ class FunctionRegistry:
             StateMutability.PAYABLE,
         ):
             decorator_list.append(ast.Name(id=state_mutability.name.lower()))
+        if nonreentrant and emit_nonreentrant:
+            decorator_list.append(ast.Name(id="nonreentrant"))
+        if reentrant:
+            decorator_list.append(ast.Name(id="reentrant"))
 
         args = ast.arguments(args=[], defaults=[], default=None)
         for pos_arg in positional_args:
@@ -416,7 +568,7 @@ class FunctionRegistry:
             return_type=return_type,
             function_visibility=visibility,
             state_mutability=state_mutability,
-            nonreentrant=False,
+            nonreentrant=nonreentrant,
             ast_def=func_def,
         )
 
@@ -448,9 +600,12 @@ class FunctionRegistry:
         self.functions_by_return_type.clear()
         self.builtins.clear()
         self.call_graph.clear()
+        self.internal_call_graph.clear()
         self.current_function = None
         self.name_generator.counter = 0
         self.initial_count = 0
         self.dynamic_count = 0
+        self._reachable_from_nonreentrant.clear()
+        self.nonreentrancy_by_default = False
         # Re-initialize builtins
         self._initialize_builtins()

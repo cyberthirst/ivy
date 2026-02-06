@@ -1260,6 +1260,9 @@ class ExprGenerator(BaseGenerator):
         assert current_func is not None
 
         caller_mutability = ctx.context.current_function_mutability
+        caller_nonreentrant_ctx = self.function_registry.reachable_from_nonreentrant(
+            current_func
+        )
 
         # Gather candidates
         compatible_func = self.function_registry.get_compatible_function(
@@ -1305,6 +1308,7 @@ class ExprGenerator(BaseGenerator):
                 type_generator=self.type_generator,
                 max_args=2,
                 caller_mutability=caller_mutability,
+                allow_nonreentrant=not caller_nonreentrant_ctx,
             )
             if func_def is None:
                 # Can't create more functions; try builtin if available
@@ -1348,7 +1352,9 @@ class ExprGenerator(BaseGenerator):
         # Record the call in the call graph
         if self.function_registry.current_function:
             self.function_registry.add_call(
-                self.function_registry.current_function, func_name
+                self.function_registry.current_function,
+                func_name,
+                internal=func_t.is_internal,
             )
 
         return result_node

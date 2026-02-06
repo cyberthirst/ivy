@@ -343,6 +343,10 @@ class AstMutator(VyperNodeTransformer):
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
         assert not self.generate
+        settings = getattr(node, "settings", None)
+        self.function_registry.set_nonreentrancy_by_default(
+            bool(getattr(settings, "nonreentrancy_by_default", False))
+        )
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 # Register existing function in the registry
