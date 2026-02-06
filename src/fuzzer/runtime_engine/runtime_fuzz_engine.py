@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import ivy
 from ivy.execution_metadata import ExecutionMetadata
+from ivy.exceptions import CallTimeout
 
 from fuzzer.runner.base_scenario_runner import (
     CallResult,
@@ -30,7 +31,6 @@ from fuzzer.runtime_engine.call_generator import (
     Corpus,
     GeneratedCall,
 )
-from fuzzer.runtime_engine.timeout import CallTimeout, call_with_timeout
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
 
@@ -44,7 +44,7 @@ class HarnessConfig:
 
     # Plateau and timeout behavior
     plateau_calls: int = 8
-    call_timeout_s: float = 5.0
+    call_timeout_s: float = 0.5
     max_timeouts_per_func: int = 3
 
     # Coverage map
@@ -372,14 +372,17 @@ class RuntimeFuzzEngine:
         # Execute with timeout
         timed_out = False
         trace_result: Optional[TraceResult] = None
+        interpreter = ivy.env.interpreter
 
+        interpreter.set_call_timeout_seconds(self.config.call_timeout_s)
         try:
-            with call_with_timeout(self.config.call_timeout_s):
-                trace_result = self.runner.execute_trace(
-                    trace, trace_index, use_python_args
-                )
-        except Exception:
+            trace_result = self.runner.execute_trace(
+                trace, trace_index, use_python_args
+            )
+        except CallTimeout:
             timed_out = True
+        finally:
+            interpreter.clear_call_timeout()
 
         if trace_result is not None:
             if isinstance(trace_result.result, CallResult):

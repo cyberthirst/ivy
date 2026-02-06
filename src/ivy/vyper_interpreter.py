@@ -1,3 +1,4 @@
+import time
 from typing import Optional, Any
 
 import vyper.ast.nodes as ast
@@ -36,6 +37,7 @@ from ivy.utils import compute_call_abi_data
 from ivy.abi import abi_decode, abi_encode
 from ivy.exceptions import (
     AccessViolation,
+    CallTimeout,
     GasReference,
     FunctionNotFound,
     PayabilityViolation,
@@ -78,6 +80,8 @@ _EDGE_NODE_TYPES = (
 
 
 class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
+    _TIMEOUT_CHECK_MASK = 0xFF  # check every 256 visited nodes
+
     def __init__(self, env: Environment):
         self.evm = EVMCore(callbacks=self, env=env)
         self.state: StateAccess = self.evm.state
@@ -88,9 +92,34 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         # across separate ABI calls or across nested external calls/contracts.
         self._edge_stack: list[Optional[int]] = []
         self._prev_edge_node_id: Optional[int] = None
+        self._timeout_deadline_ns: Optional[int] = None
+        self._timeout_tick: int = 0
 
     def execute(self, *args, **kwargs):
         return self.evm.execute_tx(*args, **kwargs)
+
+    def set_call_timeout_seconds(self, timeout_seconds: float) -> None:
+        if timeout_seconds <= 0:
+            self.clear_call_timeout()
+            return
+        self._timeout_deadline_ns = time.perf_counter_ns() + int(
+            timeout_seconds * 1_000_000_000
+        )
+        self._timeout_tick = 0
+
+    def clear_call_timeout(self) -> None:
+        self._timeout_deadline_ns = None
+        self._timeout_tick = 0
+
+    def _check_call_timeout(self) -> None:
+        deadline_ns = self._timeout_deadline_ns
+        if deadline_ns is None:
+            return
+        self._timeout_tick += 1
+        if self._timeout_tick & self._TIMEOUT_CHECK_MASK:
+            return
+        if time.perf_counter_ns() >= deadline_ns:
+            raise CallTimeout("Call exceeded time budget")
 
     def on_state_committed(self) -> None:
         for tracer in self.tracers:
@@ -250,6 +279,8 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self._prev_edge_node_id = self._edge_stack.pop()
 
     def _on_node(self, node) -> None:
+        self._check_call_timeout()
+
         tracers = self.tracers
         if not tracers:
             return

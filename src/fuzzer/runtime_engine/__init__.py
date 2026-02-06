@@ -10,7 +10,6 @@ from fuzzer.runtime_engine.runtime_fuzz_engine import (
     CallOutcome,
     FunctionInfo,
 )
-from fuzzer.runtime_engine.timeout import CallTimeout, call_with_timeout
 from fuzzer.runtime_engine.call_generator import (
     CallGenerator,
     GeneratedCall,
@@ -26,8 +25,6 @@ __all__ = [
     "HarnessStats",
     "CallOutcome",
     "FunctionInfo",
-    "CallTimeout",
-    "call_with_timeout",
     "CallGenerator",
     "GeneratedCall",
     "Seed",

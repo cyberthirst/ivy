@@ -6,6 +6,10 @@ class EVMException(Exception):
     pass
 
 
+class CallTimeout(Exception):
+    pass
+
+
 class StaticCallViolation(EVMException):
     pass
 
