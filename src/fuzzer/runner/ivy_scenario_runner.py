@@ -81,6 +81,14 @@ class IvyScenarioRunner(BaseScenarioRunner):
         addr = Address(address)
         return self.env.get_balance(addr)
 
+    def _set_nonce(self, address: str, value: int) -> None:
+        addr = Address(address)
+        self.env.state.get_account(addr).nonce = value
+
+    def _get_nonce(self, address: str) -> int:
+        addr = Address(address)
+        return self.env.state.get_nonce(addr)
+
     def _raw_call(
         self,
         to_address: str,
