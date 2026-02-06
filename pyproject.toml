@@ -5,7 +5,7 @@ description = "An AST interpreter for Vyper with a custom EVM backend"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "vyper @ git+https://github.com/vyperlang/vyper.git@79d076225105d6416ba71e23c8ac896d15104c5a",
+    "vyper @ git+https://github.com/vyperlang/vyper.git@6a77d89f2eb68a57b9b43e4e1f1df8e956e35286",
     "eth-utils>=5.3.1",
     "rlp>=4.1.0",
     "coincurve>=20.0.0",
