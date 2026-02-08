@@ -245,6 +245,9 @@ def test_runtime_retries_stop_at_first_success_and_update_trace():
     assert deployment_result.success is True
     assert runner.compile_calls == 1
     assert runner.deploy_calls == 3
+    assert harness_result.stats.deployment_attempts == 3
+    assert harness_result.stats.deployment_successes == 1
+    assert harness_result.stats.deployment_failures == 2
     assert runner.deployment_args_seen[0] == [11]
     assert runner.deployment_kwargs_seen[0]["value"] == initial_value
 
@@ -270,6 +273,9 @@ def test_runtime_retries_cap_at_max_attempts():
     assert deployment_result.success is False
     assert runner.compile_calls == 1
     assert runner.deploy_calls == 30
+    assert harness_result.stats.deployment_attempts == 30
+    assert harness_result.stats.deployment_successes == 0
+    assert harness_result.stats.deployment_failures == 30
     assert runner.deployment_start_states == [(0, DEFAULT_BALANCE)] * 30
 
     # Terminal failed attempt is committed (no rollback after final retry).
@@ -314,4 +320,7 @@ def test_call_replay_still_runs_after_successful_deployment():
     harness_result = engine.run(scenario)
 
     assert harness_result.stats.replay_calls == 1
+    assert harness_result.stats.call_attempts == 1
+    assert harness_result.stats.call_successes == 1
+    assert harness_result.stats.call_failures == 0
     assert runner.call_calls == 1

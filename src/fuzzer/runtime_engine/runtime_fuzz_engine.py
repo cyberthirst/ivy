@@ -3,10 +3,11 @@ from __future__ import annotations
 import hashlib
 import random
 from array import array
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 import ivy
+from vyper.ast import nodes as ast
 from ivy.execution_metadata import ExecutionMetadata
 from ivy.exceptions import CallTimeout
 
@@ -58,6 +59,10 @@ class HarnessConfig:
     max_seeds_per_func: int = 16
     max_seeds_total: int = 512
 
+    # Reporting toggles
+    enable_interval_metrics: bool = True
+    enable_coverage_percentages: bool = True
+
 
 @dataclass
 class HarnessStats:
@@ -69,6 +74,12 @@ class HarnessStats:
     state_modified_calls: int = 0
     interesting_calls: int = 0
     skipped_replay: int = 0
+    deployment_attempts: int = 0
+    deployment_successes: int = 0
+    deployment_failures: int = 0
+    call_attempts: int = 0
+    call_successes: int = 0
+    call_failures: int = 0
 
 
 @dataclass
@@ -77,6 +88,8 @@ class CallOutcome:
     state_modified: bool
     timed_out: bool
     trace_result: Optional[TraceResult]
+    stmt_sites: Set[tuple[str, int]] = field(default_factory=set)
+    branch_outcomes: Set[tuple[str, int, bool]] = field(default_factory=set)
 
     @property
     def is_interesting(self) -> bool:
@@ -93,6 +106,10 @@ class HarnessResult:
     ivy_result: ScenarioResult
     stats: HarnessStats
     runtime_edge_ids: Set[int]
+    runtime_stmt_sites_seen: Set[tuple[str, int]]
+    runtime_branch_outcomes_seen: Set[tuple[str, int, bool]]
+    runtime_stmt_sites_total: Set[tuple[str, int]]
+    runtime_branch_outcomes_total: Set[tuple[str, int, bool]]
 
     @property
     def finalized_traces(self) -> List[Any]:
@@ -150,6 +167,29 @@ class FunctionInfo:
     timeout_count: int = 0
 
 
+_STATEMENT_NODE_TYPES = (
+    ast.AnnAssign,
+    ast.Assign,
+    ast.AugAssign,
+    ast.Expr,
+    ast.Log,
+    ast.If,
+    ast.Assert,
+    ast.Raise,
+    ast.For,
+    ast.Return,
+    ast.Break,
+    ast.Continue,
+    ast.Pass,
+)
+
+_BRANCH_NODE_TYPES = (
+    ast.If,
+    ast.Assert,
+    ast.IfExp,
+)
+
+
 class RuntimeFuzzEngine:
     def __init__(
         self,
@@ -174,6 +214,10 @@ class RuntimeFuzzEngine:
             tracker = RuntimeCoverageTracker(self.config.map_size)
             finalized_traces: List[Any] = []
             trace_results: List[TraceResult] = []
+            runtime_stmt_sites_seen: Set[tuple[str, int]] = set()
+            runtime_branch_outcomes_seen: Set[tuple[str, int, bool]] = set()
+            runtime_stmt_sites_total: Set[tuple[str, int]] = set()
+            runtime_branch_outcomes_total: Set[tuple[str, int, bool]] = set()
 
             deployed_contracts: Dict[str, Any] = {}
             trace_index = 0
@@ -190,6 +234,7 @@ class RuntimeFuzzEngine:
                         trace=trace,
                         trace_index=trace_index,
                         use_python_args=scenario.use_python_args,
+                        stats=stats,
                     )
                     trace_results.append(trace_result)
                     if trace_result.result and trace_result.result.success:
@@ -218,6 +263,14 @@ class RuntimeFuzzEngine:
                 ):
                     all_functions.append(FunctionInfo(addr, fn_name, func_t))
 
+            if self.config.enable_coverage_percentages:
+                for contract in deployed_contracts.values():
+                    stmt_sites, branch_outcomes = (
+                        self._collect_static_coverage_sites_for_contract(contract)
+                    )
+                    runtime_stmt_sites_total.update(stmt_sites)
+                    runtime_branch_outcomes_total.update(branch_outcomes)
+
             # Create corpus for mutation-based fuzzing
             corpus = Corpus(
                 max_seeds_per_func=self.config.max_seeds_per_func,
@@ -239,6 +292,8 @@ class RuntimeFuzzEngine:
                 stats,
                 corpus,
                 total_calls,
+                runtime_stmt_sites_seen,
+                runtime_branch_outcomes_seen,
             )
 
             # Phase 2: Replay parent traces (bounded, no deepcopy)
@@ -250,6 +305,8 @@ class RuntimeFuzzEngine:
                 stats,
                 corpus,
                 total_calls,
+                runtime_stmt_sites_seen,
+                runtime_branch_outcomes_seen,
             )
 
             # Phase 3: Corpus-guided fuzzing with plateau escape
@@ -261,6 +318,8 @@ class RuntimeFuzzEngine:
                 stats,
                 corpus,
                 total_calls,
+                runtime_stmt_sites_seen,
+                runtime_branch_outcomes_seen,
             )
 
             ivy_result = ScenarioResult(results=trace_results)
@@ -275,6 +334,10 @@ class RuntimeFuzzEngine:
                 ivy_result=ivy_result,
                 stats=stats,
                 runtime_edge_ids=tracker._seen,
+                runtime_stmt_sites_seen=runtime_stmt_sites_seen,
+                runtime_branch_outcomes_seen=runtime_branch_outcomes_seen,
+                runtime_stmt_sites_total=runtime_stmt_sites_total,
+                runtime_branch_outcomes_total=runtime_branch_outcomes_total,
             )
 
     def _get_constructor_function(self, compiled: Any) -> Any:
@@ -285,9 +348,11 @@ class RuntimeFuzzEngine:
         trace: DeploymentTrace,
         trace_index: int,
         use_python_args: bool,
+        stats: HarnessStats,
     ) -> TraceResult:
         prepared = self.runner.prepare_deployment_context(trace, trace_index)
         if isinstance(prepared, TraceResult):
+            self._record_deployment_result(stats, prepared.result)
             return prepared
 
         deployment_ctx = prepared
@@ -342,6 +407,7 @@ class RuntimeFuzzEngine:
 
             deployment_result = trace_result.result
             assert isinstance(deployment_result, DeploymentResult)
+            self._record_deployment_result(stats, deployment_result)
 
             if deployment_result.success:
                 if use_python_args and trace.python_args is not None:
@@ -357,6 +423,19 @@ class RuntimeFuzzEngine:
 
         assert last_trace_result is not None
         return last_trace_result
+
+    def _record_deployment_result(
+        self,
+        stats: HarnessStats,
+        result: DeploymentResult | CallResult | None,
+    ) -> None:
+        if not isinstance(result, DeploymentResult):
+            return
+        stats.deployment_attempts += 1
+        if result.success:
+            stats.deployment_successes += 1
+        else:
+            stats.deployment_failures += 1
 
     def _execute_call_and_measure(
         self,
@@ -395,13 +474,81 @@ class RuntimeFuzzEngine:
         edge_ids = self.edge_map.hash_metadata(metadata)
         new_cov = tracker.merge(edge_ids)
         state_modified = metadata.state_modified
+        stmt_sites: Set[tuple[str, int]] = set()
+        branch_outcomes: Set[tuple[str, int, bool]] = set()
+        if self.config.enable_coverage_percentages:
+            for addr, node_ids in metadata.coverage.items():
+                addr_str = str(addr)
+                for node_id in node_ids:
+                    stmt_sites.add((addr_str, node_id))
+            for addr, node_id, taken in metadata.branches:
+                branch_outcomes.add((str(addr), node_id, taken))
 
         return CallOutcome(
             new_cov=new_cov,
             state_modified=state_modified,
             timed_out=timed_out,
             trace_result=trace_result,
+            stmt_sites=stmt_sites,
+            branch_outcomes=branch_outcomes,
         )
+
+    def _record_call_outcome(self, stats: HarnessStats, outcome: CallOutcome) -> None:
+        stats.call_attempts += 1
+        if outcome.timed_out:
+            stats.call_failures += 1
+            return
+        if outcome.trace_result is None:
+            stats.call_failures += 1
+            return
+        if (
+            isinstance(outcome.trace_result.result, CallResult)
+            and outcome.trace_result.result.success
+        ):
+            stats.call_successes += 1
+        else:
+            stats.call_failures += 1
+
+    def _iter_nodes(self, root: Any):
+        if not isinstance(root, ast.VyperNode):
+            return
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            yield node
+            for field_name in node.get_fields():
+                if not hasattr(node, field_name):
+                    continue
+                value = getattr(node, field_name)
+                if isinstance(value, list):
+                    for item in reversed(value):
+                        if isinstance(item, ast.VyperNode):
+                            stack.append(item)
+                elif isinstance(value, ast.VyperNode):
+                    stack.append(value)
+
+    def _collect_static_coverage_sites_for_contract(
+        self, contract: Any
+    ) -> tuple[Set[tuple[str, int]], Set[tuple[str, int, bool]]]:
+        compiler_data = getattr(contract, "compiler_data", None)
+        module = getattr(compiler_data, "annotated_vyper_module", None)
+        address = getattr(contract, "address", None)
+        if module is None or address is None:
+            return set(), set()
+
+        address_str = str(address)
+        stmt_sites: Set[tuple[str, int]] = set()
+        branch_outcomes: Set[tuple[str, int, bool]] = set()
+        for node in self._iter_nodes(module):
+            node_id = getattr(node, "node_id", None)
+            if node_id is None:
+                continue
+            if isinstance(node, _STATEMENT_NODE_TYPES):
+                stmt_sites.add((address_str, node_id))
+            if isinstance(node, _BRANCH_NODE_TYPES):
+                branch_outcomes.add((address_str, node_id, True))
+                branch_outcomes.add((address_str, node_id, False))
+        return stmt_sites, branch_outcomes
 
     def _seed_enumerate_externals(
         self,
@@ -412,6 +559,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
+        runtime_stmt_sites_seen: Set[tuple[str, int]],
+        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
     ) -> None:
         """Phase 1: Touch each external function once to seed corpus."""
         # Randomize order to avoid bias
@@ -437,6 +586,9 @@ class RuntimeFuzzEngine:
             )
             stats.enumeration_calls += 1
             total_calls[0] += 1
+            self._record_call_outcome(stats, outcome)
+            runtime_stmt_sites_seen.update(outcome.stmt_sites)
+            runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
             if outcome.timed_out:
                 stats.timeouts += 1
@@ -470,6 +622,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
+        runtime_stmt_sites_seen: Set[tuple[str, int]],
+        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
     ) -> None:
         """Phase 2: Replay parent CallTraces (bounded, no deepcopy)."""
         call_traces = [t for t in scenario.traces if isinstance(t, CallTrace)]
@@ -492,6 +646,9 @@ class RuntimeFuzzEngine:
             )
             stats.replay_calls += 1
             total_calls[0] += 1
+            self._record_call_outcome(stats, outcome)
+            runtime_stmt_sites_seen.update(outcome.stmt_sites)
+            runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
             if outcome.timed_out:
                 stats.timeouts += 1
@@ -533,6 +690,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
+        runtime_stmt_sites_seen: Set[tuple[str, int]],
+        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
     ) -> None:
         """Phase 3: Corpus-guided fuzzing with tiered plateau escape."""
         if not all_functions:
@@ -641,6 +800,9 @@ class RuntimeFuzzEngine:
             )
             stats.fuzz_calls += 1
             total_calls[0] += 1
+            self._record_call_outcome(stats, outcome)
+            runtime_stmt_sites_seen.update(outcome.stmt_sites)
+            runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
             if outcome.timed_out:
                 stats.timeouts += 1
