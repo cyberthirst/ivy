@@ -342,10 +342,20 @@ class FuzzerReporter:
         return (numerator / denominator) * 100.0
 
     @staticmethod
-    def _safe_rate(count: int, denominator: float) -> float:
+    def _safe_rate(count: int, denominator: int | float) -> float:
         if denominator <= 0:
             return 0.0
         return count / denominator
+
+    @staticmethod
+    def _resolve_error_type(
+        error: Optional[Exception], error_type: Optional[str]
+    ) -> str:
+        if error_type:
+            return error_type
+        if error is None:
+            return "UnknownError"
+        return type(error).__name__
 
     @staticmethod
     def _merge_harness_stats(dst: RuntimeMetricsTotals, src: Any) -> None:
@@ -446,6 +456,19 @@ class FuzzerReporter:
         if harness_stats is not None:
             self._merge_harness_stats(self._runtime_totals, harness_stats)
 
+        # Avoid accumulating pending state when the metrics stream is disabled or
+        # not initialized.
+        if not self._metrics_enabled or self._metrics_path is None:
+            self._clear_pending_metrics_state(
+                self._pending_runtime_edge_ids,
+                self._pending_contract_fingerprints,
+                self._pending_stmt_sites_seen,
+                self._pending_branch_outcomes_seen,
+                self._pending_stmt_sites_total,
+                self._pending_branch_outcomes_total,
+            )
+            return
+
         self._pending_runtime_edge_ids.update(
             getattr(artifacts, "runtime_edge_ids", set())
         )
@@ -504,6 +527,14 @@ class FuzzerReporter:
         include_coverage_percentages: bool,
     ) -> Optional[Dict[str, Any]]:
         if not self._metrics_enabled or self._metrics_path is None:
+            self._clear_pending_metrics_state(
+                self._pending_runtime_edge_ids,
+                self._pending_contract_fingerprints,
+                self._pending_stmt_sites_seen,
+                self._pending_branch_outcomes_seen,
+                self._pending_stmt_sites_total,
+                self._pending_branch_outcomes_total,
+            )
             return None
 
         elapsed = self.get_elapsed_time()
@@ -511,11 +542,16 @@ class FuzzerReporter:
 
         scenarios_interval = self.total_scenarios - self._last_snapshot_total_scenarios
         call_attempts_total = self._runtime_totals.call_attempts
-        if call_attempts_total == 0:
-            call_attempts_total = (
-                self._runtime_totals.enumeration_calls
-                + self._runtime_totals.replay_calls
-                + self._runtime_totals.fuzz_calls
+        phase_calls_total = (
+            self._runtime_totals.enumeration_calls
+            + self._runtime_totals.replay_calls
+            + self._runtime_totals.fuzz_calls
+        )
+        if call_attempts_total != phase_calls_total:
+            logging.debug(
+                "Runtime call counter mismatch: call_attempts=%s phase_calls=%s",
+                call_attempts_total,
+                phase_calls_total,
             )
         calls_interval = call_attempts_total - self._last_snapshot_total_calls
 
@@ -761,7 +797,7 @@ class FuzzerReporter:
         subfolder: Optional[str] = None,
     ):
         """Save a compiler crash with the source code that caused it."""
-        error_type = error_type or type(error).__name__
+        error_type = self._resolve_error_type(error, error_type)
 
         crash_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
         if subfolder:
@@ -802,7 +838,7 @@ class FuzzerReporter:
         subfolder: Optional[str] = None,
     ):
         """Save a compilation failure with the source code that caused it."""
-        error_type = error_type or type(error).__name__
+        error_type = self._resolve_error_type(error, error_type)
 
         failure_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
         if subfolder:

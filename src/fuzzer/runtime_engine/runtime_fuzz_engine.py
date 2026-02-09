@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import random
 from array import array
 from dataclasses import dataclass, field
@@ -429,7 +430,14 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         result: DeploymentResult | CallResult | None,
     ) -> None:
+        if result is None:
+            logging.debug("Skipping deployment stats update for missing result")
+            return
         if not isinstance(result, DeploymentResult):
+            logging.debug(
+                "Skipping deployment stats update for unexpected result type: %s",
+                type(result).__name__,
+            )
             return
         stats.deployment_attempts += 1
         if result.success:
@@ -748,7 +756,9 @@ class RuntimeFuzzEngine:
                     other_seed = corpus.get_seed_for_func(key, self.rng)
                     if other_seed and other_seed is not seed:
                         other_seed.times_mutated += 1
-                        generated = self.call_generator.mutate_single_arg(other_seed.call)
+                        generated = self.call_generator.mutate_single_arg(
+                            other_seed.call
+                        )
                     else:
                         generated = self.call_generator.mutate_call(seed.call)
                     func_info = func_lookup.get(key)

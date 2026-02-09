@@ -127,6 +127,12 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
     payload = json.loads(lines[0])
     assert payload["iteration"] == 10
     assert payload["corpus"]["seed_count"] == 20
+    assert reporter._pending_runtime_edge_ids == set()
+    assert reporter._pending_contract_fingerprints == set()
+    assert reporter._pending_stmt_sites_seen == set()
+    assert reporter._pending_branch_outcomes_seen == set()
+    assert reporter._pending_stmt_sites_total == set()
+    assert reporter._pending_branch_outcomes_total == set()
 
 
 def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkeypatch):
@@ -252,3 +258,77 @@ def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
     assert snapshot["novelty"]["contracts_seen_total"] == 1
     assert snapshot["novelty"]["new_contracts_interval"] == 1
     assert reporter._seen_contract_fingerprints == {UNPARSABLE_INTEGRITY_SUM}
+
+
+def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
+    tmp_path, monkeypatch
+):
+    reporter = FuzzerReporter(seed=23, reports_dir=tmp_path)
+    reporter.start_timer()
+    reporter.start_metrics_stream(False)
+
+    def _raise(*_args, **_kwargs):
+        raise AssertionError("loads_from_solc_json should not be called")
+
+    monkeypatch.setattr("fuzzer.reporter.loads_from_solc_json", _raise)
+
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(
+                deployment_attempts=1,
+                deployment_successes=1,
+                call_attempts=2,
+                call_successes=1,
+                call_failures=1,
+            ),
+            runtime_edge_ids={1, 2, 3},
+            runtime_stmt_sites_seen={("0x1", 10)},
+            runtime_branch_outcomes_seen={("0x1", 20, True)},
+            runtime_stmt_sites_total={("0x1", 10), ("0x1", 11)},
+            runtime_branch_outcomes_total={
+                ("0x1", 20, True),
+                ("0x1", 20, False),
+            },
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {"x.vy": {}}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+        ),
+        debug_mode=False,
+    )
+
+    assert reporter._metrics_path is None
+    assert reporter.get_runtime_deployment_success_rate() == 100.0
+    assert reporter.get_runtime_call_success_rate() == 50.0
+    assert reporter._pending_runtime_edge_ids == set()
+    assert reporter._pending_contract_fingerprints == set()
+    assert reporter._pending_stmt_sites_seen == set()
+    assert reporter._pending_branch_outcomes_seen == set()
+    assert reporter._pending_stmt_sites_total == set()
+    assert reporter._pending_branch_outcomes_total == set()
+    assert reporter._seen_runtime_edges == set()
+    assert reporter._seen_contract_fingerprints == set()
+
+    snapshot = reporter.record_interval_metrics(
+        iteration=1,
+        corpus_seed_count=1,
+        corpus_evolved_count=1,
+        corpus_max_evolved=1,
+        include_coverage_percentages=True,
+    )
+    assert snapshot is None
+    assert reporter._pending_runtime_edge_ids == set()
+    assert reporter._pending_contract_fingerprints == set()
+
+
+def test_reporter_uses_unknown_error_type_when_error_missing(tmp_path):
+    reporter = FuzzerReporter(seed=29, reports_dir=tmp_path)
+    reporter.save_compiler_crash(solc_json={"sources": {}}, error=None)
+    reporter.save_compilation_failure(solc_json={"sources": {}}, error=None)
+
+    crash_files = list(tmp_path.rglob("crash_UnknownError_*.json"))
+    failure_files = list(tmp_path.rglob("failure_UnknownError_*.json"))
+    assert len(crash_files) == 1
+    assert len(failure_files) == 1
