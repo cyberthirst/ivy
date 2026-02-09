@@ -62,14 +62,29 @@ class CoverageTracer(Tracer):
     def reset(self) -> None:
         self.metadata.reset()
 
+    @staticmethod
+    def _source_id_for_node(node: ast.VyperNode) -> int:
+        module_node = node.module_node
+        if module_node is None:
+            return -1
+        source_id = getattr(module_node, "source_id", None)
+        if source_id is None:
+            return -1
+        return int(source_id)
+
     def on_node(self, addr, node) -> None:
-        self.metadata.record_node(addr, node.node_id)
+        self.metadata.record_node(addr, self._source_id_for_node(node), node.node_id)
 
     def on_edge(self, addr, prev_node_id, node_id) -> None:
         self.metadata.record_edge(addr, prev_node_id, node_id)
 
     def on_branch(self, addr, node, taken) -> None:
-        self.metadata.record_branch(addr, node.node_id, taken)
+        self.metadata.record_branch(
+            addr,
+            self._source_id_for_node(node),
+            node.node_id,
+            taken,
+        )
 
     def on_boolop(self, addr, node, op, evaluated_count, result) -> None:
         self.metadata.record_boolop(addr, node.node_id, op, evaluated_count, result)

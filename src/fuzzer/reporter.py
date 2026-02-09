@@ -9,6 +9,7 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from ivy.frontend.loader import loads_from_solc_json
 from fuzzer.trace_types import DeploymentTrace
 
@@ -120,19 +121,19 @@ class FuzzerReporter:
     _last_snapshot_compiler_crashes: int = 0
     _seen_runtime_edges: Set[int] = field(default_factory=set)
     _seen_contract_fingerprints: Set[str] = field(default_factory=set)
-    _seen_stmt_sites: Set[tuple[str, int]] = field(default_factory=set)
-    _seen_branch_outcomes: Set[tuple[str, int, bool]] = field(default_factory=set)
-    _stmt_sites_total: Set[tuple[str, int]] = field(default_factory=set)
-    _branch_outcomes_total: Set[tuple[str, int, bool]] = field(default_factory=set)
+    _seen_stmt_sites: Set[RuntimeStmtSite] = field(default_factory=set)
+    _seen_branch_outcomes: Set[RuntimeBranchOutcome] = field(default_factory=set)
+    _stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
+    _branch_outcomes_total: Set[RuntimeBranchOutcome] = field(default_factory=set)
     _runtime_totals: RuntimeMetricsTotals = field(default_factory=RuntimeMetricsTotals)
     _pending_runtime_edge_ids: Set[int] = field(default_factory=set)
     _pending_contract_fingerprints: Set[str] = field(default_factory=set)
-    _pending_stmt_sites_seen: Set[tuple[str, int]] = field(default_factory=set)
-    _pending_branch_outcomes_seen: Set[tuple[str, int, bool]] = field(
+    _pending_stmt_sites_seen: Set[RuntimeStmtSite] = field(default_factory=set)
+    _pending_branch_outcomes_seen: Set[RuntimeBranchOutcome] = field(
         default_factory=set
     )
-    _pending_stmt_sites_total: Set[tuple[str, int]] = field(default_factory=set)
-    _pending_branch_outcomes_total: Set[tuple[str, int, bool]] = field(
+    _pending_stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
+    _pending_branch_outcomes_total: Set[RuntimeBranchOutcome] = field(
         default_factory=set
     )
 
@@ -386,10 +387,10 @@ class FuzzerReporter:
     def _clear_pending_metrics_state(
         pending_runtime_edge_ids: Set[int],
         pending_contract_fingerprints: Set[str],
-        pending_stmt_sites_seen: Set[tuple[str, int]],
-        pending_branch_outcomes_seen: Set[tuple[str, int, bool]],
-        pending_stmt_sites_total: Set[tuple[str, int]],
-        pending_branch_outcomes_total: Set[tuple[str, int, bool]],
+        pending_stmt_sites_seen: Set[RuntimeStmtSite],
+        pending_branch_outcomes_seen: Set[RuntimeBranchOutcome],
+        pending_stmt_sites_total: Set[RuntimeStmtSite],
+        pending_branch_outcomes_total: Set[RuntimeBranchOutcome],
     ) -> None:
         pending_runtime_edge_ids.clear()
         pending_contract_fingerprints.clear()

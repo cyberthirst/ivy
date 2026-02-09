@@ -10,7 +10,7 @@ from ivy.journal import Journal
 def _branches_for(env: Env, addr):
     return {
         (node_id, taken)
-        for a, node_id, taken in env.execution_metadata.branches
+        for a, _source_id, node_id, taken in env.execution_metadata.branches
         if a == addr
     }
 
@@ -44,7 +44,10 @@ def _loop_buckets_for(env: Env, addr):
 
 
 def _node_coverage_for(env: Env, addr):
-    return env.execution_metadata.coverage.get(addr, set())
+    return {
+        node_id
+        for _source_id, node_id in env.execution_metadata.coverage.get(addr, set())
+    }
 
 
 def test_runtime_coverage_branches_and_edges():

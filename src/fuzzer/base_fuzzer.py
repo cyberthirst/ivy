@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig
 
 from fuzzer.mutator.ast_mutator import AstMutator
@@ -47,10 +48,10 @@ class ScenarioRunArtifacts:
     analysis: Any
     harness_stats: Any
     runtime_edge_ids: Set[int]
-    runtime_stmt_sites_seen: Set[tuple[str, int]]
-    runtime_branch_outcomes_seen: Set[tuple[str, int, bool]]
-    runtime_stmt_sites_total: Set[tuple[str, int]]
-    runtime_branch_outcomes_total: Set[tuple[str, int, bool]]
+    runtime_stmt_sites_seen: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
+    runtime_stmt_sites_total: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_total: Set[RuntimeBranchOutcome]
     finalized_scenario: Scenario
 
 

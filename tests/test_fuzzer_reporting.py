@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.reporter import FuzzerReporter, UNPARSABLE_INTEGRITY_SUM
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import DeploymentTrace, Env, Tx
@@ -26,10 +27,10 @@ def _make_artifacts(
     *,
     harness_stats: HarnessStats,
     runtime_edge_ids: set[int],
-    runtime_stmt_sites_seen: set[tuple[str, int]],
-    runtime_branch_outcomes_seen: set[tuple[str, int, bool]],
-    runtime_stmt_sites_total: set[tuple[str, int]],
-    runtime_branch_outcomes_total: set[tuple[str, int, bool]],
+    runtime_stmt_sites_seen: set[RuntimeStmtSite],
+    runtime_branch_outcomes_seen: set[RuntimeBranchOutcome],
+    runtime_stmt_sites_total: set[RuntimeStmtSite],
+    runtime_branch_outcomes_total: set[RuntimeBranchOutcome],
     finalized_scenario: Scenario,
 ):
     return SimpleNamespace(
@@ -85,10 +86,15 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
             call_failures=3,
         ),
         runtime_edge_ids={11, 22, 33},
-        runtime_stmt_sites_seen={("0x1", 1), ("0x1", 2)},
-        runtime_branch_outcomes_seen={("0x1", 10, True)},
-        runtime_stmt_sites_total={("0x1", 1), ("0x1", 2), ("0x1", 3), ("0x1", 4)},
-        runtime_branch_outcomes_total={("0x1", 10, True), ("0x1", 10, False)},
+        runtime_stmt_sites_seen={("0x1", 0, 1), ("0x1", 0, 2)},
+        runtime_branch_outcomes_seen={("0x1", 0, 10, True)},
+        runtime_stmt_sites_total={
+            ("0x1", 0, 1),
+            ("0x1", 0, 2),
+            ("0x1", 0, 3),
+            ("0x1", 0, 4),
+        },
+        runtime_branch_outcomes_total={("0x1", 0, 10, True), ("0x1", 0, 10, False)},
         finalized_scenario=Scenario(
             traces=[_make_deployment_trace(solc_json={"sources": {}})],
             dependencies=[],
@@ -283,12 +289,12 @@ def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
                 call_failures=1,
             ),
             runtime_edge_ids={1, 2, 3},
-            runtime_stmt_sites_seen={("0x1", 10)},
-            runtime_branch_outcomes_seen={("0x1", 20, True)},
-            runtime_stmt_sites_total={("0x1", 10), ("0x1", 11)},
+            runtime_stmt_sites_seen={("0x1", 0, 10)},
+            runtime_branch_outcomes_seen={("0x1", 0, 20, True)},
+            runtime_stmt_sites_total={("0x1", 0, 10), ("0x1", 0, 11)},
             runtime_branch_outcomes_total={
-                ("0x1", 20, True),
-                ("0x1", 20, False),
+                ("0x1", 0, 20, True),
+                ("0x1", 0, 20, False),
             },
             finalized_scenario=Scenario(
                 traces=[_make_deployment_trace(solc_json={"sources": {"x.vy": {}}})],

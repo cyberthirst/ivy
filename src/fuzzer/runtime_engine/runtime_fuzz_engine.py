@@ -9,9 +9,11 @@ from typing import Any, Dict, List, Optional, Set
 
 import ivy
 from vyper.ast import nodes as ast
+from vyper.compiler.input_bundle import BUILTIN
 from ivy.execution_metadata import ExecutionMetadata
 from ivy.exceptions import CallTimeout
 
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.runner.base_scenario_runner import (
     CallResult,
     DeploymentResult,
@@ -89,8 +91,8 @@ class CallOutcome:
     state_modified: bool
     timed_out: bool
     trace_result: Optional[TraceResult]
-    stmt_sites: Set[tuple[str, int]] = field(default_factory=set)
-    branch_outcomes: Set[tuple[str, int, bool]] = field(default_factory=set)
+    stmt_sites: Set[RuntimeStmtSite] = field(default_factory=set)
+    branch_outcomes: Set[RuntimeBranchOutcome] = field(default_factory=set)
 
     @property
     def is_interesting(self) -> bool:
@@ -107,10 +109,10 @@ class HarnessResult:
     ivy_result: ScenarioResult
     stats: HarnessStats
     runtime_edge_ids: Set[int]
-    runtime_stmt_sites_seen: Set[tuple[str, int]]
-    runtime_branch_outcomes_seen: Set[tuple[str, int, bool]]
-    runtime_stmt_sites_total: Set[tuple[str, int]]
-    runtime_branch_outcomes_total: Set[tuple[str, int, bool]]
+    runtime_stmt_sites_seen: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
+    runtime_stmt_sites_total: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_total: Set[RuntimeBranchOutcome]
 
     @property
     def finalized_traces(self) -> List[Any]:
@@ -215,10 +217,10 @@ class RuntimeFuzzEngine:
             tracker = RuntimeCoverageTracker(self.config.map_size)
             finalized_traces: List[Any] = []
             trace_results: List[TraceResult] = []
-            runtime_stmt_sites_seen: Set[tuple[str, int]] = set()
-            runtime_branch_outcomes_seen: Set[tuple[str, int, bool]] = set()
-            runtime_stmt_sites_total: Set[tuple[str, int]] = set()
-            runtime_branch_outcomes_total: Set[tuple[str, int, bool]] = set()
+            runtime_stmt_sites_seen: Set[RuntimeStmtSite] = set()
+            runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome] = set()
+            runtime_stmt_sites_total: Set[RuntimeStmtSite] = set()
+            runtime_branch_outcomes_total: Set[RuntimeBranchOutcome] = set()
 
             deployed_contracts: Dict[str, Any] = {}
             trace_index = 0
@@ -482,15 +484,15 @@ class RuntimeFuzzEngine:
         edge_ids = self.edge_map.hash_metadata(metadata)
         new_cov = tracker.merge(edge_ids)
         state_modified = metadata.state_modified
-        stmt_sites: Set[tuple[str, int]] = set()
-        branch_outcomes: Set[tuple[str, int, bool]] = set()
+        stmt_sites: Set[RuntimeStmtSite] = set()
+        branch_outcomes: Set[RuntimeBranchOutcome] = set()
         if self.config.enable_coverage_percentages:
-            for addr, node_ids in metadata.coverage.items():
+            for addr, source_node_ids in metadata.coverage.items():
                 addr_str = str(addr)
-                for node_id in node_ids:
-                    stmt_sites.add((addr_str, node_id))
-            for addr, node_id, taken in metadata.branches:
-                branch_outcomes.add((str(addr), node_id, taken))
+                for source_id, node_id in source_node_ids:
+                    stmt_sites.add((addr_str, int(source_id), int(node_id)))
+            for addr, source_id, node_id, taken in metadata.branches:
+                branch_outcomes.add((str(addr), int(source_id), int(node_id), taken))
 
         return CallOutcome(
             new_cov=new_cov,
@@ -535,27 +537,64 @@ class RuntimeFuzzEngine:
                 elif isinstance(value, ast.VyperNode):
                     stack.append(value)
 
+    def _iter_coverage_modules(self, compiler_data: Any):
+        root = getattr(compiler_data, "annotated_vyper_module", None)
+        if isinstance(root, ast.Module):
+            yield root
+
+        resolved_imports = getattr(compiler_data, "resolved_imports", None)
+        compiler_inputs = getattr(resolved_imports, "compiler_inputs", None)
+        if not isinstance(compiler_inputs, dict):
+            return
+
+        for compiler_input, parsed_module in compiler_inputs.items():
+            if not isinstance(parsed_module, ast.Module):
+                continue
+            if getattr(parsed_module, "is_interface", False):
+                continue
+            if getattr(compiler_input, "source_id", None) == BUILTIN:
+                continue
+            yield parsed_module
+
     def _collect_static_coverage_sites_for_contract(
         self, contract: Any
-    ) -> tuple[Set[tuple[str, int]], Set[tuple[str, int, bool]]]:
+    ) -> tuple[Set[RuntimeStmtSite], Set[RuntimeBranchOutcome]]:
         compiler_data = getattr(contract, "compiler_data", None)
-        module = getattr(compiler_data, "annotated_vyper_module", None)
         address = getattr(contract, "address", None)
-        if module is None or address is None:
+        if compiler_data is None or address is None:
             return set(), set()
 
         address_str = str(address)
-        stmt_sites: Set[tuple[str, int]] = set()
-        branch_outcomes: Set[tuple[str, int, bool]] = set()
-        for node in self._iter_nodes(module):
-            node_id = getattr(node, "node_id", None)
-            if node_id is None:
+        stmt_sites: Set[RuntimeStmtSite] = set()
+        branch_outcomes: Set[RuntimeBranchOutcome] = set()
+
+        seen_modules: Set[tuple[Any, Any]] = set()
+        for module in self._iter_coverage_modules(compiler_data):
+            module_key = (
+                getattr(module, "source_id", None),
+                getattr(module, "resolved_path", None),
+            )
+            if module_key in seen_modules:
                 continue
-            if isinstance(node, _STATEMENT_NODE_TYPES):
-                stmt_sites.add((address_str, node_id))
-            if isinstance(node, _BRANCH_NODE_TYPES):
-                branch_outcomes.add((address_str, node_id, True))
-                branch_outcomes.add((address_str, node_id, False))
+            seen_modules.add(module_key)
+            module_source_id = getattr(module, "source_id", None)
+            if module_source_id is None:
+                module_source_id = -1
+
+            for node in self._iter_nodes(module):
+                node_id = getattr(node, "node_id", None)
+                if node_id is None:
+                    continue
+                if isinstance(node, _STATEMENT_NODE_TYPES):
+                    stmt_sites.add((address_str, int(module_source_id), node_id))
+                if isinstance(node, _BRANCH_NODE_TYPES):
+                    branch_outcomes.add(
+                        (address_str, int(module_source_id), node_id, True)
+                    )
+                    branch_outcomes.add(
+                        (address_str, int(module_source_id), node_id, False)
+                    )
+
         return stmt_sites, branch_outcomes
 
     def _seed_enumerate_externals(
@@ -567,8 +606,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
-        runtime_stmt_sites_seen: Set[tuple[str, int]],
-        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
+        runtime_stmt_sites_seen: Set[RuntimeStmtSite],
+        runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome],
     ) -> None:
         """Phase 1: Touch each external function once to seed corpus."""
         # Randomize order to avoid bias
@@ -630,8 +669,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
-        runtime_stmt_sites_seen: Set[tuple[str, int]],
-        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
+        runtime_stmt_sites_seen: Set[RuntimeStmtSite],
+        runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome],
     ) -> None:
         """Phase 2: Replay parent CallTraces (bounded, no deepcopy)."""
         call_traces = [t for t in scenario.traces if isinstance(t, CallTrace)]
@@ -698,8 +737,8 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         corpus: Corpus,
         total_calls: List[int],
-        runtime_stmt_sites_seen: Set[tuple[str, int]],
-        runtime_branch_outcomes_seen: Set[tuple[str, int, bool]],
+        runtime_stmt_sites_seen: Set[RuntimeStmtSite],
+        runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome],
     ) -> None:
         """Phase 3: Corpus-guided fuzzing with tiered plateau escape."""
         if not all_functions:
