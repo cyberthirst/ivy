@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
 import ivy
-from vyper.ast import nodes as ast
 from ivy.execution_metadata import ExecutionMetadata
 from ivy.exceptions import CallTimeout
 from ivy.types import Address
@@ -33,6 +32,9 @@ from fuzzer.runtime_engine.call_generator import (
     CallKey,
     Corpus,
     GeneratedCall,
+)
+from fuzzer.runtime_engine.static_coverage import (
+    collect_static_coverage_sites_for_contract,
 )
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
 
@@ -191,9 +193,6 @@ class FunctionInfo:
     fn_name: str
     func_t: Any
     timeout_count: int = 0
-
-
-_STMT_NODE_TYPE = getattr(ast, "Stmt")
 
 
 class RuntimeFuzzEngine:
@@ -497,91 +496,10 @@ class RuntimeFuzzEngine:
 
         return self.runner.env.state.get_code(Address(to_address)) is None
 
-    def _iter_runtime_modules(self, root_module_t: Any):
-        seen: Set[Any] = set()
-        stack = [root_module_t]
-        while stack:
-            module_t = stack.pop()
-            if module_t in seen:
-                continue
-            seen.add(module_t)
-
-            decl_node = getattr(module_t, "decl_node", None)
-            if getattr(decl_node, "is_interface", False):
-                continue
-
-            yield module_t
-
-            imported_modules = getattr(module_t, "imported_modules", {})
-            if not isinstance(imported_modules, dict):
-                continue
-            for import_info in imported_modules.values():
-                imported_module_t = getattr(import_info, "module_t", None)
-                if imported_module_t is not None:
-                    stack.append(imported_module_t)
-
-    def _iter_runtime_functions(self, root_module_t: Any):
-        runtime_functions: Set[Any] = set()
-        for module_t in self._iter_runtime_modules(root_module_t):
-            exposed_functions = getattr(module_t, "exposed_functions", [])
-            for fn_t in exposed_functions:
-                if getattr(fn_t, "is_constructor", False):
-                    continue
-                runtime_functions.add(fn_t)
-                runtime_functions.update(
-                    internal_fn
-                    for internal_fn in getattr(fn_t, "reachable_internal_functions", [])
-                    if not getattr(internal_fn, "is_constructor", False)
-                )
-        return runtime_functions
-
-    @staticmethod
-    def _source_id_for_node(node: ast.VyperNode) -> int:
-        module_node = node.module_node
-        if module_node is None:
-            return -1
-        source_id = getattr(module_node, "source_id", None)
-        if source_id is None:
-            return -1
-        return int(source_id)
-
     def _collect_static_coverage_sites_for_contract(
         self, contract: Any
     ) -> tuple[Set[RuntimeStmtSite], Set[RuntimeBranchOutcome]]:
-        compiler_data = getattr(contract, "compiler_data", None)
-        address = getattr(contract, "address", None)
-        if compiler_data is None or address is None:
-            return set(), set()
-
-        root_module_t = getattr(compiler_data, "global_ctx", None)
-        if root_module_t is None:
-            return set(), set()
-
-        address_str = str(address)
-        stmt_sites: Set[RuntimeStmtSite] = set()
-        branch_outcomes: Set[RuntimeBranchOutcome] = set()
-
-        runtime_functions = self._iter_runtime_functions(root_module_t)
-        for fn_t in runtime_functions:
-            decl_node = getattr(fn_t, "decl_node", None)
-            if not isinstance(decl_node, ast.FunctionDef):
-                continue
-
-            for node in decl_node.get_descendants(_STMT_NODE_TYPE):
-                node_id = getattr(node, "node_id", None)
-                if node_id is None:
-                    continue
-                stmt_sites.add((address_str, self._source_id_for_node(node), node_id))
-
-            for node in decl_node.get_descendants((ast.If, ast.Assert, ast.IfExp)):
-                node_id = getattr(node, "node_id", None)
-                if node_id is None:
-                    continue
-                source_id = self._source_id_for_node(node)
-                branch_outcomes.add((address_str, source_id, node_id, True))
-                branch_outcomes.add((address_str, source_id, node_id, False))
-
-        return stmt_sites, branch_outcomes
+        return collect_static_coverage_sites_for_contract(contract)
 
     def _seed_enumerate_externals(
         self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ivy.execution_metadata import ExecutionMetadata
+from ivy.source_utils import source_id_for_node
 
 if TYPE_CHECKING:
     from vyper.ast import nodes as ast
@@ -62,18 +63,8 @@ class CoverageTracer(Tracer):
     def reset(self) -> None:
         self.metadata.reset()
 
-    @staticmethod
-    def _source_id_for_node(node: ast.VyperNode) -> int:
-        module_node = node.module_node
-        if module_node is None:
-            return -1
-        source_id = getattr(module_node, "source_id", None)
-        if source_id is None:
-            return -1
-        return int(source_id)
-
     def on_node(self, addr, node) -> None:
-        self.metadata.record_node(addr, self._source_id_for_node(node), node.node_id)
+        self.metadata.record_node(addr, source_id_for_node(node), node.node_id)
 
     def on_edge(self, addr, prev_node_id, node_id) -> None:
         self.metadata.record_edge(addr, prev_node_id, node_id)
@@ -81,7 +72,7 @@ class CoverageTracer(Tracer):
     def on_branch(self, addr, node, taken) -> None:
         self.metadata.record_branch(
             addr,
-            self._source_id_for_node(node),
+            source_id_for_node(node),
             node.node_id,
             taken,
         )

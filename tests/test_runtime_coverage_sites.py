@@ -3,19 +3,10 @@ from __future__ import annotations
 import vyper.ast as vy_ast
 
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig, RuntimeFuzzEngine
+from ivy.source_utils import source_id_for_node
 
 
 _STMT_NODE_TYPE = getattr(vy_ast, "Stmt")
-
-
-def _source_id_for_node(node: vy_ast.VyperNode) -> int:
-    module_node = node.module_node
-    if module_node is None:
-        return -1
-    source_id = getattr(module_node, "source_id", None)
-    if source_id is None:
-        return -1
-    return int(source_id)
 
 
 def _stmt_sites_for_function(
@@ -31,7 +22,7 @@ def _stmt_sites_for_function(
         node_id = getattr(node, "node_id", None)
         if node_id is None:
             continue
-        stmt_sites.add((address, _source_id_for_node(node), int(node_id)))
+        stmt_sites.add((address, source_id_for_node(node), int(node_id)))
     return stmt_sites
 
 
@@ -48,7 +39,7 @@ def _branch_outcomes_for_function(
         node_id = getattr(node, "node_id", None)
         if node_id is None:
             continue
-        source_id = _source_id_for_node(node)
+        source_id = source_id_for_node(node)
         branch_outcomes.add((address, source_id, int(node_id), True))
         branch_outcomes.add((address, source_id, int(node_id), False))
     return branch_outcomes
@@ -186,8 +177,8 @@ def used(a: uint256) -> uint256:
     run_fn = next(fn for fn in root_module_t.exposed_functions if fn.name == "run")
     lib_fn = root_module_t.imported_modules["lib1"].module_t.functions["used"]
 
-    run_source_id = _source_id_for_node(run_fn.decl_node)
-    lib_source_id = _source_id_for_node(lib_fn.decl_node)
+    run_source_id = source_id_for_node(run_fn.decl_node)
+    lib_source_id = source_id_for_node(lib_fn.decl_node)
 
     stmt_source_ids = {source_id for _, source_id, _ in stmt_sites}
     branch_source_ids = {source_id for _, source_id, _, _ in branch_outcomes}
