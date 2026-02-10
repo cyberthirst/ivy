@@ -18,7 +18,9 @@ from vyper.exceptions import ParserException
 
 
 def test_arc_coverage_collector_records_arcs_and_time():
-    collector = ArcCoverageCollector(guidance_targets=("tests/test_coverage_guidance.py",))
+    collector = ArcCoverageCollector(
+        guidance_targets=("tests/test_coverage_guidance.py",)
+    )
     collector.start_scenario()
 
     def f(x: bool) -> int:
@@ -35,10 +37,16 @@ def test_arc_coverage_collector_records_arcs_and_time():
     assert collector.compile_time_by_config_s["c1"] >= 0
     assert collector.get_scenario_arcs()
     assert collector.get_arcs_by_config()["c1"]
+    line_analysis = collector.get_scenario_line_analysis()
+    assert line_analysis
+    for executable, missing in line_analysis.values():
+        assert missing <= executable
 
 
 def test_arc_coverage_collector_drops_arcs_on_exception():
-    collector = ArcCoverageCollector(guidance_targets=("tests/test_coverage_guidance.py",))
+    collector = ArcCoverageCollector(
+        guidance_targets=("tests/test_coverage_guidance.py",)
+    )
     collector.start_scenario()
 
     t0 = time.perf_counter()

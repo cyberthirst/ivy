@@ -18,6 +18,7 @@ from typing import DefaultDict, Dict, Iterable, Iterator, Optional, Set, Tuple
 import coverage
 
 Arc = Tuple[str, int, int]
+FileLineAnalysis = Tuple[Set[int], Set[int]]
 
 DEFAULT_GUIDANCE_TARGETS: Tuple[str, ...] = (
     "vyper/codegen",
@@ -107,6 +108,36 @@ class ArcCoverageCollector:
 
     def get_arcs_by_config(self) -> Dict[str, Set[Arc]]:
         return {k: set(v) for k, v in self._scenario_arcs_by_config.items()}
+
+    def get_scenario_line_analysis(self) -> Dict[str, FileLineAnalysis]:
+        """
+        Return per-file executable and missing line numbers from the latest run.
+
+        The returned mapping is:
+            filename -> (executable_lines, missing_lines)
+        """
+        if self._cov is None:
+            return {}
+
+        data = self._cov.get_data()
+        analysis: Dict[str, FileLineAnalysis] = {}
+        for filename in data.measured_files():
+            if not self._should_trace_file(filename):
+                continue
+
+            try:
+                canonical, executable, _excluded, missing, _missing_fmt = (
+                    self._cov.analysis2(filename)
+                )
+            except coverage.CoverageException:
+                continue
+
+            analysis[canonical] = (
+                set(executable),
+                set(missing),
+            )
+
+        return analysis
 
     def _should_trace_file(self, filename: str) -> bool:
         norm = _normalize_path(filename)
