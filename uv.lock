@@ -733,6 +733,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "coincurve" },
+    { name = "coverage" },
     { name = "eth-utils" },
     { name = "rlp" },
     { name = "vyper" },
@@ -754,6 +755,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coincurve", specifier = ">=20.0.0" },
+    { name = "coverage", specifier = ">=7.13.1" },
     { name = "eth-utils", specifier = ">=5.3.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.104.2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
