@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, Set
 
 import ivy
 from vyper.ast import nodes as ast
-from vyper.compiler.input_bundle import BUILTIN
 from ivy.execution_metadata import ExecutionMetadata
 from ivy.exceptions import CallTimeout
 from ivy.types import Address
@@ -173,27 +172,7 @@ class FunctionInfo:
     timeout_count: int = 0
 
 
-_STATEMENT_NODE_TYPES = (
-    ast.AnnAssign,
-    ast.Assign,
-    ast.AugAssign,
-    ast.Expr,
-    ast.Log,
-    ast.If,
-    ast.Assert,
-    ast.Raise,
-    ast.For,
-    ast.Return,
-    ast.Break,
-    ast.Continue,
-    ast.Pass,
-)
-
-_BRANCH_NODE_TYPES = (
-    ast.If,
-    ast.Assert,
-    ast.IfExp,
-)
+_STMT_NODE_TYPE = getattr(ast, "Stmt")
 
 
 class RuntimeFuzzEngine:
@@ -534,42 +513,53 @@ class RuntimeFuzzEngine:
 
         return self.runner.env.state.get_code(Address(to_address)) is None
 
-    def _iter_nodes(self, root: Any):
-        if not isinstance(root, ast.VyperNode):
-            return
-        stack = [root]
+    def _iter_runtime_modules(self, root_module_t: Any):
+        seen: Set[Any] = set()
+        stack = [root_module_t]
         while stack:
-            node = stack.pop()
-            yield node
-            for field_name in node.get_fields():
-                if not hasattr(node, field_name):
+            module_t = stack.pop()
+            if module_t in seen:
+                continue
+            seen.add(module_t)
+
+            decl_node = getattr(module_t, "decl_node", None)
+            if getattr(decl_node, "is_interface", False):
+                continue
+
+            yield module_t
+
+            imported_modules = getattr(module_t, "imported_modules", {})
+            if not isinstance(imported_modules, dict):
+                continue
+            for import_info in imported_modules.values():
+                imported_module_t = getattr(import_info, "module_t", None)
+                if imported_module_t is not None:
+                    stack.append(imported_module_t)
+
+    def _iter_runtime_functions(self, root_module_t: Any):
+        runtime_functions: Set[Any] = set()
+        for module_t in self._iter_runtime_modules(root_module_t):
+            exposed_functions = getattr(module_t, "exposed_functions", [])
+            for fn_t in exposed_functions:
+                if getattr(fn_t, "is_constructor", False):
                     continue
-                value = getattr(node, field_name)
-                if isinstance(value, list):
-                    for item in reversed(value):
-                        if isinstance(item, ast.VyperNode):
-                            stack.append(item)
-                elif isinstance(value, ast.VyperNode):
-                    stack.append(value)
+                runtime_functions.add(fn_t)
+                runtime_functions.update(
+                    internal_fn
+                    for internal_fn in getattr(fn_t, "reachable_internal_functions", [])
+                    if not getattr(internal_fn, "is_constructor", False)
+                )
+        return runtime_functions
 
-    def _iter_coverage_modules(self, compiler_data: Any):
-        root = getattr(compiler_data, "annotated_vyper_module", None)
-        if isinstance(root, ast.Module):
-            yield root
-
-        resolved_imports = getattr(compiler_data, "resolved_imports", None)
-        compiler_inputs = getattr(resolved_imports, "compiler_inputs", None)
-        if not isinstance(compiler_inputs, dict):
-            return
-
-        for compiler_input, parsed_module in compiler_inputs.items():
-            if not isinstance(parsed_module, ast.Module):
-                continue
-            if getattr(parsed_module, "is_interface", False):
-                continue
-            if getattr(compiler_input, "source_id", None) == BUILTIN:
-                continue
-            yield parsed_module
+    @staticmethod
+    def _source_id_for_node(node: ast.VyperNode) -> int:
+        module_node = node.module_node
+        if module_node is None:
+            return -1
+        source_id = getattr(module_node, "source_id", None)
+        if source_id is None:
+            return -1
+        return int(source_id)
 
     def _collect_static_coverage_sites_for_contract(
         self, contract: Any
@@ -579,36 +569,33 @@ class RuntimeFuzzEngine:
         if compiler_data is None or address is None:
             return set(), set()
 
+        root_module_t = getattr(compiler_data, "global_ctx", None)
+        if root_module_t is None:
+            return set(), set()
+
         address_str = str(address)
         stmt_sites: Set[RuntimeStmtSite] = set()
         branch_outcomes: Set[RuntimeBranchOutcome] = set()
 
-        seen_modules: Set[tuple[Any, Any]] = set()
-        for module in self._iter_coverage_modules(compiler_data):
-            module_key = (
-                getattr(module, "source_id", None),
-                getattr(module, "resolved_path", None),
-            )
-            if module_key in seen_modules:
+        runtime_functions = self._iter_runtime_functions(root_module_t)
+        for fn_t in runtime_functions:
+            decl_node = getattr(fn_t, "decl_node", None)
+            if not isinstance(decl_node, ast.FunctionDef):
                 continue
-            seen_modules.add(module_key)
-            module_source_id = getattr(module, "source_id", None)
-            if module_source_id is None:
-                module_source_id = -1
 
-            for node in self._iter_nodes(module):
+            for node in decl_node.get_descendants(_STMT_NODE_TYPE):
                 node_id = getattr(node, "node_id", None)
                 if node_id is None:
                     continue
-                if isinstance(node, _STATEMENT_NODE_TYPES):
-                    stmt_sites.add((address_str, int(module_source_id), node_id))
-                if isinstance(node, _BRANCH_NODE_TYPES):
-                    branch_outcomes.add(
-                        (address_str, int(module_source_id), node_id, True)
-                    )
-                    branch_outcomes.add(
-                        (address_str, int(module_source_id), node_id, False)
-                    )
+                stmt_sites.add((address_str, self._source_id_for_node(node), node_id))
+
+            for node in decl_node.get_descendants((ast.If, ast.Assert, ast.IfExp)):
+                node_id = getattr(node, "node_id", None)
+                if node_id is None:
+                    continue
+                source_id = self._source_id_for_node(node)
+                branch_outcomes.add((address_str, source_id, node_id, True))
+                branch_outcomes.add((address_str, source_id, node_id, False))
 
         return stmt_sites, branch_outcomes
 

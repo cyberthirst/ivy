@@ -1,157 +1,198 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import vyper.ast as vy_ast
-from vyper.compiler.input_bundle import BUILTIN
 
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig, RuntimeFuzzEngine
 
 
-class _CompilerInputKey:
-    def __init__(self, source_id: int):
-        self.source_id = source_id
+_STMT_NODE_TYPE = getattr(vy_ast, "Stmt")
 
 
-def _make_module(source: str, *, source_id: int, resolved_path: str):
-    module = vy_ast.parse_to_ast(source)
-    module.source_id = source_id
-    module.resolved_path = resolved_path
-    return module
+def _source_id_for_node(node: vy_ast.VyperNode) -> int:
+    module_node = node.module_node
+    if module_node is None:
+        return -1
+    source_id = getattr(module_node, "source_id", None)
+    if source_id is None:
+        return -1
+    return int(source_id)
 
 
-def _offset_node_ids(engine: RuntimeFuzzEngine, module, offset: int) -> None:
-    for node in engine._iter_nodes(module):
+def _stmt_sites_for_function(
+    address: str,
+    fn_t,
+) -> set[tuple[str, int, int]]:
+    decl_node = getattr(fn_t, "decl_node", None)
+    if decl_node is None:
+        return set()
+
+    stmt_sites: set[tuple[str, int, int]] = set()
+    for node in decl_node.get_descendants(_STMT_NODE_TYPE):
         node_id = getattr(node, "node_id", None)
-        if node_id is not None:
-            node.node_id = node_id + offset
+        if node_id is None:
+            continue
+        stmt_sites.add((address, _source_id_for_node(node), int(node_id)))
+    return stmt_sites
 
 
-def _collect_sites(engine: RuntimeFuzzEngine, root_module, compiler_inputs):
-    contract = SimpleNamespace(
-        address="0x123",
-        compiler_data=SimpleNamespace(
-            annotated_vyper_module=root_module,
-            resolved_imports=SimpleNamespace(compiler_inputs=compiler_inputs),
-        ),
-    )
-    return engine._collect_static_coverage_sites_for_contract(contract)
+def _branch_outcomes_for_function(
+    address: str,
+    fn_t,
+) -> set[tuple[str, int, int, bool]]:
+    decl_node = getattr(fn_t, "decl_node", None)
+    if decl_node is None:
+        return set()
+
+    branch_outcomes: set[tuple[str, int, int, bool]] = set()
+    for node in decl_node.get_descendants((vy_ast.If, vy_ast.Assert, vy_ast.IfExp)):
+        node_id = getattr(node, "node_id", None)
+        if node_id is None:
+            continue
+        source_id = _source_id_for_node(node)
+        branch_outcomes.add((address, source_id, int(node_id), True))
+        branch_outcomes.add((address, source_id, int(node_id), False))
+    return branch_outcomes
 
 
-def test_static_coverage_sites_include_non_interface_non_builtin_imports():
+def test_static_coverage_sites_skip_constructors_and_init_only_functions(get_contract):
+    source = """
+x: uint256
+
+@deploy
+def __init__(a: uint256):
+    self.x = a
+    self.init_only(a)
+
+@internal
+def init_only(a: uint256):
+    if a > 0:
+        self.x = a + 1
+
+@external
+def run(a: uint256):
+    self.runtime_fn(a)
+
+@internal
+def runtime_fn(a: uint256):
+    if a > 1:
+        self.x = a
+    """
+    contract = get_contract(source, 1)
     engine = RuntimeFuzzEngine(HarnessConfig(), seed=1)
 
-    root_module = _make_module(
-        """
-@external
-def root_fn(x: uint256) -> uint256:
-    if x > 0:
-        return x
-    assert x == 0
-    return 1
-        """,
-        source_id=100,
-        resolved_path="main.vy",
+    stmt_sites, branch_outcomes = engine._collect_static_coverage_sites_for_contract(
+        contract
     )
-    import_module = _make_module(
-        """
+    address = str(contract.address)
+    module_t = contract.compiler_data.global_ctx
+
+    run_fn = next(fn for fn in module_t.exposed_functions if fn.name == "run")
+    runtime_fn = module_t.functions["runtime_fn"]
+    init_fn = module_t.init_function
+    init_only_fn = module_t.functions["init_only"]
+
+    expected_runtime_stmt = _stmt_sites_for_function(
+        address, run_fn
+    ) | _stmt_sites_for_function(address, runtime_fn)
+    expected_runtime_branches = _branch_outcomes_for_function(
+        address, run_fn
+    ) | _branch_outcomes_for_function(address, runtime_fn)
+
+    assert expected_runtime_stmt <= stmt_sites
+    assert expected_runtime_branches <= branch_outcomes
+
+    assert _stmt_sites_for_function(address, init_fn).isdisjoint(stmt_sites)
+    assert _branch_outcomes_for_function(address, init_fn).isdisjoint(branch_outcomes)
+    assert _stmt_sites_for_function(address, init_only_fn).isdisjoint(stmt_sites)
+    assert _branch_outcomes_for_function(address, init_only_fn).isdisjoint(
+        branch_outcomes
+    )
+
+
+def test_static_coverage_sites_include_reachable_internal_imports_only(
+    get_contract, make_input_bundle
+):
+    main = """
+import lib1
+initializes: lib1
+
+@external
+def run(a: uint256) -> uint256:
+    return lib1.used(a)
+    """
+    lib1 = """
 @internal
-def lib_fn(y: uint256) -> uint256:
-    z: uint256 = y
-    return z
-        """,
-        source_id=101,
-        resolved_path="lib.vy",
-    )
-    interface_module = _make_module(
-        """
-@external
-def ping() -> uint256:
-    ...
-        """,
-        source_id=102,
-        resolved_path="iface.vyi",
-    )
-    interface_module.is_interface = True
-    builtin_module = _make_module(
-        """
-@internal
-def helper(a: uint256) -> uint256:
-    return a
-        """,
-        source_id=103,
-        resolved_path="builtin.vy",
-    )
-
-    # Keep node IDs disjoint between modules so set membership reflects module inclusion.
-    _offset_node_ids(engine, import_module, 1000)
-    _offset_node_ids(engine, interface_module, 2000)
-    _offset_node_ids(engine, builtin_module, 3000)
-
-    root_stmt, root_branch = _collect_sites(engine, root_module, {})
-    import_stmt, import_branch = _collect_sites(engine, import_module, {})
-
-    combined_stmt, combined_branch = _collect_sites(
-        engine,
-        root_module,
-        {
-            _CompilerInputKey(source_id=101): import_module,
-            # Duplicate module should be de-duplicated via source_id/resolved_path.
-            _CompilerInputKey(source_id=999): import_module,
-            _CompilerInputKey(source_id=102): interface_module,
-            _CompilerInputKey(source_id=BUILTIN): builtin_module,
-        },
-    )
-
-    assert combined_stmt == root_stmt | import_stmt
-    assert combined_branch == root_branch | import_branch
-
-
-def test_static_coverage_sites_use_source_id_with_node_id():
-    engine = RuntimeFuzzEngine(HarnessConfig(), seed=1)
-
-    root_module = _make_module(
-        """
-@external
-def root_fn(x: uint256) -> uint256:
-    if x > 0:
-        return x
+def used(a: uint256) -> uint256:
+    if a > 0:
+        return a
     return 0
-        """,
-        source_id=200,
-        resolved_path="main.vy",
-    )
-    import_module = _make_module(
-        """
+
 @internal
-def lib_fn(y: uint256) -> uint256:
-    if y > 0:
-        return y
+def dead(a: uint256) -> uint256:
+    if a == 1:
+        return 1
+    return 2
+    """
+    contract = get_contract(main, input_bundle=make_input_bundle({"lib1.vy": lib1}))
+    engine = RuntimeFuzzEngine(HarnessConfig(), seed=1)
+
+    stmt_sites, branch_outcomes = engine._collect_static_coverage_sites_for_contract(
+        contract
+    )
+    address = str(contract.address)
+    root_module_t = contract.compiler_data.global_ctx
+    lib_module_t = root_module_t.imported_modules["lib1"].module_t
+
+    run_fn = next(fn for fn in root_module_t.exposed_functions if fn.name == "run")
+    used_fn = lib_module_t.functions["used"]
+    dead_fn = lib_module_t.functions["dead"]
+
+    assert _stmt_sites_for_function(address, run_fn) <= stmt_sites
+    assert _stmt_sites_for_function(address, used_fn) <= stmt_sites
+    assert _branch_outcomes_for_function(address, run_fn) <= branch_outcomes
+    assert _branch_outcomes_for_function(address, used_fn) <= branch_outcomes
+
+    assert _stmt_sites_for_function(address, dead_fn).isdisjoint(stmt_sites)
+    assert _branch_outcomes_for_function(address, dead_fn).isdisjoint(branch_outcomes)
+
+
+def test_static_coverage_sites_track_source_id_per_module(
+    get_contract, make_input_bundle
+):
+    main = """
+import lib1
+initializes: lib1
+
+@external
+def run(a: uint256) -> uint256:
+    if a > 10:
+        return lib1.used(a)
+    return 0
+    """
+    lib1 = """
+@internal
+def used(a: uint256) -> uint256:
+    if a > 0:
+        return a
     return 1
-        """,
-        source_id=201,
-        resolved_path="lib.vy",
+    """
+    contract = get_contract(main, input_bundle=make_input_bundle({"lib1.vy": lib1}))
+    engine = RuntimeFuzzEngine(HarnessConfig(), seed=1)
+
+    stmt_sites, branch_outcomes = engine._collect_static_coverage_sites_for_contract(
+        contract
     )
+    root_module_t = contract.compiler_data.global_ctx
+    run_fn = next(fn for fn in root_module_t.exposed_functions if fn.name == "run")
+    lib_fn = root_module_t.imported_modules["lib1"].module_t.functions["used"]
 
-    # Keep node IDs overlapping to verify source_id disambiguation.
-    root_stmt, root_branch = _collect_sites(engine, root_module, {})
-    import_stmt, import_branch = _collect_sites(engine, import_module, {})
-    combined_stmt, combined_branch = _collect_sites(
-        engine,
-        root_module,
-        {_CompilerInputKey(source_id=201): import_module},
-    )
+    run_source_id = _source_id_for_node(run_fn.decl_node)
+    lib_source_id = _source_id_for_node(lib_fn.decl_node)
 
-    root_stmt_ids = {(source_id, node_id) for _, source_id, node_id in root_stmt}
-    import_stmt_ids = {(source_id, node_id) for _, source_id, node_id in import_stmt}
-    assert root_stmt_ids
-    assert import_stmt_ids
-    # node_id overlap can exist; identity must still differ by source_id.
-    overlapping_node_ids = {node_id for _, node_id in root_stmt_ids} & {
-        node_id for _, node_id in import_stmt_ids
-    }
-    assert overlapping_node_ids
-    assert root_stmt_ids.isdisjoint(import_stmt_ids)
+    stmt_source_ids = {source_id for _, source_id, _ in stmt_sites}
+    branch_source_ids = {source_id for _, source_id, _, _ in branch_outcomes}
 
-    assert combined_stmt == root_stmt | import_stmt
-    assert combined_branch == root_branch | import_branch
+    assert run_source_id in stmt_source_ids
+    assert lib_source_id in stmt_source_ids
+    assert run_source_id in branch_source_ids
+    assert lib_source_id in branch_source_ids
