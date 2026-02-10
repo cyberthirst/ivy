@@ -90,10 +90,17 @@ class GenerativeFuzzer(BaseFuzzer):
                 scenario_seed,
             )
 
-            analysis = self.run_scenario(mutated, seed=scenario_seed)
-            self.reporter.report(analysis, debug_mode=self.debug_mode)
+            artifacts = self.run_scenario_with_artifacts(mutated, seed=scenario_seed)
+            self.reporter.ingest_run(
+                artifacts.analysis,
+                artifacts,
+                debug_mode=self.debug_mode,
+            )
 
-            if not analysis.compile_failures and not analysis.crashes:
+            if (
+                not artifacts.analysis.compile_failures
+                and not artifacts.analysis.crashes
+            ):
                 self.corpus.add_evolved(mutated)
                 count += 1
 
@@ -123,6 +130,7 @@ class GenerativeFuzzer(BaseFuzzer):
             return
 
         self.reporter.start_timer()
+        self.reporter.start_metrics_stream(self.harness_config.enable_interval_metrics)
 
         try:
             self.bootstrap_corpus()
@@ -157,9 +165,15 @@ class GenerativeFuzzer(BaseFuzzer):
                     scenario_seed,
                 )
 
-                analysis = self.run_scenario(mutated_scenario, seed=scenario_seed)
-
-                self.reporter.report(analysis, debug_mode=self.debug_mode)
+                artifacts = self.run_scenario_with_artifacts(
+                    mutated_scenario, seed=scenario_seed
+                )
+                analysis = artifacts.analysis
+                self.reporter.ingest_run(
+                    analysis,
+                    artifacts,
+                    debug_mode=self.debug_mode,
+                )
 
                 # Add to evolved corpus if no compilation failures
                 # (divergences are fine - we want to keep exploring that space)
@@ -167,32 +181,46 @@ class GenerativeFuzzer(BaseFuzzer):
                     self.corpus.add_evolved(mutated_scenario)
 
                 if self._iteration % log_interval == 0:
-                    self._log_progress()
+                    snapshot = self.reporter.record_interval_metrics(
+                        iteration=self._iteration,
+                        corpus_seed_count=self.corpus.seed_count,
+                        corpus_evolved_count=self.corpus.evolved_count,
+                        corpus_max_evolved=self.corpus.max_evolved,
+                        include_coverage_percentages=(
+                            self.harness_config.enable_coverage_percentages
+                        ),
+                    )
+                    self.reporter.log_generative_progress(
+                        iteration=self._iteration,
+                        corpus_seed_count=self.corpus.seed_count,
+                        corpus_evolved_count=self.corpus.evolved_count,
+                        snapshot=snapshot,
+                    )
 
         except KeyboardInterrupt:
             logging.info("Interrupted by user")
 
-        self.finalize()
-
-    def _log_progress(self):
-        """Log fuzzing progress."""
-        elapsed = self.reporter.get_elapsed_time()
-        rate = self._iteration / elapsed if elapsed > 0 else 0
-
-        logging.info(
-            f"iter={self._iteration} | "
-            f"seeds={self.corpus.seed_count} | "
-            f"evolved={self.corpus.evolved_count} | "
-            f"divergences={self.reporter.divergences} | "
-            f"rate={rate:.1f}/s"
+        final_snapshot = self.reporter.record_interval_metrics(
+            iteration=self._iteration,
+            corpus_seed_count=self.corpus.seed_count,
+            corpus_evolved_count=self.corpus.evolved_count,
+            corpus_max_evolved=self.corpus.max_evolved,
+            include_coverage_percentages=self.harness_config.enable_coverage_percentages,
         )
+        self.reporter.log_generative_progress(
+            iteration=self._iteration,
+            corpus_seed_count=self.corpus.seed_count,
+            corpus_evolved_count=self.corpus.evolved_count,
+            snapshot=final_snapshot,
+        )
+        self.finalize()
 
 
 def main():
     """Run generative fuzzing."""
     import boa
 
-    boa.interpret.disable_cache()
+    boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
 
     test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
     exclude_unsupported_patterns(test_filter)

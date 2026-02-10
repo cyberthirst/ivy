@@ -22,7 +22,22 @@ class DummyContract:
     address: str
 
 
+class DummyState:
+    def __init__(self, env: "DummyEnv"):
+        self._env = env
+
+    def get_code(self, address: Any) -> object | None:
+        runner = self._env.runner
+        if runner is None:
+            return None
+        return object() if str(address) in runner.deployed_contracts else None
+
+
 class DummyEnv:
+    def __init__(self):
+        self.runner: Optional[InstrumentedRunner] = None
+        self.state = DummyState(self)
+
     @contextmanager
     def anchor(self):
         yield
@@ -35,7 +50,9 @@ class InstrumentedRunner(BaseScenarioRunner):
         *,
         compile_should_fail: bool = False,
     ):
-        super().__init__(env=DummyEnv(), collect_storage_dumps=False)
+        env = DummyEnv()
+        super().__init__(env=env, collect_storage_dumps=False)
+        env.runner = self
         self.deployment_outcomes = deployment_outcomes
         self.compile_should_fail = compile_should_fail
 
@@ -245,6 +262,9 @@ def test_runtime_retries_stop_at_first_success_and_update_trace():
     assert deployment_result.success is True
     assert runner.compile_calls == 1
     assert runner.deploy_calls == 3
+    assert harness_result.stats.deployment_attempts == 3
+    assert harness_result.stats.deployment_successes == 1
+    assert harness_result.stats.deployment_failures == 2
     assert runner.deployment_args_seen[0] == [11]
     assert runner.deployment_kwargs_seen[0]["value"] == initial_value
 
@@ -270,6 +290,9 @@ def test_runtime_retries_cap_at_max_attempts():
     assert deployment_result.success is False
     assert runner.compile_calls == 1
     assert runner.deploy_calls == 30
+    assert harness_result.stats.deployment_attempts == 30
+    assert harness_result.stats.deployment_successes == 0
+    assert harness_result.stats.deployment_failures == 30
     assert runner.deployment_start_states == [(0, DEFAULT_BALANCE)] * 30
 
     # Terminal failed attempt is committed (no rollback after final retry).
@@ -314,4 +337,35 @@ def test_call_replay_still_runs_after_successful_deployment():
     harness_result = engine.run(scenario)
 
     assert harness_result.stats.replay_calls == 1
+    assert harness_result.stats.call_attempts == 1
+    assert harness_result.stats.call_successes == 1
+    assert harness_result.stats.call_failures == 0
+    assert harness_result.stats.calls_to_no_code == 0
+    assert runner.call_calls == 1
+
+
+def test_call_replay_counts_calls_to_no_code_when_target_not_deployed():
+    runner = InstrumentedRunner([])
+    engine = _new_engine_with_runner(
+        runner,
+        max_total_calls=1,
+        max_replay_calls=1,
+        max_deploy_retries=30,
+    )
+    call_trace = _make_call_trace(
+        to_address="0x00000000000000000000000000000000000000BB"
+    )
+    scenario = Scenario(
+        traces=[call_trace],
+        dependencies=[],
+        use_python_args=True,
+    )
+
+    harness_result = engine.run(scenario)
+
+    assert harness_result.stats.replay_calls == 1
+    assert harness_result.stats.call_attempts == 1
+    assert harness_result.stats.call_successes == 1
+    assert harness_result.stats.call_failures == 0
+    assert harness_result.stats.calls_to_no_code == 1
     assert runner.call_calls == 1

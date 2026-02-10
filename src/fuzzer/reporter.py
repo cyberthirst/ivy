@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import Dict, Any, Optional, Set, TYPE_CHECKING
 import time
 import json
 import logging
@@ -9,13 +9,37 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from fuzzer.runner.base_scenario_runner import ScenarioResult
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
+from ivy.frontend.loader import loads_from_solc_json
+from fuzzer.trace_types import DeploymentTrace
 
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
+    from fuzzer.runner.base_scenario_runner import ScenarioResult
+
+UNPARSABLE_INTEGRITY_SUM = "0" * 64
 
 
-def _make_json_serializable(obj):
+@dataclass
+class RuntimeMetricsTotals:
+    enumeration_calls: int = 0
+    replay_calls: int = 0
+    fuzz_calls: int = 0
+    timeouts: int = 0
+    new_coverage_calls: int = 0
+    state_modified_calls: int = 0
+    interesting_calls: int = 0
+    skipped_replay: int = 0
+    deployment_attempts: int = 0
+    deployment_successes: int = 0
+    deployment_failures: int = 0
+    call_attempts: int = 0
+    call_successes: int = 0
+    call_failures: int = 0
+    calls_to_no_code: int = 0
+
+
+def _make_json_serializable(obj) -> Any:
     """Convert nested structures into JSON-serializable equivalents."""
     if isinstance(obj, dict):
         result = {}
@@ -36,11 +60,7 @@ def _make_json_serializable(obj):
 def _format_traceback(error: Optional[BaseException]) -> Optional[str]:
     if error is None:
         return None
-    return "".join(
-        traceback.format_exception(type(error), error, error.__traceback__)
-    )
-
-
+    return "".join(traceback.format_exception(type(error), error, error.__traceback__))
 
 
 def build_divergence_record(
@@ -92,6 +112,32 @@ class FuzzerReporter:
     seed: Optional[int] = None
     reports_dir: Path = field(default_factory=lambda: Path("reports"))
     _file_counter: int = 0
+    _metrics_enabled: bool = False
+    _metrics_path: Optional[Path] = None
+    _last_snapshot_elapsed_s: float = 0.0
+    _last_snapshot_total_scenarios: int = 0
+    _last_snapshot_total_calls: int = 0
+    _last_snapshot_calls_to_no_code: int = 0
+    _last_snapshot_total_deployments: int = 0
+    _last_snapshot_compilation_failures: int = 0
+    _last_snapshot_compiler_crashes: int = 0
+    _seen_runtime_edges: Set[int] = field(default_factory=set)
+    _seen_contract_fingerprints: Set[str] = field(default_factory=set)
+    _seen_stmt_sites: Set[RuntimeStmtSite] = field(default_factory=set)
+    _seen_branch_outcomes: Set[RuntimeBranchOutcome] = field(default_factory=set)
+    _stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
+    _branch_outcomes_total: Set[RuntimeBranchOutcome] = field(default_factory=set)
+    _runtime_totals: RuntimeMetricsTotals = field(default_factory=RuntimeMetricsTotals)
+    _pending_runtime_edge_ids: Set[int] = field(default_factory=set)
+    _pending_contract_fingerprints: Set[str] = field(default_factory=set)
+    _pending_stmt_sites_seen: Set[RuntimeStmtSite] = field(default_factory=set)
+    _pending_branch_outcomes_seen: Set[RuntimeBranchOutcome] = field(
+        default_factory=set
+    )
+    _pending_stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
+    _pending_branch_outcomes_total: Set[RuntimeBranchOutcome] = field(
+        default_factory=set
+    )
 
     def record_compilation_failure(self):
         self.compilation_failures += 1
@@ -292,6 +338,432 @@ class FuzzerReporter:
             return 0.0
         return self.total_scenarios / elapsed
 
+    @staticmethod
+    def _safe_pct(numerator: int, denominator: int) -> float:
+        if denominator <= 0:
+            return 0.0
+        return (numerator / denominator) * 100.0
+
+    @staticmethod
+    def _safe_rate(count: int, denominator: int | float) -> float:
+        if denominator <= 0:
+            return 0.0
+        return count / denominator
+
+    @staticmethod
+    def _resolve_error_type(
+        error: Optional[Exception], error_type: Optional[str]
+    ) -> str:
+        if error_type:
+            return error_type
+        if error is None:
+            return "UnknownError"
+        return type(error).__name__
+
+    @staticmethod
+    def _merge_harness_stats(dst: RuntimeMetricsTotals, src: Any) -> None:
+        fields = (
+            "enumeration_calls",
+            "replay_calls",
+            "fuzz_calls",
+            "timeouts",
+            "new_coverage_calls",
+            "state_modified_calls",
+            "interesting_calls",
+            "skipped_replay",
+            "deployment_attempts",
+            "deployment_successes",
+            "deployment_failures",
+            "call_attempts",
+            "call_successes",
+            "call_failures",
+            "calls_to_no_code",
+        )
+        for field_name in fields:
+            setattr(
+                dst,
+                field_name,
+                getattr(dst, field_name) + int(getattr(src, field_name, 0)),
+            )
+
+    @staticmethod
+    def _clear_pending_metrics_state(
+        pending_runtime_edge_ids: Set[int],
+        pending_contract_fingerprints: Set[str],
+        pending_stmt_sites_seen: Set[RuntimeStmtSite],
+        pending_branch_outcomes_seen: Set[RuntimeBranchOutcome],
+        pending_stmt_sites_total: Set[RuntimeStmtSite],
+        pending_branch_outcomes_total: Set[RuntimeBranchOutcome],
+    ) -> None:
+        pending_runtime_edge_ids.clear()
+        pending_contract_fingerprints.clear()
+        pending_stmt_sites_seen.clear()
+        pending_branch_outcomes_seen.clear()
+        pending_stmt_sites_total.clear()
+        pending_branch_outcomes_total.clear()
+
+    def _reset_metrics_state(self) -> None:
+        self._last_snapshot_elapsed_s = 0.0
+        self._last_snapshot_total_scenarios = 0
+        self._last_snapshot_total_calls = 0
+        self._last_snapshot_calls_to_no_code = 0
+        self._last_snapshot_total_deployments = 0
+        self._last_snapshot_compilation_failures = 0
+        self._last_snapshot_compiler_crashes = 0
+
+        self._seen_runtime_edges.clear()
+        self._seen_contract_fingerprints.clear()
+        self._seen_stmt_sites.clear()
+        self._seen_branch_outcomes.clear()
+        self._stmt_sites_total.clear()
+        self._branch_outcomes_total.clear()
+
+        self._runtime_totals = RuntimeMetricsTotals()
+        self._clear_pending_metrics_state(
+            self._pending_runtime_edge_ids,
+            self._pending_contract_fingerprints,
+            self._pending_stmt_sites_seen,
+            self._pending_branch_outcomes_seen,
+            self._pending_stmt_sites_total,
+            self._pending_branch_outcomes_total,
+        )
+
+    def _integrity_sum_from_solc_json(self, solc_json: Dict[str, Any]) -> str:
+        try:
+            compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
+        except Exception:
+            return UNPARSABLE_INTEGRITY_SUM
+
+        integrity_sum = getattr(compiler_data, "integrity_sum", None)
+        if isinstance(integrity_sum, str) and integrity_sum:
+            return integrity_sum
+        return UNPARSABLE_INTEGRITY_SUM
+
+    def _collect_contract_integrity_sums(self, finalized_scenario: Any) -> Set[str]:
+        integrity_sums: Set[str] = set()
+        traces = getattr(finalized_scenario, "traces", None)
+        if not isinstance(traces, list):
+            return integrity_sums
+
+        for trace in traces:
+            if not isinstance(trace, DeploymentTrace):
+                continue
+            if trace.deployment_type != "source" or not trace.solc_json:
+                continue
+            integrity_sums.add(self._integrity_sum_from_solc_json(trace.solc_json))
+
+        return integrity_sums
+
+    def ingest_run(self, analysis: AnalysisResult, artifacts: Any, *, debug_mode: bool):
+        self.report(analysis, debug_mode=debug_mode)
+
+        harness_stats = getattr(artifacts, "harness_stats", None)
+        if harness_stats is not None:
+            self._merge_harness_stats(self._runtime_totals, harness_stats)
+
+        # Avoid accumulating pending state when the metrics stream is disabled or
+        # not initialized.
+        if not self._metrics_enabled or self._metrics_path is None:
+            self._clear_pending_metrics_state(
+                self._pending_runtime_edge_ids,
+                self._pending_contract_fingerprints,
+                self._pending_stmt_sites_seen,
+                self._pending_branch_outcomes_seen,
+                self._pending_stmt_sites_total,
+                self._pending_branch_outcomes_total,
+            )
+            return
+
+        self._pending_runtime_edge_ids.update(
+            getattr(artifacts, "runtime_edge_ids", set())
+        )
+        self._pending_stmt_sites_seen.update(
+            getattr(artifacts, "runtime_stmt_sites_seen", set())
+        )
+        self._pending_branch_outcomes_seen.update(
+            getattr(artifacts, "runtime_branch_outcomes_seen", set())
+        )
+        self._pending_stmt_sites_total.update(
+            getattr(artifacts, "runtime_stmt_sites_total", set())
+        )
+        self._pending_branch_outcomes_total.update(
+            getattr(artifacts, "runtime_branch_outcomes_total", set())
+        )
+
+        finalized_scenario = getattr(artifacts, "finalized_scenario", None)
+        self._pending_contract_fingerprints.update(
+            self._collect_contract_integrity_sums(finalized_scenario)
+        )
+
+    def get_runtime_deployment_success_rate(self) -> float:
+        return self._safe_pct(
+            self._runtime_totals.deployment_successes,
+            self._runtime_totals.deployment_attempts,
+        )
+
+    def get_runtime_call_success_rate(self) -> float:
+        return self._safe_pct(
+            self._runtime_totals.call_successes,
+            self._runtime_totals.call_attempts,
+        )
+
+    def start_metrics_stream(self, enabled: bool) -> None:
+        self._metrics_enabled = enabled
+        self._reset_metrics_state()
+        # If the reporter instance is reused across campaigns, treat the current
+        # aggregate counters as the baseline so new intervals don't include prior runs.
+        self._last_snapshot_total_scenarios = self.total_scenarios
+        self._last_snapshot_total_deployments = (
+            self.successful_deployments
+            + self.deployment_failures
+            + self.compilation_failures
+            + self.compiler_crashes
+        )
+        self._last_snapshot_compilation_failures = self.compilation_failures
+        self._last_snapshot_compiler_crashes = self.compiler_crashes
+        if not enabled:
+            self._metrics_path = None
+            return
+
+        stats_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        stats_dir.mkdir(parents=True, exist_ok=True)
+        seed_part = str(self.seed) if self.seed is not None else "noseed"
+        timestamp = datetime.now().strftime("%H%M%S")
+        self._metrics_path = stats_dir / f"metrics_{seed_part}_{timestamp}.jsonl"
+
+        logging.info(f"Interval metrics enabled at {self._metrics_path}")
+
+    def record_interval_metrics(
+        self,
+        *,
+        iteration: int,
+        corpus_seed_count: int,
+        corpus_evolved_count: int,
+        corpus_max_evolved: int,
+        include_coverage_percentages: bool,
+    ) -> Optional[Dict[str, Any]]:
+        if not self._metrics_enabled or self._metrics_path is None:
+            self._clear_pending_metrics_state(
+                self._pending_runtime_edge_ids,
+                self._pending_contract_fingerprints,
+                self._pending_stmt_sites_seen,
+                self._pending_branch_outcomes_seen,
+                self._pending_stmt_sites_total,
+                self._pending_branch_outcomes_total,
+            )
+            return None
+
+        elapsed = self.get_elapsed_time()
+        delta_elapsed = max(elapsed - self._last_snapshot_elapsed_s, 1e-9)
+
+        scenarios_interval = self.total_scenarios - self._last_snapshot_total_scenarios
+        call_attempts_total = self._runtime_totals.call_attempts
+        phase_calls_total = (
+            self._runtime_totals.enumeration_calls
+            + self._runtime_totals.replay_calls
+            + self._runtime_totals.fuzz_calls
+        )
+        if call_attempts_total != phase_calls_total:
+            logging.debug(
+                "Runtime call counter mismatch: call_attempts=%s phase_calls=%s",
+                call_attempts_total,
+                phase_calls_total,
+            )
+        calls_interval = call_attempts_total - self._last_snapshot_total_calls
+        calls_to_no_code_total = self._runtime_totals.calls_to_no_code
+        calls_to_no_code_interval = (
+            calls_to_no_code_total - self._last_snapshot_calls_to_no_code
+        )
+
+        all_deployments_total = (
+            self.successful_deployments
+            + self.deployment_failures
+            + self.compilation_failures
+            + self.compiler_crashes
+        )
+        deployments_interval = (
+            all_deployments_total - self._last_snapshot_total_deployments
+        )
+        compilation_failures_interval = (
+            self.compilation_failures - self._last_snapshot_compilation_failures
+        )
+        compiler_crashes_interval = (
+            self.compiler_crashes - self._last_snapshot_compiler_crashes
+        )
+
+        prev_runtime_edges_total = len(self._seen_runtime_edges)
+        self._seen_runtime_edges.update(self._pending_runtime_edge_ids)
+        runtime_edges_total = len(self._seen_runtime_edges)
+        new_runtime_edges_interval = runtime_edges_total - prev_runtime_edges_total
+
+        prev_contracts_total = len(self._seen_contract_fingerprints)
+        self._seen_contract_fingerprints.update(self._pending_contract_fingerprints)
+        contracts_seen_total = len(self._seen_contract_fingerprints)
+        new_contracts_interval = contracts_seen_total - prev_contracts_total
+
+        self._seen_stmt_sites.update(self._pending_stmt_sites_seen)
+        self._seen_branch_outcomes.update(self._pending_branch_outcomes_seen)
+        self._stmt_sites_total.update(self._pending_stmt_sites_total)
+        self._branch_outcomes_total.update(self._pending_branch_outcomes_total)
+
+        stmt_coverage_pct: Optional[float] = None
+        branch_coverage_pct: Optional[float] = None
+        if include_coverage_percentages:
+            if self._stmt_sites_total:
+                stmt_coverage_pct = self._safe_pct(
+                    len(self._seen_stmt_sites), len(self._stmt_sites_total)
+                )
+            if self._branch_outcomes_total:
+                branch_coverage_pct = self._safe_pct(
+                    len(self._seen_branch_outcomes), len(self._branch_outcomes_total)
+                )
+
+        deployment_attempts_total = self._runtime_totals.deployment_attempts
+        deployment_successes_total = self._runtime_totals.deployment_successes
+        deployment_failures_total = self._runtime_totals.deployment_failures
+        call_successes_total = self._runtime_totals.call_successes
+        call_failures_total = self._runtime_totals.call_failures
+
+        snapshot: Dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "seed": self.seed,
+            "iteration": iteration,
+            "elapsed_s": elapsed,
+            "throughput": {
+                "scenarios_per_sec": self._safe_rate(scenarios_interval, delta_elapsed),
+                "calls_per_sec": self._safe_rate(calls_interval, delta_elapsed),
+                "scenarios_total": self.total_scenarios,
+                "calls_total": call_attempts_total,
+            },
+            "deployments": {
+                "attempts_total": deployment_attempts_total,
+                "success_total": deployment_successes_total,
+                "failure_total": deployment_failures_total,
+                "success_rate_pct": self._safe_pct(
+                    deployment_successes_total, deployment_attempts_total
+                ),
+            },
+            "calls": {
+                "attempts_total": call_attempts_total,
+                "success_total": call_successes_total,
+                "failure_total": call_failures_total,
+                "timeouts_total": self._runtime_totals.timeouts,
+                "calls_to_no_code_total": calls_to_no_code_total,
+                "calls_to_no_code_interval": calls_to_no_code_interval,
+                "calls_to_no_code_pct": self._safe_pct(
+                    calls_to_no_code_total, call_attempts_total
+                ),
+                "success_rate_pct": self._safe_pct(
+                    call_successes_total, call_attempts_total
+                ),
+            },
+            "compile": {
+                "compilation_failures_total": self.compilation_failures,
+                "compiler_crashes_total": self.compiler_crashes,
+                "compilation_failures_interval": compilation_failures_interval,
+                "compiler_crashes_interval": compiler_crashes_interval,
+                "compilation_failures_per_scenario": self._safe_rate(
+                    compilation_failures_interval, scenarios_interval
+                ),
+                "compiler_crashes_per_scenario": self._safe_rate(
+                    compiler_crashes_interval, scenarios_interval
+                ),
+                "compilation_failures_per_deployment": self._safe_rate(
+                    compilation_failures_interval, deployments_interval
+                ),
+                "compiler_crashes_per_deployment": self._safe_rate(
+                    compiler_crashes_interval, deployments_interval
+                ),
+            },
+            "coverage": {
+                "runtime_edges_total": runtime_edges_total,
+                "new_runtime_edges_interval": new_runtime_edges_interval,
+                "new_runtime_edges_per_sec": (
+                    new_runtime_edges_interval / delta_elapsed
+                ),
+                "stmt_coverage_pct": stmt_coverage_pct,
+                "branch_coverage_pct": branch_coverage_pct,
+            },
+            "novelty": {
+                "contracts_seen_total": contracts_seen_total,
+                "new_contracts_interval": new_contracts_interval,
+            },
+            "runtime_phase": {
+                "enumeration_calls": self._runtime_totals.enumeration_calls,
+                "replay_calls": self._runtime_totals.replay_calls,
+                "fuzz_calls": self._runtime_totals.fuzz_calls,
+                "interesting_calls": self._runtime_totals.interesting_calls,
+                "new_coverage_calls": self._runtime_totals.new_coverage_calls,
+                "state_modified_calls": self._runtime_totals.state_modified_calls,
+                "skipped_replay": self._runtime_totals.skipped_replay,
+            },
+            "corpus": {
+                "seed_count": corpus_seed_count,
+                "evolved_count": corpus_evolved_count,
+                "max_evolved": corpus_max_evolved,
+            },
+            "issues": {
+                "divergences_total": self.divergences,
+                "compilation_failures_total": self.compilation_failures,
+                "compiler_crashes_total": self.compiler_crashes,
+            },
+        }
+
+        with open(self._metrics_path, "a") as f:
+            json.dump(snapshot, f, default=str)
+            f.write("\n")
+
+        self._last_snapshot_elapsed_s = elapsed
+        self._last_snapshot_total_scenarios = self.total_scenarios
+        self._last_snapshot_total_calls = call_attempts_total
+        self._last_snapshot_calls_to_no_code = calls_to_no_code_total
+        self._last_snapshot_total_deployments = all_deployments_total
+        self._last_snapshot_compilation_failures = self.compilation_failures
+        self._last_snapshot_compiler_crashes = self.compiler_crashes
+        self._clear_pending_metrics_state(
+            self._pending_runtime_edge_ids,
+            self._pending_contract_fingerprints,
+            self._pending_stmt_sites_seen,
+            self._pending_branch_outcomes_seen,
+            self._pending_stmt_sites_total,
+            self._pending_branch_outcomes_total,
+        )
+
+        return snapshot
+
+    def log_generative_progress(
+        self,
+        *,
+        iteration: int,
+        corpus_seed_count: int,
+        corpus_evolved_count: int,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        """Log interval progress for the generative fuzzer."""
+        elapsed = self.get_elapsed_time()
+        rate = iteration / elapsed if elapsed > 0 else 0
+        deployment_success_rate = self.get_runtime_deployment_success_rate()
+        call_success_rate = self.get_runtime_call_success_rate()
+        new_edges_interval = 0
+        new_contracts_interval = 0
+        if snapshot is not None:
+            coverage = snapshot.get("coverage", {})
+            novelty = snapshot.get("novelty", {})
+            new_edges_interval = int(coverage.get("new_runtime_edges_interval", 0))
+            new_contracts_interval = int(novelty.get("new_contracts_interval", 0))
+
+        logging.info(
+            f"iter={iteration} | "
+            f"seeds={corpus_seed_count} | "
+            f"evolved={corpus_evolved_count} | "
+            f"divergences={self.divergences} | "
+            f"deploy_ok={deployment_success_rate:.1f}% | "
+            f"call_ok={call_success_rate:.1f}% | "
+            f"new_edges={new_edges_interval} | "
+            f"new_contracts={new_contracts_interval} | "
+            f"rate={rate:.1f}/s"
+        )
+
     def print_summary(self):
         print("\n" + "=" * 60)
         print("FUZZING CAMPAIGN STATISTICS")
@@ -378,13 +850,13 @@ class FuzzerReporter:
     def save_compiler_crash(
         self,
         solc_json: Optional[Dict[str, Any]],
-        error: Exception,
+        error: Optional[Exception],
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
         subfolder: Optional[str] = None,
     ):
         """Save a compiler crash with the source code that caused it."""
-        error_type = error_type or type(error).__name__
+        error_type = self._resolve_error_type(error, error_type)
 
         crash_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
         if subfolder:
@@ -419,13 +891,13 @@ class FuzzerReporter:
     def save_compilation_failure(
         self,
         solc_json: Optional[Dict[str, Any]],
-        error: Exception,
+        error: Optional[Exception],
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
         subfolder: Optional[str] = None,
     ):
         """Save a compilation failure with the source code that caused it."""
-        error_type = error_type or type(error).__name__
+        error_type = self._resolve_error_type(error, error_type)
 
         failure_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
         if subfolder:

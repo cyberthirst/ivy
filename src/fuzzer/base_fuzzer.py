@@ -8,9 +8,11 @@ import hashlib
 import secrets
 import typing
 from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Set
 
+from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig
 
 from fuzzer.mutator.ast_mutator import AstMutator
@@ -39,6 +41,18 @@ from vyper.compiler.phases import CompilerData
 DEFAULT_AST_MUTATIONS = 8
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+@dataclass
+class ScenarioRunArtifacts:
+    analysis: Any
+    harness_stats: Any
+    runtime_edge_ids: Set[int]
+    runtime_stmt_sites_seen: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
+    runtime_stmt_sites_total: Set[RuntimeStmtSite]
+    runtime_branch_outcomes_total: Set[RuntimeBranchOutcome]
+    finalized_scenario: Scenario
 
 
 class BaseFuzzer:
@@ -93,9 +107,7 @@ class BaseFuzzer:
                 loads_from_solc_json(trace.solc_json, get_compiler_data=True),
             )
         except Exception as e:
-            logging.debug(
-                f"Failed to load compiler data ({type(e).__name__}): {e}"
-            )
+            logging.debug(f"Failed to load compiler data ({type(e).__name__}): {e}")
             return None
 
     def derive_scenario_seed(self, base: str, num: int) -> int:
@@ -125,8 +137,7 @@ class BaseFuzzer:
 
         for trace in new_scenario.traces:
             if not (
-                isinstance(trace, DeploymentTrace)
-                and trace.deployment_type == "source"
+                isinstance(trace, DeploymentTrace) and trace.deployment_type == "source"
             ):
                 continue
 
@@ -157,9 +168,9 @@ class BaseFuzzer:
                         trace.compilation_xfails = list(
                             trace.compilation_xfails
                         ) + list(mutation_result.compilation_xfails)
-                        trace.runtime_xfails = list(
-                            trace.runtime_xfails
-                        ) + list(mutation_result.runtime_xfails)
+                        trace.runtime_xfails = list(trace.runtime_xfails) + list(
+                            mutation_result.runtime_xfails
+                        )
 
             if compiler_data and hasattr(compiler_data, "settings"):
                 settings = settings_to_kwargs(compiler_data.settings)
@@ -170,13 +181,13 @@ class BaseFuzzer:
 
         return new_scenario
 
-    def run_scenario(
+    def run_scenario_with_artifacts(
         self,
         scenario: Scenario,
         *,
         seed: Optional[int] = None,
-    ):
-        """Run a scenario and analyze results."""
+    ) -> ScenarioRunArtifacts:
+        """Run a scenario and return analysis plus runtime metrics/artifacts."""
         from fuzzer.runtime_engine.runtime_fuzz_engine import RuntimeFuzzEngine
 
         harness = RuntimeFuzzEngine(self.harness_config, seed)
@@ -193,7 +204,29 @@ class BaseFuzzer:
             results.boa_results,
         )
 
-        return analysis
+        return ScenarioRunArtifacts(
+            analysis=analysis,
+            harness_stats=harness_result.stats,
+            runtime_edge_ids=set(harness_result.runtime_edge_ids),
+            runtime_stmt_sites_seen=set(harness_result.runtime_stmt_sites_seen),
+            runtime_branch_outcomes_seen=set(
+                harness_result.runtime_branch_outcomes_seen
+            ),
+            runtime_stmt_sites_total=set(harness_result.runtime_stmt_sites_total),
+            runtime_branch_outcomes_total=set(
+                harness_result.runtime_branch_outcomes_total
+            ),
+            finalized_scenario=harness_result.finalized_scenario,
+        )
+
+    def run_scenario(
+        self,
+        scenario: Scenario,
+        *,
+        seed: Optional[int] = None,
+    ):
+        """Run a scenario and analyze results."""
+        return self.run_scenario_with_artifacts(scenario, seed=seed).analysis
 
     def finalize(self):
         """Stop timer and output final reports."""

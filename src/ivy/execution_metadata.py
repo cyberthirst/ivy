@@ -6,13 +6,14 @@ from typing import Literal
 from ivy.types import Address
 
 BoolOp = Literal["and", "or"]
+SourceNodeID = tuple[int, int]
 
 
 @dataclass
 class ExecutionMetadata:
-    coverage: dict[Address, set[int]] = field(default_factory=dict)
+    coverage: dict[Address, set[SourceNodeID]] = field(default_factory=dict)
     edges: set[tuple[Address, int, int]] = field(default_factory=set)
-    branches: set[tuple[Address, int, bool]] = field(default_factory=set)
+    branches: set[tuple[Address, int, int, bool]] = field(default_factory=set)
     boolops: set[tuple[Address, int, BoolOp, int, bool]] = field(default_factory=set)
     loops: set[tuple[Address, int, int]] = field(default_factory=set)
     state_modified: bool = False
@@ -48,14 +49,16 @@ class ExecutionMetadata:
         )
         return hash(signature)
 
-    def record_node(self, addr: Address, node_id: int) -> None:
-        self.coverage.setdefault(addr, set()).add(node_id)
+    def record_node(self, addr: Address, source_id: int, node_id: int) -> None:
+        self.coverage.setdefault(addr, set()).add((source_id, node_id))
 
     def record_edge(self, addr: Address, prev_node_id: int, node_id: int) -> None:
         self.edges.add((addr, prev_node_id, node_id))
 
-    def record_branch(self, addr: Address, node_id: int, taken: bool) -> None:
-        self.branches.add((addr, node_id, taken))
+    def record_branch(
+        self, addr: Address, source_id: int, node_id: int, taken: bool
+    ) -> None:
+        self.branches.add((addr, source_id, node_id, taken))
 
     def record_boolop(
         self,
