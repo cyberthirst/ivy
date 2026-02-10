@@ -12,6 +12,7 @@ from vyper.ast import nodes as ast
 from vyper.compiler.input_bundle import BUILTIN
 from ivy.execution_metadata import ExecutionMetadata
 from ivy.exceptions import CallTimeout
+from ivy.types import Address
 
 from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.runner.base_scenario_runner import (
@@ -83,6 +84,7 @@ class HarnessStats:
     call_attempts: int = 0
     call_successes: int = 0
     call_failures: int = 0
+    calls_to_no_code: int = 0
 
 
 @dataclass
@@ -93,6 +95,7 @@ class CallOutcome:
     trace_result: Optional[TraceResult]
     stmt_sites: Set[RuntimeStmtSite] = field(default_factory=set)
     branch_outcomes: Set[RuntimeBranchOutcome] = field(default_factory=set)
+    target_no_code: bool = False
 
     @property
     def is_interesting(self) -> bool:
@@ -458,6 +461,8 @@ class RuntimeFuzzEngine:
         # Reset metadata BEFORE the call
         ivy.env.reset_execution_metadata()
 
+        target_no_code = self._call_targets_no_code(trace)
+
         # Execute with timeout
         timed_out = False
         trace_result: Optional[TraceResult] = None
@@ -501,10 +506,13 @@ class RuntimeFuzzEngine:
             trace_result=trace_result,
             stmt_sites=stmt_sites,
             branch_outcomes=branch_outcomes,
+            target_no_code=target_no_code,
         )
 
     def _record_call_outcome(self, stats: HarnessStats, outcome: CallOutcome) -> None:
         stats.call_attempts += 1
+        if outcome.target_no_code:
+            stats.calls_to_no_code += 1
         if outcome.timed_out:
             stats.call_failures += 1
             return
@@ -518,6 +526,13 @@ class RuntimeFuzzEngine:
             stats.call_successes += 1
         else:
             stats.call_failures += 1
+
+    def _call_targets_no_code(self, trace: CallTrace) -> bool:
+        to_address = trace.call_args.get("to", "")
+        if not to_address:
+            return False
+
+        return self.runner.env.state.get_code(Address(to_address)) is None
 
     def _iter_nodes(self, root: Any):
         if not isinstance(root, ast.VyperNode):

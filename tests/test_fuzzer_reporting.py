@@ -84,6 +84,7 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
             call_attempts=9,
             call_successes=6,
             call_failures=3,
+            calls_to_no_code=2,
         ),
         runtime_edge_ids={11, 22, 33},
         runtime_stmt_sites_seen={("0x1", 0, 1), ("0x1", 0, 2)},
@@ -121,6 +122,9 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
     assert snapshot is not None
     assert snapshot["deployments"]["success_rate_pct"] == (2 / 3) * 100
     assert snapshot["calls"]["success_rate_pct"] == (6 / 9) * 100
+    assert snapshot["calls"]["calls_to_no_code_total"] == 2
+    assert snapshot["calls"]["calls_to_no_code_interval"] == 2
+    assert snapshot["calls"]["calls_to_no_code_pct"] == (2 / 9) * 100
     assert snapshot["coverage"]["runtime_edges_total"] == 3
     assert snapshot["coverage"]["new_runtime_edges_interval"] == 3
     assert snapshot["coverage"]["stmt_coverage_pct"] == 50.0
@@ -161,6 +165,7 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
                 deployment_successes=1,
                 call_attempts=1,
                 call_successes=1,
+                calls_to_no_code=1,
             ),
             runtime_edge_ids={1, 2},
             runtime_stmt_sites_seen=set(),
@@ -186,6 +191,8 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
     assert first["coverage"]["stmt_coverage_pct"] is None
     assert first["coverage"]["branch_coverage_pct"] is None
     assert first["coverage"]["new_runtime_edges_interval"] == 2
+    assert first["calls"]["calls_to_no_code_total"] == 1
+    assert first["calls"]["calls_to_no_code_interval"] == 1
 
     reporter.ingest_run(
         _empty_analysis(),
@@ -221,6 +228,8 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
     assert second["coverage"]["runtime_edges_total"] == 3
     assert second["coverage"]["new_runtime_edges_interval"] == 1
     assert second["novelty"]["new_contracts_interval"] == 0
+    assert second["calls"]["calls_to_no_code_total"] == 1
+    assert second["calls"]["calls_to_no_code_interval"] == 0
 
 
 def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
@@ -266,6 +275,42 @@ def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
     assert reporter._seen_contract_fingerprints == {UNPARSABLE_INTEGRITY_SUM}
 
 
+def test_reporter_start_metrics_stream_reuse_resets_interval_baselines(tmp_path):
+    reporter = FuzzerReporter(seed=31, reports_dir=tmp_path)
+    reporter.start_timer()
+    reporter.start_metrics_stream(True)
+
+    # Simulate previously accumulated campaign totals on a reused reporter.
+    reporter.total_scenarios = 10
+    reporter.successful_deployments = 7
+    reporter.deployment_failures = 2
+    reporter.compilation_failures = 3
+    reporter.compiler_crashes = 1
+
+    reporter.start_metrics_stream(True)
+
+    # New campaign increments should be measured against the new baseline only.
+    reporter.total_scenarios += 1
+    reporter.successful_deployments += 1
+    reporter.compilation_failures += 1
+    reporter.compiler_crashes += 1
+
+    snapshot = reporter.record_interval_metrics(
+        iteration=1,
+        corpus_seed_count=0,
+        corpus_evolved_count=0,
+        corpus_max_evolved=0,
+        include_coverage_percentages=False,
+    )
+
+    assert snapshot is not None
+    assert snapshot["throughput"]["scenarios_total"] == 11
+    assert snapshot["compile"]["compilation_failures_interval"] == 1
+    assert snapshot["compile"]["compiler_crashes_interval"] == 1
+    assert snapshot["compile"]["compilation_failures_per_deployment"] == (1 / 3)
+    assert snapshot["compile"]["compiler_crashes_per_deployment"] == (1 / 3)
+
+
 def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
     tmp_path, monkeypatch
 ):
@@ -287,6 +332,7 @@ def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
                 call_attempts=2,
                 call_successes=1,
                 call_failures=1,
+                calls_to_no_code=2,
             ),
             runtime_edge_ids={1, 2, 3},
             runtime_stmt_sites_seen={("0x1", 0, 10)},
@@ -316,6 +362,7 @@ def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
     assert reporter._pending_branch_outcomes_total == set()
     assert reporter._seen_runtime_edges == set()
     assert reporter._seen_contract_fingerprints == set()
+    assert reporter._runtime_totals.calls_to_no_code == 2
 
     snapshot = reporter.record_interval_metrics(
         iteration=1,

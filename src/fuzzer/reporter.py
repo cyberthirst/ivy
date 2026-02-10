@@ -36,6 +36,7 @@ class RuntimeMetricsTotals:
     call_attempts: int = 0
     call_successes: int = 0
     call_failures: int = 0
+    calls_to_no_code: int = 0
 
 
 def _make_json_serializable(obj) -> Any:
@@ -116,6 +117,7 @@ class FuzzerReporter:
     _last_snapshot_elapsed_s: float = 0.0
     _last_snapshot_total_scenarios: int = 0
     _last_snapshot_total_calls: int = 0
+    _last_snapshot_calls_to_no_code: int = 0
     _last_snapshot_total_deployments: int = 0
     _last_snapshot_compilation_failures: int = 0
     _last_snapshot_compiler_crashes: int = 0
@@ -375,6 +377,7 @@ class FuzzerReporter:
             "call_attempts",
             "call_successes",
             "call_failures",
+            "calls_to_no_code",
         )
         for field_name in fields:
             setattr(
@@ -403,6 +406,7 @@ class FuzzerReporter:
         self._last_snapshot_elapsed_s = 0.0
         self._last_snapshot_total_scenarios = 0
         self._last_snapshot_total_calls = 0
+        self._last_snapshot_calls_to_no_code = 0
         self._last_snapshot_total_deployments = 0
         self._last_snapshot_compilation_failures = 0
         self._last_snapshot_compiler_crashes = 0
@@ -506,6 +510,17 @@ class FuzzerReporter:
     def start_metrics_stream(self, enabled: bool) -> None:
         self._metrics_enabled = enabled
         self._reset_metrics_state()
+        # If the reporter instance is reused across campaigns, treat the current
+        # aggregate counters as the baseline so new intervals don't include prior runs.
+        self._last_snapshot_total_scenarios = self.total_scenarios
+        self._last_snapshot_total_deployments = (
+            self.successful_deployments
+            + self.deployment_failures
+            + self.compilation_failures
+            + self.compiler_crashes
+        )
+        self._last_snapshot_compilation_failures = self.compilation_failures
+        self._last_snapshot_compiler_crashes = self.compiler_crashes
         if not enabled:
             self._metrics_path = None
             return
@@ -555,6 +570,10 @@ class FuzzerReporter:
                 phase_calls_total,
             )
         calls_interval = call_attempts_total - self._last_snapshot_total_calls
+        calls_to_no_code_total = self._runtime_totals.calls_to_no_code
+        calls_to_no_code_interval = (
+            calls_to_no_code_total - self._last_snapshot_calls_to_no_code
+        )
 
         all_deployments_total = (
             self.successful_deployments
@@ -629,6 +648,11 @@ class FuzzerReporter:
                 "success_total": call_successes_total,
                 "failure_total": call_failures_total,
                 "timeouts_total": self._runtime_totals.timeouts,
+                "calls_to_no_code_total": calls_to_no_code_total,
+                "calls_to_no_code_interval": calls_to_no_code_interval,
+                "calls_to_no_code_pct": self._safe_pct(
+                    calls_to_no_code_total, call_attempts_total
+                ),
                 "success_rate_pct": self._safe_pct(
                     call_successes_total, call_attempts_total
                 ),
@@ -692,6 +716,7 @@ class FuzzerReporter:
         self._last_snapshot_elapsed_s = elapsed
         self._last_snapshot_total_scenarios = self.total_scenarios
         self._last_snapshot_total_calls = call_attempts_total
+        self._last_snapshot_calls_to_no_code = calls_to_no_code_total
         self._last_snapshot_total_deployments = all_deployments_total
         self._last_snapshot_compilation_failures = self.compilation_failures
         self._last_snapshot_compiler_crashes = self.compiler_crashes
