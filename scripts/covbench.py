@@ -314,12 +314,11 @@ def main():
         for outcome, arcs, focus_line_sets, seed_i, failure_text in pool.imap_unordered(
             run_one, range(total), chunksize=16
         ):
-            all_arcs |= arcs
-            if focus_accumulators:
-                _update_focus_accumulators(focus_accumulators, arcs, focus_line_sets)
-
             if outcome == OUTCOME_SUCCESS:
                 successful += 1
+                all_arcs |= arcs
+                if focus_accumulators:
+                    _update_focus_accumulators(focus_accumulators, arcs, focus_line_sets)
             elif outcome == OUTCOME_ICE:
                 ice += 1
             elif outcome == OUTCOME_XFAIL:
