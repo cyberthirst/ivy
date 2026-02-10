@@ -340,9 +340,15 @@ def main():
     output = {
         "n": total,
         "success": successful,
+        "success_pct": round(successful / total if total > 0 else 0.0, 4),
         "successful_xfail": successful_xfail,
+        "successful_xfail_pct": round(
+            successful_xfail / total if total > 0 else 0.0, 4
+        ),
         "failed": failed,
+        "failed_pct": round(failed / total if total > 0 else 0.0, 4),
         "ice": ice,
+        "ice_pct": round(ice / total if total > 0 else 0.0, 4),
         "success_rate": round(success_rate, 4),
         "total_unique_arcs": len(all_arcs),
         "arcs_by_target": target_counts,
