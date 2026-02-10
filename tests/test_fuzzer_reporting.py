@@ -32,6 +32,7 @@ def _make_artifacts(
     runtime_stmt_sites_total: set[RuntimeStmtSite],
     runtime_branch_outcomes_total: set[RuntimeBranchOutcome],
     finalized_scenario: Scenario,
+    contract_fingerprints: set[str] | None = None,
 ):
     return SimpleNamespace(
         harness_stats=harness_stats,
@@ -40,6 +41,7 @@ def _make_artifacts(
         runtime_branch_outcomes_seen=runtime_branch_outcomes_seen,
         runtime_stmt_sites_total=runtime_stmt_sites_total,
         runtime_branch_outcomes_total=runtime_branch_outcomes_total,
+        contract_fingerprints=contract_fingerprints or set(),
         finalized_scenario=finalized_scenario,
     )
 
@@ -56,17 +58,12 @@ def _empty_analysis():
     )
 
 
-def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
+def test_reporter_writes_interval_metrics_jsonl(tmp_path):
     reporter = FuzzerReporter(seed=7, reports_dir=tmp_path)
     reporter.start_timer()
     assert reporter.start_time is not None
     reporter.start_time -= 5
     reporter.start_metrics_stream(True)
-
-    monkeypatch.setattr(
-        "fuzzer.reporter.loads_from_solc_json",
-        lambda *_args, **_kwargs: SimpleNamespace(integrity_sum="abc"),
-    )
 
     artifacts = _make_artifacts(
         harness_stats=HarnessStats(
@@ -101,6 +98,7 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
             dependencies=[],
             use_python_args=True,
         ),
+        contract_fingerprints={"abc"},
     )
     reporter.ingest_run(_empty_analysis(), artifacts, debug_mode=False)
 
@@ -145,17 +143,12 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path, monkeypatch):
     assert reporter._pending_branch_outcomes_total == set()
 
 
-def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkeypatch):
+def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
     reporter = FuzzerReporter(seed=11, reports_dir=tmp_path)
     reporter.start_timer()
     assert reporter.start_time is not None
     reporter.start_time -= 4
     reporter.start_metrics_stream(True)
-
-    monkeypatch.setattr(
-        "fuzzer.reporter.loads_from_solc_json",
-        lambda *_args, **_kwargs: SimpleNamespace(integrity_sum="contract-a"),
-    )
 
     reporter.ingest_run(
         _empty_analysis(),
@@ -177,6 +170,7 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
                 dependencies=[],
                 use_python_args=True,
             ),
+            contract_fingerprints={"contract-a"},
         ),
         debug_mode=False,
     )
@@ -213,6 +207,7 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
                 dependencies=[],
                 use_python_args=True,
             ),
+            contract_fingerprints={"contract-a"},
         ),
         debug_mode=False,
     )
@@ -232,17 +227,12 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path, monkey
     assert second["calls"]["calls_to_no_code_interval"] == 0
 
 
-def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
+def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path):
     reporter = FuzzerReporter(seed=19, reports_dir=tmp_path)
     reporter.start_timer()
     assert reporter.start_time is not None
     reporter.start_time -= 1
     reporter.start_metrics_stream(True)
-
-    def _raise(*_args, **_kwargs):
-        raise ValueError("bad source")
-
-    monkeypatch.setattr("fuzzer.reporter.loads_from_solc_json", _raise)
 
     reporter.ingest_run(
         _empty_analysis(),
@@ -258,6 +248,7 @@ def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
                 dependencies=[],
                 use_python_args=True,
             ),
+            contract_fingerprints={UNPARSABLE_INTEGRITY_SUM},
         ),
         debug_mode=False,
     )
@@ -273,7 +264,6 @@ def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path, monkeypatch):
     assert snapshot["novelty"]["contracts_seen_total"] == 1
     assert snapshot["novelty"]["new_contracts_interval"] == 1
     assert reporter._seen_contract_fingerprints == {UNPARSABLE_INTEGRITY_SUM}
-
 
 def test_reporter_start_metrics_stream_reuse_resets_interval_baselines(tmp_path):
     reporter = FuzzerReporter(seed=31, reports_dir=tmp_path)
@@ -312,16 +302,11 @@ def test_reporter_start_metrics_stream_reuse_resets_interval_baselines(tmp_path)
 
 
 def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
-    tmp_path, monkeypatch
+    tmp_path,
 ):
     reporter = FuzzerReporter(seed=23, reports_dir=tmp_path)
     reporter.start_timer()
     reporter.start_metrics_stream(False)
-
-    def _raise(*_args, **_kwargs):
-        raise AssertionError("loads_from_solc_json should not be called")
-
-    monkeypatch.setattr("fuzzer.reporter.loads_from_solc_json", _raise)
 
     reporter.ingest_run(
         _empty_analysis(),

@@ -226,6 +226,7 @@ def test_execute_trace_reuses_precompiled_deployment_context():
     }
     prepared = DeploymentExecutionContext(
         compiled=runner._compile_from_solc_json(trace.solc_json, merged_settings),
+        contract_fingerprint="abc",
     )
 
     result = None

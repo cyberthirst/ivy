@@ -52,6 +52,7 @@ class ScenarioRunArtifacts:
     runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
     runtime_stmt_sites_total: Set[RuntimeStmtSite]
     runtime_branch_outcomes_total: Set[RuntimeBranchOutcome]
+    contract_fingerprints: Set[str]
     finalized_scenario: Scenario
 
 
@@ -216,6 +217,7 @@ class BaseFuzzer:
             runtime_branch_outcomes_total=set(
                 harness_result.runtime_branch_outcomes_total
             ),
+            contract_fingerprints=set(harness_result.contract_fingerprints),
             finalized_scenario=harness_result.finalized_scenario,
         )
 
