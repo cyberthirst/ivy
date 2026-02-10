@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import logging
 import random
 from array import array
 from dataclasses import dataclass, field
@@ -84,6 +83,28 @@ class HarnessStats:
     call_successes: int = 0
     call_failures: int = 0
     calls_to_no_code: int = 0
+
+    def record_deployment_result(self, result: DeploymentResult) -> None:
+        self.deployment_attempts += 1
+        if result.success:
+            self.deployment_successes += 1
+        else:
+            self.deployment_failures += 1
+
+    def record_call_outcome(self, outcome: CallOutcome) -> None:
+        self.call_attempts += 1
+        if outcome.target_no_code:
+            self.calls_to_no_code += 1
+        if outcome.timed_out or outcome.trace_result is None:
+            self.call_failures += 1
+            return
+        if (
+            isinstance(outcome.trace_result.result, CallResult)
+            and outcome.trace_result.result.success
+        ):
+            self.call_successes += 1
+        else:
+            self.call_failures += 1
 
 
 @dataclass
@@ -337,7 +358,8 @@ class RuntimeFuzzEngine:
     ) -> TraceResult:
         prepared = self.runner.prepare_deployment_context(trace, trace_index)
         if isinstance(prepared, TraceResult):
-            self._record_deployment_result(stats, prepared.result)
+            assert isinstance(prepared.result, DeploymentResult)
+            stats.record_deployment_result(prepared.result)
             return prepared
 
         deployment_ctx = prepared
@@ -392,7 +414,7 @@ class RuntimeFuzzEngine:
 
             deployment_result = trace_result.result
             assert isinstance(deployment_result, DeploymentResult)
-            self._record_deployment_result(stats, deployment_result)
+            stats.record_deployment_result(deployment_result)
 
             if deployment_result.success:
                 if use_python_args and trace.python_args is not None:
@@ -408,26 +430,6 @@ class RuntimeFuzzEngine:
 
         assert last_trace_result is not None
         return last_trace_result
-
-    def _record_deployment_result(
-        self,
-        stats: HarnessStats,
-        result: DeploymentResult | CallResult | None,
-    ) -> None:
-        if result is None:
-            logging.debug("Skipping deployment stats update for missing result")
-            return
-        if not isinstance(result, DeploymentResult):
-            logging.debug(
-                "Skipping deployment stats update for unexpected result type: %s",
-                type(result).__name__,
-            )
-            return
-        stats.deployment_attempts += 1
-        if result.success:
-            stats.deployment_successes += 1
-        else:
-            stats.deployment_failures += 1
 
     def _execute_call_and_measure(
         self,
@@ -487,24 +489,6 @@ class RuntimeFuzzEngine:
             branch_outcomes=branch_outcomes,
             target_no_code=target_no_code,
         )
-
-    def _record_call_outcome(self, stats: HarnessStats, outcome: CallOutcome) -> None:
-        stats.call_attempts += 1
-        if outcome.target_no_code:
-            stats.calls_to_no_code += 1
-        if outcome.timed_out:
-            stats.call_failures += 1
-            return
-        if outcome.trace_result is None:
-            stats.call_failures += 1
-            return
-        if (
-            isinstance(outcome.trace_result.result, CallResult)
-            and outcome.trace_result.result.success
-        ):
-            stats.call_successes += 1
-        else:
-            stats.call_failures += 1
 
     def _call_targets_no_code(self, trace: CallTrace) -> bool:
         to_address = trace.call_args.get("to", "")
@@ -635,7 +619,7 @@ class RuntimeFuzzEngine:
             )
             stats.enumeration_calls += 1
             total_calls[0] += 1
-            self._record_call_outcome(stats, outcome)
+            stats.record_call_outcome(outcome)
             runtime_stmt_sites_seen.update(outcome.stmt_sites)
             runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
@@ -695,7 +679,7 @@ class RuntimeFuzzEngine:
             )
             stats.replay_calls += 1
             total_calls[0] += 1
-            self._record_call_outcome(stats, outcome)
+            stats.record_call_outcome(outcome)
             runtime_stmt_sites_seen.update(outcome.stmt_sites)
             runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
@@ -851,7 +835,7 @@ class RuntimeFuzzEngine:
             )
             stats.fuzz_calls += 1
             total_calls[0] += 1
-            self._record_call_outcome(stats, outcome)
+            stats.record_call_outcome(outcome)
             runtime_stmt_sites_seen.update(outcome.stmt_sites)
             runtime_branch_outcomes_seen.update(outcome.branch_outcomes)
 
