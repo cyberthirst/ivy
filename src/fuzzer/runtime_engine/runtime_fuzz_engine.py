@@ -138,6 +138,7 @@ class HarnessResult:
     runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
     runtime_stmt_sites_total: Set[RuntimeStmtSite]
     runtime_branch_outcomes_total: Set[RuntimeBranchOutcome]
+    contract_fingerprints: Set[str]
 
     @property
     def finalized_traces(self) -> List[Any]:
@@ -223,6 +224,7 @@ class RuntimeFuzzEngine:
             runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome] = set()
             runtime_stmt_sites_total: Set[RuntimeStmtSite] = set()
             runtime_branch_outcomes_total: Set[RuntimeBranchOutcome] = set()
+            contract_fingerprints: Set[str] = set()
 
             deployed_contracts: Dict[str, Any] = {}
             trace_index = 0
@@ -240,6 +242,7 @@ class RuntimeFuzzEngine:
                         trace_index=trace_index,
                         use_python_args=scenario.use_python_args,
                         stats=stats,
+                        contract_fingerprints=contract_fingerprints,
                     )
                     trace_results.append(trace_result)
                     if trace_result.result and trace_result.result.success:
@@ -343,6 +346,7 @@ class RuntimeFuzzEngine:
                 runtime_branch_outcomes_seen=runtime_branch_outcomes_seen,
                 runtime_stmt_sites_total=runtime_stmt_sites_total,
                 runtime_branch_outcomes_total=runtime_branch_outcomes_total,
+                contract_fingerprints=contract_fingerprints,
             )
 
     def _get_constructor_function(self, compiled: Any) -> Any:
@@ -354,6 +358,7 @@ class RuntimeFuzzEngine:
         trace_index: int,
         use_python_args: bool,
         stats: HarnessStats,
+        contract_fingerprints: Set[str],
     ) -> TraceResult:
         prepared = self.runner.prepare_deployment_context(trace, trace_index)
         if isinstance(prepared, TraceResult):
@@ -362,6 +367,7 @@ class RuntimeFuzzEngine:
             return prepared
 
         deployment_ctx = prepared
+        contract_fingerprints.add(deployment_ctx.contract_fingerprint)
         sender = self.runner._get_sender(trace.env.tx.origin if trace.env else None)
         attempt_budget = max(1, self.config.max_deploy_retries)
         last_trace_result: Optional[TraceResult] = None

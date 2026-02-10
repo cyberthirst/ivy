@@ -21,6 +21,8 @@ from fuzzer.trace_types import (
 )
 from fuzzer.xfail import XFailExpectation
 
+UNPARSABLE_CONTRACT_FINGERPRINT = "0" * 64
+
 
 @dataclass
 class BaseResult(ABC):
@@ -169,6 +171,7 @@ class ScenarioResult:
 @dataclass
 class DeploymentExecutionContext:
     compiled: Any
+    contract_fingerprint: str
 
 
 class BaseScenarioRunner(ABC):
@@ -331,8 +334,18 @@ class BaseScenarioRunner(ABC):
                 runtime_xfails=list(trace.runtime_xfails),
             )
 
+        try:
+            integrity_sum = getattr(compiled, "integrity_sum", None)
+        except Exception:
+            integrity_sum = None
+
+        contract_fingerprint = UNPARSABLE_CONTRACT_FINGERPRINT
+        if isinstance(integrity_sum, str) and integrity_sum:
+            contract_fingerprint = integrity_sum
+
         return DeploymentExecutionContext(
             compiled=compiled,
+            contract_fingerprint=contract_fingerprint,
         )
 
     def run(self, scenario: Scenario) -> ScenarioResult:

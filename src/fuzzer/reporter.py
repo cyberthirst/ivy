@@ -10,8 +10,6 @@ from pathlib import Path
 from datetime import datetime
 
 from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
-from ivy.frontend.loader import loads_from_solc_json
-from fuzzer.trace_types import DeploymentTrace
 
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
@@ -428,32 +426,6 @@ class FuzzerReporter:
             self._pending_branch_outcomes_total,
         )
 
-    def _integrity_sum_from_solc_json(self, solc_json: Dict[str, Any]) -> str:
-        try:
-            compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
-        except Exception:
-            return UNPARSABLE_INTEGRITY_SUM
-
-        integrity_sum = getattr(compiler_data, "integrity_sum", None)
-        if isinstance(integrity_sum, str) and integrity_sum:
-            return integrity_sum
-        return UNPARSABLE_INTEGRITY_SUM
-
-    def _collect_contract_integrity_sums(self, finalized_scenario: Any) -> Set[str]:
-        integrity_sums: Set[str] = set()
-        traces = getattr(finalized_scenario, "traces", None)
-        if not isinstance(traces, list):
-            return integrity_sums
-
-        for trace in traces:
-            if not isinstance(trace, DeploymentTrace):
-                continue
-            if trace.deployment_type != "source" or not trace.solc_json:
-                continue
-            integrity_sums.add(self._integrity_sum_from_solc_json(trace.solc_json))
-
-        return integrity_sums
-
     def ingest_run(self, analysis: AnalysisResult, artifacts: Any, *, debug_mode: bool):
         self.report(analysis, debug_mode=debug_mode)
 
@@ -489,10 +461,8 @@ class FuzzerReporter:
         self._pending_branch_outcomes_total.update(
             getattr(artifacts, "runtime_branch_outcomes_total", set())
         )
-
-        finalized_scenario = getattr(artifacts, "finalized_scenario", None)
         self._pending_contract_fingerprints.update(
-            self._collect_contract_integrity_sums(finalized_scenario)
+            getattr(artifacts, "contract_fingerprints", set())
         )
 
     def get_runtime_deployment_success_rate(self) -> float:
