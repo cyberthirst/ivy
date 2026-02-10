@@ -731,6 +731,39 @@ class FuzzerReporter:
 
         return snapshot
 
+    def log_generative_progress(
+        self,
+        *,
+        iteration: int,
+        corpus_seed_count: int,
+        corpus_evolved_count: int,
+        snapshot: Optional[Dict[str, Any]],
+    ) -> None:
+        """Log interval progress for the generative fuzzer."""
+        elapsed = self.get_elapsed_time()
+        rate = iteration / elapsed if elapsed > 0 else 0
+        deployment_success_rate = self.get_runtime_deployment_success_rate()
+        call_success_rate = self.get_runtime_call_success_rate()
+        new_edges_interval = 0
+        new_contracts_interval = 0
+        if snapshot is not None:
+            coverage = snapshot.get("coverage", {})
+            novelty = snapshot.get("novelty", {})
+            new_edges_interval = int(coverage.get("new_runtime_edges_interval", 0))
+            new_contracts_interval = int(novelty.get("new_contracts_interval", 0))
+
+        logging.info(
+            f"iter={iteration} | "
+            f"seeds={corpus_seed_count} | "
+            f"evolved={corpus_evolved_count} | "
+            f"divergences={self.divergences} | "
+            f"deploy_ok={deployment_success_rate:.1f}% | "
+            f"call_ok={call_success_rate:.1f}% | "
+            f"new_edges={new_edges_interval} | "
+            f"new_contracts={new_contracts_interval} | "
+            f"rate={rate:.1f}/s"
+        )
+
     def print_summary(self):
         print("\n" + "=" * 60)
         print("FUZZING CAMPAIGN STATISTICS")

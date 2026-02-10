@@ -190,7 +190,12 @@ class GenerativeFuzzer(BaseFuzzer):
                             self.harness_config.enable_coverage_percentages
                         ),
                     )
-                    self._log_progress(snapshot)
+                    self.reporter.log_generative_progress(
+                        iteration=self._iteration,
+                        corpus_seed_count=self.corpus.seed_count,
+                        corpus_evolved_count=self.corpus.evolved_count,
+                        snapshot=snapshot,
+                    )
 
         except KeyboardInterrupt:
             logging.info("Interrupted by user")
@@ -202,34 +207,13 @@ class GenerativeFuzzer(BaseFuzzer):
             corpus_max_evolved=self.corpus.max_evolved,
             include_coverage_percentages=self.harness_config.enable_coverage_percentages,
         )
-        self._log_progress(final_snapshot)
-        self.finalize()
-
-    def _log_progress(self, snapshot: Optional[dict]):
-        """Log fuzzing progress."""
-        elapsed = self.reporter.get_elapsed_time()
-        rate = self._iteration / elapsed if elapsed > 0 else 0
-        deployment_success_rate = self.reporter.get_runtime_deployment_success_rate()
-        call_success_rate = self.reporter.get_runtime_call_success_rate()
-        new_edges_interval = 0
-        new_contracts_interval = 0
-        if snapshot is not None:
-            coverage = snapshot.get("coverage", {})
-            novelty = snapshot.get("novelty", {})
-            new_edges_interval = int(coverage.get("new_runtime_edges_interval", 0))
-            new_contracts_interval = int(novelty.get("new_contracts_interval", 0))
-
-        logging.info(
-            f"iter={self._iteration} | "
-            f"seeds={self.corpus.seed_count} | "
-            f"evolved={self.corpus.evolved_count} | "
-            f"divergences={self.reporter.divergences} | "
-            f"deploy_ok={deployment_success_rate:.1f}% | "
-            f"call_ok={call_success_rate:.1f}% | "
-            f"new_edges={new_edges_interval} | "
-            f"new_contracts={new_contracts_interval} | "
-            f"rate={rate:.1f}/s"
+        self.reporter.log_generative_progress(
+            iteration=self._iteration,
+            corpus_seed_count=self.corpus.seed_count,
+            corpus_evolved_count=self.corpus.evolved_count,
+            snapshot=final_snapshot,
         )
+        self.finalize()
 
 
 def main():
