@@ -16,7 +16,6 @@ from contextlib import contextmanager
 from typing import DefaultDict, Dict, Iterable, Iterator, Optional, Set, Tuple
 
 import coverage
-from coverage.core import CTRACER_FILE
 
 Arc = Tuple[str, int, int]
 
@@ -88,7 +87,6 @@ class ArcCoverageCollector:
 
         # Reusable Coverage instance (created lazily on first use).
         self._cov: Optional[coverage.Coverage] = None
-        self._c_tracer_verified: bool = False
 
     def start_scenario(self) -> None:
         self._scenario_arcs.clear()
@@ -119,13 +117,6 @@ class ArcCoverageCollector:
         if self._cov is not None:
             return self._cov
 
-        if CTRACER_FILE is None:
-            raise RuntimeError(
-                "coverage.py C tracer is unavailable (CTRACER_FILE is None). "
-                "Install coverage.py with the C extension, or use a Python build "
-                "that supports it."
-            )
-
         cov = coverage.Coverage(
             branch=True,
             timid=False,
@@ -136,23 +127,6 @@ class ArcCoverageCollector:
         cov.config.disable_warnings = ["no-data-collected"]
         self._cov = cov
         return cov
-
-    def _ensure_c_tracer(self, cov: coverage.Coverage) -> None:
-        """Verify C tracer is active (only checked once per collector lifetime)."""
-        if self._c_tracer_verified:
-            return
-
-        collector = getattr(cov, "_collector", None)
-        if collector is None:
-            raise RuntimeError("coverage.py collector was not initialized")
-
-        tracer_name = collector.tracer_name()
-        if tracer_name != "CTracer":
-            raise RuntimeError(
-                f"ArcCoverageCollector requires coverage.py C tracer, got {tracer_name!r}"
-            )
-
-        self._c_tracer_verified = True
 
     def _extract_arcs(self, cov: coverage.Coverage) -> Set[Arc]:
         data = cov.get_data()
@@ -198,7 +172,6 @@ class ArcCoverageCollector:
         try:
             cov.start()
             started = True
-            self._ensure_c_tracer(cov)
 
             # Match the old sys.settrace collector: start timing after tracing
             # is enabled, so compile_time measures just the compilation window.
