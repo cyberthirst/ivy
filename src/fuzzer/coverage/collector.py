@@ -84,11 +84,6 @@ class ArcCoverageCollector:
             include_patterns.append(f"**/{fuzzy}")
             include_patterns.append(f"**/{fuzzy}/**")
 
-            win_target = norm_target.replace("/", "\\")
-            if win_target != norm_target:
-                include_patterns.append(f"**\\{win_target}")
-                include_patterns.append(f"**\\{win_target}\\**")
-
         self._include_patterns = _unique_preserve_order(include_patterns)
 
         # Reusable Coverage instance (created lazily on first use).
