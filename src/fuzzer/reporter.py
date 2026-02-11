@@ -109,6 +109,8 @@ class FuzzerReporter:
     current_scenario_num: Optional[int] = None
     seed: Optional[int] = None
     reports_dir: Path = field(default_factory=lambda: Path("reports"))
+    _run_started_at: Optional[datetime] = None
+    _run_reports_dir: Optional[Path] = None
     _file_counter: int = 0
     _metrics_enabled: bool = False
     _metrics_path: Optional[Path] = None
@@ -317,8 +319,31 @@ class FuzzerReporter:
             return 0.0
         return (self.successful_calls / total) * 100
 
+    def _build_run_reports_dir(self, started_at: datetime) -> Path:
+        seed_part = str(self.seed) if self.seed is not None else "noseed"
+        base_name = f"{started_at.strftime('%Y-%m-%d_%H-%M-%S')}_seed-{seed_part}"
+        run_dir = self.reports_dir / base_name
+        suffix = 1
+        while run_dir.exists():
+            run_dir = self.reports_dir / f"{base_name}_{suffix}"
+            suffix += 1
+        return run_dir
+
+    def _get_run_reports_dir(self) -> Path:
+        if self._run_reports_dir is None:
+            started_at = self._run_started_at or datetime.now()
+            self._run_started_at = started_at
+            self._run_reports_dir = self._build_run_reports_dir(started_at)
+
+        self._run_reports_dir.mkdir(parents=True, exist_ok=True)
+        return self._run_reports_dir
+
     def start_timer(self):
+        self._run_started_at = datetime.now()
+        self._run_reports_dir = self._build_run_reports_dir(self._run_started_at)
+        self._run_reports_dir.mkdir(parents=True, exist_ok=True)
         self.start_time = time.time()
+        self.end_time = None
 
     def stop_timer(self):
         self.end_time = time.time()
@@ -495,7 +520,7 @@ class FuzzerReporter:
             self._metrics_path = None
             return
 
-        stats_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        stats_dir = self._get_run_reports_dir()
         stats_dir.mkdir(parents=True, exist_ok=True)
         seed_part = str(self.seed) if self.seed is not None else "noseed"
         timestamp = datetime.now().strftime("%H%M%S")
@@ -792,7 +817,7 @@ class FuzzerReporter:
 
     def save_divergence(self, divergence: Any, subfolder: Optional[str] = None):
         """Save a divergence between Ivy and Boa execution."""
-        reports_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        reports_dir = self._get_run_reports_dir()
         if subfolder:
             reports_dir = reports_dir / subfolder
         reports_dir = reports_dir / "divergences"
@@ -829,7 +854,7 @@ class FuzzerReporter:
         """Save a compiler crash with the source code that caused it."""
         error_type = self._resolve_error_type(error, error_type)
 
-        crash_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        crash_dir = self._get_run_reports_dir()
         if subfolder:
             crash_dir = crash_dir / subfolder
         crash_dir = crash_dir / "compiler_crashes"
@@ -870,7 +895,7 @@ class FuzzerReporter:
         """Save a compilation failure with the source code that caused it."""
         error_type = self._resolve_error_type(error, error_type)
 
-        failure_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        failure_dir = self._get_run_reports_dir()
         if subfolder:
             failure_dir = failure_dir / subfolder
         failure_dir = failure_dir / "compilation_failures"
@@ -902,7 +927,7 @@ class FuzzerReporter:
 
     def save_statistics(self):
         """Save the campaign statistics to a JSON file."""
-        stats_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
+        stats_dir = self._get_run_reports_dir()
         stats_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S")
