@@ -795,6 +795,7 @@ class FuzzerReporter:
         reports_dir = self.reports_dir / datetime.now().strftime("%Y-%m-%d")
         if subfolder:
             reports_dir = reports_dir / subfolder
+        reports_dir = reports_dir / "divergences"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         item_name = self.current_item_name or "unknown"
