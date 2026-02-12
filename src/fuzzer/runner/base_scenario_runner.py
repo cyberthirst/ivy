@@ -128,7 +128,7 @@ class CallResult(BaseResult):
 
     def to_dict(self) -> Dict[str, Any]:
         result = super().to_dict()
-        result["output"] = self.output if self.output else None
+        result["output"] = self.output
         return result
 
 
