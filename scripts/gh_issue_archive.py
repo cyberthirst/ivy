@@ -6,6 +6,7 @@ Source of truth is per-issue JSON; Markdown is generated from those JSON docs.
 
 Usage:
     python gh_issue_archive.py owner/repo [--format both] [--force] [--dry-run]
+    python gh_issue_archive.py --config /path/to/config.json
 
 Requires: `gh` CLI authenticated and on PATH. Zero external Python dependencies.
 """
@@ -29,6 +30,7 @@ JSON_SCHEMA_VERSION = 1
 
 MARKDOWN_FORMATS = {"md", "both"}
 JSON_FORMATS = {"json", "both"}
+OUTPUT_FORMATS = {"md", "json", "both"}
 
 REST_ACCEPT_HEADER = "Accept: application/vnd.github+json"
 REST_PAGE_SIZE = 100
@@ -101,6 +103,76 @@ def default_output_dir(repo):
 
 def utc_now_iso():
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def validate_repo(repo):
+    if not isinstance(repo, str):
+        return False
+    repo = repo.strip()
+    if repo.count("/") != 1:
+        return False
+    owner, name = repo.split("/", 1)
+    return bool(owner) and bool(name)
+
+
+def output_subdir_for_repo(repo):
+    return Path(default_output_dir(repo)).name
+
+
+def _config_error(message):
+    print(f"Config error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def parse_archive_config(data):
+    if not isinstance(data, dict):
+        _config_error("expected top-level JSON object.")
+
+    output_root = data.get("output_root", ".")
+    if not isinstance(output_root, str):
+        output_root = str(output_root)
+
+    defaults = data.get("defaults", {})
+    if not isinstance(defaults, dict):
+        defaults = {}
+
+    output_format = defaults.get("format", "both")
+    if output_format not in OUTPUT_FORMATS:
+        output_format = "both"
+
+    force = bool(defaults.get("force", False))
+    dry_run = bool(defaults.get("dry_run", False))
+
+    remotes = data.get("remotes", [])
+    if not isinstance(remotes, list):
+        remotes = []
+
+    normalized_remotes = []
+    for remote in remotes:
+        if isinstance(remote, str) and remote.strip():
+            normalized_remotes.append(remote.strip())
+
+    return {
+        "output_root": output_root.strip(),
+        "defaults": {
+            "format": output_format,
+            "force": force,
+            "dry_run": dry_run,
+        },
+        "remotes": normalized_remotes,
+    }
+
+
+def load_archive_config(path):
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        _config_error(f"config file not found: {path}")
+    except json.JSONDecodeError as exc:
+        _config_error(f"invalid JSON in {path}: {exc}")
+
+    return parse_archive_config(data)
 
 
 # ---------------------------------------------------------------------------
@@ -748,6 +820,58 @@ def archive(repo, out_dir, *, force=False, dry_run=False, output_format="both"):
         print(f"Done. Archived {len(successful_remote)} issue(s) to {out_dir}/")
 
 
+def archive_from_config(
+    config_path,
+    *,
+    output_root_override=None,
+    output_format_override=None,
+    force_override=None,
+    dry_run_override=None,
+):
+    config = load_archive_config(config_path)
+    remotes = config["remotes"]
+    if not remotes:
+        print("No remotes configured. Nothing to archive.")
+        return 0
+
+    output_root = output_root_override or config["output_root"]
+    defaults = config["defaults"]
+    output_format = output_format_override or defaults["format"]
+    force = defaults["force"] if force_override is None else force_override
+    dry_run = defaults["dry_run"] if dry_run_override is None else dry_run_override
+
+    root_dir = Path(output_root)
+    failures = []
+    for i, repo in enumerate(remotes, 1):
+        out_dir = root_dir / output_subdir_for_repo(repo)
+        print(f"[{i}/{len(remotes)}] Archiving {repo} -> {out_dir}")
+        try:
+            archive(
+                repo,
+                out_dir,
+                force=force,
+                dry_run=dry_run,
+                output_format=output_format,
+            )
+        except SystemExit as exc:
+            code = exc.code if isinstance(exc.code, int) else 1
+            print(f"  Error: archiving {repo} failed with exit code {code}.",
+                  file=sys.stderr)
+            failures.append(repo)
+        except Exception as exc:
+            print(f"  Error: archiving {repo} failed: {exc}", file=sys.stderr)
+            failures.append(repo)
+
+    if failures:
+        succeeded = len(remotes) - len(failures)
+        print(f"Done with failures. Succeeded: {succeeded}, Failed: {len(failures)}.")
+        print(f"  Failed remotes: {failures}", file=sys.stderr)
+        return 1
+
+    print(f"Done. Archived {len(remotes)} remote(s).")
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -758,7 +882,13 @@ def main():
     )
     parser.add_argument(
         "repo",
+        nargs="?",
         help="GitHub repository in owner/repo format (e.g. vyperlang/vyper)",
+    )
+    parser.add_argument(
+        "--config",
+        default=None,
+        help="Path to JSON config with output_root/defaults/remotes.",
     )
     parser.add_argument(
         "-o",
@@ -769,36 +899,67 @@ def main():
     parser.add_argument(
         "--format",
         choices=("md", "json", "both"),
-        default="both",
-        help="Output format: markdown, json, or both (default: both)",
+        default=None,
+        help="Output format: markdown, json, or both.",
+    )
+    parser.add_argument(
+        "--output-root",
+        default=None,
+        help="Override config output_root in --config mode.",
     )
     parser.add_argument(
         "--force",
         action="store_true",
+        default=None,
         help="Re-archive all issues, ignoring manifest",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
+        default=None,
         help="Show what would be archived without writing files",
     )
     args = parser.parse_args()
 
-    if "/" not in args.repo or args.repo.count("/") != 1:
-        print(f"Error: repo must be in owner/repo format, got: {args.repo}",
-              file=sys.stderr)
+    if bool(args.repo) == bool(args.config):
+        print("Error: provide exactly one of: repo or --config.", file=sys.stderr)
         raise SystemExit(1)
 
-    output_dir = args.output or default_output_dir(args.repo)
-    archive(
-        args.repo,
-        output_dir,
-        force=args.force,
-        dry_run=args.dry_run,
-        output_format=args.format,
+    if args.repo:
+        if args.output_root is not None:
+            print("Error: --output-root can only be used with --config.",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+        if not validate_repo(args.repo):
+            print(f"Error: repo must be in owner/repo format, got: {args.repo}",
+                  file=sys.stderr)
+            raise SystemExit(1)
+
+        output_dir = args.output or default_output_dir(args.repo)
+        archive(
+            args.repo,
+            output_dir,
+            force=bool(args.force),
+            dry_run=bool(args.dry_run),
+            output_format=args.format or "both",
+        )
+        return
+
+    if args.output is not None:
+        print("Error: --output is only valid in single-repo mode.", file=sys.stderr)
+        raise SystemExit(1)
+
+    raise SystemExit(
+        archive_from_config(
+            args.config,
+            output_root_override=args.output_root,
+            output_format_override=args.format,
+            force_override=args.force,
+            dry_run_override=args.dry_run,
+        )
     )
 
 
 if __name__ == "__main__":
     main()
-
