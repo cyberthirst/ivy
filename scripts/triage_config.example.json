@@ -6,6 +6,6 @@
     "dry_run": false
   },
   "remotes": [
-    "vyperlang/vyper"
+    "owner/repo"
   ]
 }
