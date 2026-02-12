@@ -4687,3 +4687,37 @@ def foo() -> DynArray[uint256, 5]:
     """
     c = get_contract(code)
     assert c.foo() == [1, 2, 3, 4, 5]
+
+
+def test_struct_field_assignment_dynarray_capacity_widening(get_contract):
+    code = """
+struct MyStruct:
+    x: DynArray[uint256, 5]
+
+@external
+def foo() -> DynArray[uint256, 5]:
+    s: MyStruct = empty(MyStruct)
+    arr: DynArray[uint256, 3] = [1, 2, 3]
+    s.x = arr
+    s.x.append(4)
+    s.x.append(5)
+    return s.x
+    """
+    c = get_contract(code)
+    assert c.foo() == [1, 2, 3, 4, 5]
+
+
+def test_hashmap_value_assignment_dynarray_capacity_widening(get_contract):
+    code = """
+vals: HashMap[uint256, DynArray[uint256, 5]]
+
+@external
+def foo() -> DynArray[uint256, 5]:
+    arr: DynArray[uint256, 3] = [1, 2, 3]
+    self.vals[0] = arr
+    self.vals[0].append(4)
+    self.vals[0].append(5)
+    return self.vals[0]
+    """
+    c = get_contract(code)
+    assert c.foo() == [1, 2, 3, 4, 5]

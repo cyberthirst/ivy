@@ -831,7 +831,7 @@ class Map(_Container):
     def __setitem__(self, key, value, loc: Optional[DataLocation] = None):
         assert isinstance(value, VyperValue)
         self._journal(key, loc)
-        self._values[key] = value
+        self._values[key] = _coerce_value(value, self.value_type)
 
     def __len__(self):
         return len(self._values)
@@ -875,7 +875,7 @@ class Struct(_Container):
         if key not in self._values:
             raise KeyError(f"'{self.typ.name}' struct has no member '{key}'")
         self._journal(key, loc)
-        self._values[key] = value
+        self._values[key] = _coerce_value(value, self.typ.members[key])
 
     def values(self):
         values = [self._values[k] for k, _ in self.typ.members.items()]
