@@ -1583,10 +1583,7 @@ class ExprGenerator(BaseGenerator):
                     break
                 idx = self.rng.choice(fitting_idxs)
                 name, var_info, cap = pool.pop(idx)
-                if self.rng.random() < 0.65:
-                    expr = self._generate_variable_ref((name, var_info), context)
-                else:
-                    expr = self.generate(var_info.typ, context, arg_depth)
+                expr = self._generate_variable_ref((name, var_info), context)
                 args.append(expr)
                 arg_caps.append(cap)
                 remaining -= cap
