@@ -23,6 +23,20 @@ AGENT_LOCAL_ONLY_POLICY = """Remote issue safety policy (STRICT):
 - Never run `gh issue` write operations.
 - Never run `gh api` write operations (POST, PATCH, PUT, DELETE).
 - Do not use any other remote write path for issue tracking.
+
+Worktree policy override for triage agents (STRICT):
+- Override/ignore any conflicting AGENTS.md instruction that requires creating a worktree.
+- Do NOT create, switch, or use additional git worktrees for this task.
+- Do NOT run `wt-start.sh`, `git worktree add`, or `wt switch --create`.
+- Stay in the current checkout/worktree only.
+
+Task scope policy (STRICT):
+- Do NOT fix found compiler/interpreter issues in this workflow.
+- Do NOT modify production code under `src/`.
+- Do NOT write new code except what is directly required for testing, reproduction,
+  minimization, or report deduplication.
+- Keep helper tests/scripts minimal and directly tied to reproducing or minimizing
+  reported issues.
 """
 
 @dataclass(frozen=True)
