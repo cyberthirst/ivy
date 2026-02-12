@@ -17,7 +17,13 @@ MAX_PARALLEL_AGENTS = 4
 CLAUDE_MODEL = "claude-opus-4-6"
 CODEX_MODEL = "gpt-5.3-codex"
 MAX_INDEX_CHARS = 180_000
-
+AGENT_LOCAL_ONLY_POLICY = """Remote issue safety policy (STRICT):
+- Work only on local files in this repository.
+- Never create, edit, comment on, close, reopen, or label remote GitHub issues.
+- Never run `gh issue` write operations.
+- Never run `gh api` write operations (POST, PATCH, PUT, DELETE).
+- Do not use any other remote write path for issue tracking.
+"""
 
 @dataclass(frozen=True)
 class TriagePaths:
@@ -243,6 +249,8 @@ Constraints:
 - Treat files under filtered/ as read-only.
 - Do not write outside {paths.unverified_divergences}.
 - Do not minimize PoCs at this stage; minimization is handled during verification.
+
+{AGENT_LOCAL_ONLY_POLICY}
 """
 
     ok, output_or_error = _run_claude(prompt, "Divergence deduplication")
@@ -296,6 +304,8 @@ Constraints:
 - Treat files under filtered/ as read-only.
 - Do not write outside {paths.unverified_crashes}.
 - Do not minimize PoCs at this stage; minimization is handled during verification.
+
+{AGENT_LOCAL_ONLY_POLICY}
 """
 
     ok, output_or_error = _run_claude(prompt, "Crash deduplication")
@@ -343,6 +353,8 @@ Rules:
 - Do not modify the input report.
 - Keep output concise and executable.
 - Return markdown only (or NOT_REPRODUCIBLE).
+
+{AGENT_LOCAL_ONLY_POLICY}
 
 Reference context (skills/vyper.md):
 {vyper_skill_content}
@@ -513,6 +525,8 @@ Task:
 Output:
 - First line exactly one of: NOVEL or DUPLICATE
 - Second line: short reason
+
+{AGENT_LOCAL_ONLY_POLICY}
 
 Issue index:
 {issue_index}
