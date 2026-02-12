@@ -212,7 +212,8 @@ class FuzzerReporter:
         Report results from an AnalysisResult.
 
         Handles all reporting: stats, item stats, file saving, and logging.
-        Saves unique items to filtered/, all items to unfiltered/ if debug_mode.
+        Saves unique items to filtered/*/untriaged, all items to
+        unfiltered/*/untriaged if debug_mode.
         """
         from .divergence_detector import DivergenceType
 
@@ -820,7 +821,7 @@ class FuzzerReporter:
         reports_dir = self._get_run_reports_dir()
         if subfolder:
             reports_dir = reports_dir / subfolder
-        reports_dir = reports_dir / "divergences"
+        reports_dir = reports_dir / "divergences" / "untriaged"
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         item_name = self.current_item_name or "unknown"
@@ -857,7 +858,7 @@ class FuzzerReporter:
         crash_dir = self._get_run_reports_dir()
         if subfolder:
             crash_dir = crash_dir / subfolder
-        crash_dir = crash_dir / "compiler_crashes"
+        crash_dir = crash_dir / "compiler_crashes" / "untriaged"
         crash_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
@@ -898,7 +899,7 @@ class FuzzerReporter:
         failure_dir = self._get_run_reports_dir()
         if subfolder:
             failure_dir = failure_dir / subfolder
-        failure_dir = failure_dir / "compilation_failures"
+        failure_dir = failure_dir / "compilation_failures" / "untriaged"
         failure_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]

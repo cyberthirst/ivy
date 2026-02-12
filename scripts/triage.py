@@ -22,8 +22,10 @@ MAX_INDEX_CHARS = 180_000
 @dataclass(frozen=True)
 class TriagePaths:
     run_dir: Path
-    filtered_divergences: Path
-    filtered_crashes: Path
+    filtered_divergences_untriaged: Path
+    filtered_divergences_triaged: Path
+    filtered_crashes_untriaged: Path
+    filtered_crashes_triaged: Path
     unverified_root: Path
     unverified_divergences: Path
     unverified_crashes: Path
@@ -64,6 +66,12 @@ def _sorted_md_files(directory: Path, *, recursive: bool) -> list[Path]:
     return sorted(path for path in directory.glob(pattern) if path.is_file())
 
 
+def _sorted_json_files(directory: Path) -> list[Path]:
+    if not directory.exists():
+        return []
+    return sorted(path for path in directory.glob("*.json") if path.is_file())
+
+
 def _clear_md_files(directory: Path) -> None:
     if not directory.exists():
         return
@@ -85,10 +93,14 @@ def _parse_config(config_path: Path) -> TriageConfig:
 
 def _prepare_paths(run_dir: Path, skip_verify: bool) -> TriagePaths:
     filtered = run_dir / "filtered"
+    divergences_root = filtered / "divergences"
+    crashes_root = filtered / "compiler_crashes"
     paths = TriagePaths(
         run_dir=run_dir,
-        filtered_divergences=filtered / "divergences",
-        filtered_crashes=filtered / "compiler_crashes",
+        filtered_divergences_untriaged=divergences_root / "untriaged",
+        filtered_divergences_triaged=divergences_root / "triaged",
+        filtered_crashes_untriaged=crashes_root / "untriaged",
+        filtered_crashes_triaged=crashes_root / "triaged",
         unverified_root=run_dir / "unverified",
         unverified_divergences=run_dir / "unverified" / "divergences",
         unverified_crashes=run_dir / "unverified" / "compiler_crashes",
@@ -105,6 +117,32 @@ def _prepare_paths(run_dir: Path, skip_verify: bool) -> TriagePaths:
         _clear_md_files(paths.verified_dir)
 
     return paths
+
+
+def _move_json_files_to_triaged(files: list[Path], triaged_dir: Path) -> int:
+    if not files:
+        return 0
+
+    triaged_dir.mkdir(parents=True, exist_ok=True)
+    moved = 0
+    for src in files:
+        if not src.exists():
+            continue
+
+        dest = triaged_dir / src.name
+        if dest.exists():
+            stem = src.stem
+            suffix = src.suffix
+            idx = 1
+            while True:
+                candidate = triaged_dir / f"{stem}_{idx}{suffix}"
+                if not candidate.exists():
+                    dest = candidate
+                    break
+                idx += 1
+        src.rename(dest)
+        moved += 1
+    return moved
 
 
 def _run_checked(cmd: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -169,18 +207,27 @@ def _run_claude(prompt: str, label: str) -> tuple[bool, str]:
 
 def dedup_divergences(paths: TriagePaths, vyper_version: str) -> list[Path]:
     _print_step("Step 2/5: Deduplicating divergence reports with Claude")
-    if not paths.filtered_divergences.exists():
-        _print_step(f"  Skipping: missing directory {paths.filtered_divergences}")
+    if not paths.filtered_divergences_untriaged.exists():
+        _print_step(
+            f"  Skipping: missing directory {paths.filtered_divergences_untriaged}"
+        )
+        return []
+
+    divergence_files = _sorted_json_files(paths.filtered_divergences_untriaged)
+    if not divergence_files:
+        _print_step(
+            f"  Skipping: no untriaged divergence JSON files in {paths.filtered_divergences_untriaged}"
+        )
         return []
 
     prompt = f"""You are triaging fuzzer divergences for the Vyper compiler.
 Vyper version: {vyper_version}
 
-Divergence JSON files are in: {paths.filtered_divergences}
+Divergence JSON files are in: {paths.filtered_divergences_untriaged}
 Write deduplicated bug reports to: {paths.unverified_divergences}
 
 Instructions:
-1. Read all divergence files in {paths.filtered_divergences}.
+1. Read all divergence files in {paths.filtered_divergences_untriaged}.
 2. Use up to 4 subagents for parallel analysis.
 3. Group divergences by root cause.
 4. For each unique root cause, write one markdown report to {paths.unverified_divergences}/<root-cause-slug>.md.
@@ -205,24 +252,35 @@ Constraints:
         _print_step(f"  Claude output: {output_or_error.splitlines()[0]}")
 
     reports = _sorted_md_files(paths.unverified_divergences, recursive=False)
+    moved = _move_json_files_to_triaged(
+        divergence_files, paths.filtered_divergences_triaged
+    )
     _print_step(f"  Generated {len(reports)} divergence report(s)")
+    _print_step(f"  Moved {moved} divergence JSON file(s) to {paths.filtered_divergences_triaged}")
     return reports
 
 
 def dedup_crashes(paths: TriagePaths, vyper_version: str) -> list[Path]:
     _print_step("Step 3/5: Deduplicating compiler crash reports with Claude")
-    if not paths.filtered_crashes.exists():
-        _print_step(f"  Skipping: missing directory {paths.filtered_crashes}")
+    if not paths.filtered_crashes_untriaged.exists():
+        _print_step(f"  Skipping: missing directory {paths.filtered_crashes_untriaged}")
+        return []
+
+    crash_files = _sorted_json_files(paths.filtered_crashes_untriaged)
+    if not crash_files:
+        _print_step(
+            f"  Skipping: no untriaged crash JSON files in {paths.filtered_crashes_untriaged}"
+        )
         return []
 
     prompt = f"""You are triaging Vyper compiler crash reports from a fuzzer run.
 Vyper version: {vyper_version}
 
-Crash JSON files are in: {paths.filtered_crashes}
+Crash JSON files are in: {paths.filtered_crashes_untriaged}
 Write deduplicated bug reports to: {paths.unverified_crashes}
 
 Instructions:
-1. Read all crash files in {paths.filtered_crashes}.
+1. Read all crash files in {paths.filtered_crashes_untriaged}.
 2. Use up to 4 subagents for parallel analysis.
 3. Group crashes by root cause (same traceback/cause should be grouped).
 4. For each unique root cause, write one markdown report to {paths.unverified_crashes}/<root-cause-slug>.md.
@@ -247,7 +305,9 @@ Constraints:
         _print_step(f"  Claude output: {output_or_error.splitlines()[0]}")
 
     reports = _sorted_md_files(paths.unverified_crashes, recursive=False)
+    moved = _move_json_files_to_triaged(crash_files, paths.filtered_crashes_triaged)
     _print_step(f"  Generated {len(reports)} crash report(s)")
+    _print_step(f"  Moved {moved} crash JSON file(s) to {paths.filtered_crashes_triaged}")
     return reports
 
 
