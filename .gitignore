@@ -49,3 +49,6 @@ ivy/.idea/*.xml
 tests/vyper-exports
 
 reports/
+
+# Local triage config may include private remotes
+scripts/triage_config.json
