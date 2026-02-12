@@ -861,7 +861,9 @@ class Struct(_Container):
         kws: Dict[str, Any],
     ):
         super().__init__(typ)
-        self._values = {key: value for key, value in kws.items()}
+        self._values = {
+            key: _coerce_value(value, typ.members[key]) for key, value in kws.items()
+        }
 
     def __getitem__(self, key: str) -> Any:
         if key not in self._values:

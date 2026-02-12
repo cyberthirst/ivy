@@ -4670,3 +4670,20 @@ def set_value(v: uint256):
 
     result = c.create_and_call(salt, 12345)
     assert result == 12345
+
+
+def test_struct_dynarray_capacity_widening(get_contract):
+    code = """
+struct MyStruct:
+    x: DynArray[uint256, 5]
+
+@external
+def foo() -> DynArray[uint256, 5]:
+    arr: DynArray[uint256, 3] = [1, 2, 3]
+    s: MyStruct = MyStruct(x=arr)
+    s.x.append(4)
+    s.x.append(5)
+    return s.x
+    """
+    c = get_contract(code)
+    assert c.foo() == [1, 2, 3, 4, 5]
