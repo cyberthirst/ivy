@@ -1536,43 +1536,104 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         **_,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        # Choose k in [2,8] and a budget B in [0, target.length].
-        # Partition B into k nonnegative parts and generate that many args.
         if not isinstance(target_type, (StringT, BytesT)):
             return None
 
         tgt_len = target_type.length
-        k = self.rng.randint(2, 8)
-        budget = self.rng.randint(0, tgt_len)
-
-        # composition of `budget` into `k` nonnegative parts
-        parts = []
-        remaining = budget
-        for i in range(k - 1):
-            li = self.rng.randint(0, remaining)
-            parts.append(li)
-            remaining -= li
-        parts.append(remaining)
-
-        # shuffle to avoid monotone order bias
-        self.rng.shuffle(parts)
-
-        def make_typ(n):
-            return StringT(n) if isinstance(target_type, StringT) else BytesT(n)
-
-        arg_types = [make_typ(n) for n in parts]
+        is_string_target = isinstance(target_type, StringT)
+        # Decay arg count so concat is usually low arity:
+        # weights ~ [1, 1/4, 1/16, ...] for k=[2,3,4,...].
+        k_values = list(range(2, 9))
+        decay = 0.25
+        k_weights = [decay**i for i in range(len(k_values))]
+        k = self.rng.choices(k_values, weights=k_weights, k=1)[0]
         arg_depth = self.child_depth(depth)
-        args = []
-        for t in arg_types:
-            if t.length == 0:
-                # Create empty literal directly to avoid generate() bugs with 0-sized types
-                empty_val = "" if isinstance(t, StringT) else b""
-                args.append(ast_builder.literal(empty_val, t))
-            else:
-                args.append(self.generate(t, context, arg_depth))
 
-        # The concat return length is sum(parts) which is <= target length by design
-        return self._finalize_call(func_node, args, make_typ(sum(parts)))
+        def make_dynamic_typ(n: int) -> VyperType:
+            return StringT(n) if is_string_target else BytesT(n)
+
+        def arg_capacity(typ: VyperType) -> Optional[int]:
+            if is_string_target:
+                return typ.length if isinstance(typ, StringT) else None
+            if isinstance(typ, (BytesT, BytesM_T)):
+                return typ.length
+            return None
+
+        # Candidate-driven pass: consume compatible in-scope expressions first.
+        scope_candidates = []
+        for name, var_info in context.find_matching_vars(None):
+            cap = arg_capacity(var_info.typ)
+            if cap is None or cap > tgt_len:
+                continue
+            scope_candidates.append((name, var_info, cap))
+
+        remaining = tgt_len
+        args: list[ast.VyperNode] = []
+        arg_caps: list[int] = []
+
+        if scope_candidates and self.rng.random() < 0.65:
+            pool = list(scope_candidates)
+            max_take = min(k, len(pool), 3)
+            take = self.rng.randint(1, max_take)
+            for _ in range(take):
+                fitting_idxs = [
+                    i for i, entry in enumerate(pool) if entry[2] <= remaining
+                ]
+                if not fitting_idxs:
+                    break
+                idx = self.rng.choice(fitting_idxs)
+                name, var_info, cap = pool.pop(idx)
+                if self.rng.random() < 0.65:
+                    expr = self._generate_variable_ref((name, var_info), context)
+                else:
+                    expr = self.generate(var_info.typ, context, arg_depth)
+                args.append(expr)
+                arg_caps.append(cap)
+                remaining -= cap
+
+        while len(args) < k:
+            slots_left = k - len(args)
+            if remaining == 0:
+                n = 0
+            elif slots_left == 1:
+                n = remaining
+            else:
+                # Prefer non-empty chunks while keeping some zero-length tails.
+                n = self.rng.randint(0, remaining)
+                if n == 0 and self.rng.random() < 0.75:
+                    n = self.rng.randint(1, remaining)
+
+            if is_string_target:
+                t = StringT(n)
+                if n == 0:
+                    expr = ast_builder.literal("", t)
+                else:
+                    expr = self.generate(t, context, arg_depth)
+            else:
+                use_fixed_bytes = n > 0 and self.rng.random() < 0.35
+                if use_fixed_bytes:
+                    fixed_sizes = [m for m in (1, 2, 3, 4, 8, 16, 24, 32) if m <= n]
+                    if fixed_sizes:
+                        m = self.rng.choice(fixed_sizes)
+                        t = BytesM_T(m)
+                        expr = self.generate(t, context, arg_depth)
+                        args.append(expr)
+                        arg_caps.append(m)
+                        remaining -= m
+                        continue
+
+                t = BytesT(n)
+                if n == 0:
+                    expr = ast_builder.literal(b"", t)
+                else:
+                    expr = self.generate(t, context, arg_depth)
+
+            args.append(expr)
+            arg_caps.append(n)
+            remaining -= n
+
+        self.rng.shuffle(args)
+        return self._finalize_call(func_node, args, make_dynamic_typ(sum(arg_caps)))
 
     def _builtin_slice(
         self,
