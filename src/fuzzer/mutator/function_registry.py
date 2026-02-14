@@ -96,6 +96,7 @@ class FunctionRegistry:
             "slice",
             "keccak256",
             "convert",
+            "abi_encode",
         ]
 
         for name, builtin in DISPATCH_TABLE.items():
@@ -154,6 +155,13 @@ class FunctionRegistry:
 
             if name == "convert":
                 if convert_target_supported(return_type):
+                    compat.append((name, b))
+                continue
+
+            if name == "abi_encode":
+                # `abi_encode` returns Bytes[maxlen] where maxlen depends on args.
+                # We can only prefilter by target family and minimum feasible size.
+                if isinstance(return_type, BytesT) and return_type.length >= 32:
                     compat.append((name, b))
                 continue
 

@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
+from vyper.abi_types import ABI_Tuple
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -106,6 +107,7 @@ class ExprGenerator(BaseGenerator):
             "concat": self._builtin_concat,
             "convert": self._builtin_convert,
             "slice": self._builtin_slice,
+            "abi_encode": self._builtin_abi_encode,
         }
 
     def generate(
@@ -1445,6 +1447,117 @@ class ExprGenerator(BaseGenerator):
         if src_expr is None:
             return None
         return self.maybe_convert_expr(src_expr, target_type, context)
+
+    def _random_abi_encode_arg_type(self, payload_budget: int) -> VyperType:
+        static_choices = [BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32)]
+        can_use_dynamic = payload_budget >= 64 and self.rng.random() < 0.35
+        if not can_use_dynamic:
+            return self.rng.choice(static_choices)
+
+        max_dynamic_len = min(64, max(1, payload_budget - 32))
+        if self.rng.random() < 0.5:
+            return BytesT(self.rng.randint(1, max_dynamic_len))
+        return StringT(self.rng.randint(1, max_dynamic_len))
+
+    def _abi_encode_maxlen(
+        self, arg_types: list[VyperType], *, ensure_tuple: bool, has_method_id: bool
+    ) -> Optional[int]:
+        if not arg_types:
+            return None
+
+        try:
+            abi_types = [arg_t.abi_type for arg_t in arg_types]
+            encoded_shape = (
+                abi_types[0] if len(abi_types) == 1 and not ensure_tuple else ABI_Tuple(abi_types)
+            )
+            maxlen = encoded_shape.size_bound()
+        except Exception:
+            return None
+
+        if has_method_id:
+            maxlen += 4
+        return maxlen
+
+    def _generate_abi_encode_arg_expr(
+        self,
+        arg_t: VyperType,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.VyperNode:
+        scope_matches = context.find_matching_vars(arg_t)
+        if scope_matches and self.rng.random() < 0.65:
+            return self._generate_variable_ref(self.rng.choice(scope_matches), context)
+        return self.generate(arg_t, context, depth)
+
+    def _generate_abi_encode_method_id(self) -> ast.VyperNode:
+        value = bytes(self.rng.getrandbits(8) for _ in range(4))
+        if self.rng.random() < 0.5:
+            return ast_builder.literal(value, BytesM_T(4))
+        return ast_builder.literal(value, BytesT(4))
+
+    def _builtin_abi_encode(
+        self,
+        *,
+        func_node: ast.Name,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        **_,
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
+        if not isinstance(target_type, BytesT):
+            return None
+
+        for _ in range(12):
+            has_method_id = target_type.length >= 36 and self.rng.random() < 0.35
+            payload_budget = target_type.length - (4 if has_method_id else 0)
+            if payload_budget < 32:
+                continue
+
+            max_arity = max(1, min(3, payload_budget // 32))
+            if max_arity == 1:
+                arity = 1
+            else:
+                arity = self.rng.choices(
+                    list(range(1, max_arity + 1)),
+                    weights=[4, 2, 1][:max_arity],
+                    k=1,
+                )[0]
+
+            ensure_tuple = self.rng.choice([True, False]) if arity == 1 else True
+            arg_types = [
+                self._random_abi_encode_arg_type(payload_budget) for _ in range(arity)
+            ]
+
+            maxlen = self._abi_encode_maxlen(
+                arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+            )
+            if maxlen is None or maxlen > target_type.length:
+                continue
+
+            arg_depth = self.child_depth(depth)
+            args = [
+                self._generate_abi_encode_arg_expr(arg_t, context, arg_depth)
+                for arg_t in arg_types
+            ]
+
+            keywords = []
+            if arity == 1 or self.rng.random() < 0.35:
+                keywords.append(
+                    ast.keyword(
+                        arg="ensure_tuple",
+                        value=ast_builder.literal(ensure_tuple, BoolT()),
+                    )
+                )
+            if has_method_id:
+                keywords.append(
+                    ast.keyword(arg="method_id", value=self._generate_abi_encode_method_id())
+                )
+
+            call_node = ast.Call(func=func_node, args=args, keywords=keywords)
+            call_node._metadata = {"type": BytesT(maxlen)}
+            return call_node
+
+        return None
 
     def _builtin_min_max(
         self,
