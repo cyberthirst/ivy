@@ -498,7 +498,12 @@ class ExprGenerator(BaseGenerator):
         if isinstance(ctx.target_type, InterfaceT):
             return self._generate_interface_literal(ctx)
         value = self.literal_generator.generate(ctx.target_type)
-        return ast_builder.literal(value, ctx.target_type)
+        literal_type = ctx.target_type
+        if isinstance(ctx.target_type, BytesT):
+            literal_type = BytesT(len(value))
+        elif isinstance(ctx.target_type, StringT):
+            literal_type = StringT(len(value))
+        return ast_builder.literal(value, literal_type)
 
     def _generate_array_literal(self, ctx: ExprGenCtx) -> ast.List:
         target_type = ctx.target_type
