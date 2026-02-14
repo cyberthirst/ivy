@@ -88,6 +88,9 @@ class StatementGenerator(BaseGenerator):
             return False
         return bool(self._get_append_candidates(ctx.context))
 
+    def _is_raw_call_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
+        return self.expr_generator.can_generate_raw_call(ctx.context, None)
+
     def _is_if_applicable(self, *, ctx: StmtGenCtx, **_) -> bool:
         return not ctx.context.is_module_scope
 
@@ -107,6 +110,9 @@ class StatementGenerator(BaseGenerator):
 
     def _weight_append(self, **_) -> float:
         return self.cfg.append_weight
+
+    def _weight_raw_call(self, **_) -> float:
+        return self.cfg.raw_call_weight
 
     def _weight_if(self, **_) -> float:
         return self.cfg.if_weight
@@ -1035,6 +1041,22 @@ class StatementGenerator(BaseGenerator):
             args=[value],
             keywords=[],
         )
+        return ast.Expr(value=call)
+
+    @strategy(
+        name="stmt.raw_call",
+        tags=frozenset({"stmt", "terminal"}),
+        is_applicable="_is_raw_call_applicable",
+        weight="_weight_raw_call",
+    )
+    def generate_raw_call(self, *, ctx: StmtGenCtx, **_) -> Optional[ast.Expr]:
+        call = self.expr_generator.generate_raw_call_call(
+            ctx.context,
+            self.expr_generator.root_depth(),
+            target_type=None,
+        )
+        if call is None:
+            return None
         return ast.Expr(value=call)
 
     def generate_assert(self, context, parent: Optional[ast.VyperNode]) -> ast.Assert:

@@ -255,6 +255,43 @@ class ExprGenerator(BaseGenerator):
             return False
         return not ctx.context.is_module_scope
 
+    def _raw_call_target_spec(
+        self, target_type: Optional[VyperType]
+    ) -> Optional[tuple[str, int]]:
+        if target_type is None:
+            return "void", 0
+        if isinstance(target_type, BoolT):
+            return "bool", 0
+        if isinstance(target_type, BytesT):
+            if target_type.length < 1:
+                return None
+            return "bytes", target_type.length
+        if isinstance(target_type, TupleT) and len(target_type.member_types) == 2:
+            first_t, second_t = target_type.member_types
+            if (
+                first_t.compare_type(BoolT())
+                and isinstance(second_t, BytesT)
+                and second_t.length > 0
+            ):
+                return "tuple", second_t.length
+        return None
+
+    def can_generate_raw_call(
+        self,
+        context: GenerationContext,
+        target_type: Optional[VyperType],
+    ) -> bool:
+        if context.is_module_scope:
+            return False
+        if context.current_mutability in (ExprMutability.CONST, ExprMutability.PURE):
+            return False
+        if context.current_function_mutability == StateMutability.PURE:
+            return False
+        return self._raw_call_target_spec(target_type) is not None
+
+    def _is_raw_call_expr_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        return self.can_generate_raw_call(ctx.context, ctx.target_type)
+
     def _find_deref_bases(
         self,
         *,
@@ -339,6 +376,9 @@ class ExprGenerator(BaseGenerator):
 
     def _weight_convert(self, **_) -> float:
         return self.cfg.convert_weight
+
+    def _weight_raw_call(self, **_) -> float:
+        return self.cfg.raw_call_weight
 
     def _weight_attribute(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
@@ -467,6 +507,106 @@ class ExprGenerator(BaseGenerator):
             return src_expr
 
         return None
+
+    def generate_raw_call_call(
+        self,
+        context: GenerationContext,
+        depth: int,
+        *,
+        target_type: Optional[VyperType],
+    ) -> Optional[ast.Call]:
+        if not self.can_generate_raw_call(context, target_type):
+            return None
+
+        target_spec = self._raw_call_target_spec(target_type)
+        if target_spec is None:
+            return None
+
+        target_kind, target_typ_len = target_spec
+        uint256_t = IntegerT(False, 256)
+        bool_t = BoolT()
+        arg_depth = self.child_depth(depth)
+
+        force_static_call = (
+            context.current_function_mutability == StateMutability.VIEW
+        )
+        if force_static_call:
+            is_static_call = True
+        else:
+            is_static_call = (
+                self.rng.random() < self.cfg.raw_call_set_is_static_call_prob
+            )
+
+        revert_on_failure = target_kind in {"void", "bytes"}
+
+        max_outsize = 0
+        max_outsize_optional = target_kind in {"void", "bool"}
+        set_max_outsize = (
+            not max_outsize_optional
+            or self.rng.random() < self.cfg.raw_call_set_max_outsize_prob
+        )
+        if set_max_outsize:
+            max_outsize = self.rng.randint(0, target_typ_len)
+            if target_kind in {"bytes", "tuple"} and max_outsize == 0:
+                max_outsize = self.rng.randint(1, target_typ_len)
+
+        to_expr = self.generate(AddressT(), context, arg_depth)
+        data_expr = self.generate(BytesT(self.rng.randint(0, 256)), context, arg_depth)
+
+        func_node = ast.Name(id="raw_call")
+        func_node._metadata = {}
+        if (
+            self.function_registry is not None
+            and "raw_call" in self.function_registry.builtins
+        ):
+            func_node._metadata["type"] = self.function_registry.builtins["raw_call"]
+
+        keywords: list[ast.keyword] = []
+        if set_max_outsize:
+            keywords.append(
+                ast.keyword(
+                    arg="max_outsize",
+                    value=ast_builder.uint256_literal(max_outsize),
+                )
+            )
+
+        if (
+            not is_static_call
+            and self.rng.random() < self.cfg.raw_call_set_value_prob
+        ):
+            randexpr = self.generate(uint256_t, context, arg_depth)
+            wei_scale = ast_builder.uint256_literal(10**18)
+            value_expr = ast.BinOp(left=randexpr, op=ast.Mod(), right=wei_scale)
+            value_expr._metadata = {"type": uint256_t}
+            keywords.append(ast.keyword(arg="value", value=value_expr))
+
+        if is_static_call:
+            keywords.append(
+                ast.keyword(arg="is_static_call", value=ast_builder.literal(True, bool_t))
+            )
+
+        keywords.append(
+            ast.keyword(
+                arg="revert_on_failure",
+                value=ast_builder.literal(revert_on_failure, bool_t),
+            )
+        )
+
+        call_node = ast.Call(func=func_node, args=[to_expr, data_expr], keywords=keywords)
+
+        if target_kind == "void":
+            ret_type = None
+        elif target_kind == "bool":
+            ret_type = BoolT()
+        elif target_kind == "bytes":
+            ret_type = BytesT(max_outsize)
+        elif target_kind == "tuple":
+            ret_type = TupleT((BoolT(), BytesT(max_outsize)))
+        else:
+            return None
+
+        call_node._metadata = {"type": ret_type}
+        return call_node
 
     # Strategy methods
 
@@ -1249,6 +1389,20 @@ class ExprGenerator(BaseGenerator):
     )
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
+
+    @strategy(
+        name="expr.raw_call",
+        tags=frozenset({"expr", "recursive"}),
+        type_classes=(BoolT, BytesT, TupleT),
+        is_applicable="_is_raw_call_expr_applicable",
+        weight="_weight_raw_call",
+    )
+    def _generate_raw_call_expr(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Call]:
+        return self.generate_raw_call_call(
+            ctx.context,
+            ctx.depth,
+            target_type=ctx.target_type,
+        )
 
     @strategy(
         name="expr.func_call",
