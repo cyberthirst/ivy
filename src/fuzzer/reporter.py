@@ -847,21 +847,6 @@ class FuzzerReporter:
         print(f"\nTotal scenarios executed: {self.total_scenarios}")
         print(f"Total divergences found: {self.divergences}")
 
-        print("\nDeployment Statistics:")
-        print(f"  Successful deployments: {self.successful_deployments}")
-        print(f"  Failed deployments: {self.deployment_failures}")
-        print(f"  Compilation failures: {self.compilation_failures}")
-        print(f"  Compiler crashes: {self.compiler_crashes}")
-
-        print("\nCall Statistics:")
-        print(f"  Successful calls: {self.successful_calls}")
-        print(f"  Failed calls: {self.call_failures}")
-
-        # Print success rates
-        print("\nSuccess Rates:")
-        print(f"  Deployment success rate: {self.get_deployment_success_rate():.2f}%")
-        print(f"  Call success rate: {self.get_call_success_rate():.2f}%")
-
         print("=" * 60 + "\n")
 
     def _format_duration(self, seconds: float) -> str:
