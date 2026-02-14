@@ -105,7 +105,7 @@ class ExprGenerator(BaseGenerator):
             "keccak256": self._builtin_keccak256,
             "concat": self._builtin_concat,
             "convert": self._builtin_convert,
-            #"slice": self._builtin_slice,
+            "slice": self._builtin_slice,
         }
 
     def generate(
@@ -1646,106 +1646,93 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         **_,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        # Generate slice with dynamic expressions for start/length.
-        # Bias towards valid slices, but still produce some invalid
-        # ones to ensure compiler/runtime checks are exercised.
         if not isinstance(target_type, (BytesT, StringT)):
             return None
+        if target_type.length < 1:
+            return None
 
-        cfg = self.cfg
-        builtins = self.function_registry.builtins if self.function_registry else {}
-        ret_len = target_type.length
-
-        # Choose source type:
-        # - For String target, must slice a String
-        # - For Bytes target, pick Bytes[..] or sometimes bytes32
-        if isinstance(target_type, StringT):
-            arg_len = ret_len + self.rng.randint(0, 32)
-            src_t = StringT(arg_len)
-        else:
-            if self.rng.random() < cfg.slice_use_bytes32_source_prob:
-                src_t = BytesM_T(32)
-                arg_len = 32
-            else:
-                arg_len = ret_len + self.rng.randint(0, 32)
-                src_t = BytesT(arg_len)
-
-        # Generate the source expression
+        target_bound = target_type.length
+        target_is_string = isinstance(target_type, StringT)
+        uint256_t = IntegerT(False, 256)
         arg_depth = self.child_depth(depth)
-        arg0 = self.generate(src_t, context, arg_depth)
 
-        # Build len(arg0) where applicable (Bytes/String only)
-        len_ret_t = IntegerT(False, 256)
-        if isinstance(src_t, (BytesT, StringT)):
-            len_arg = arg0
-            len_call = ast_builder.builtin_call("len", [len_arg], len_ret_t, builtins)
+        def _folded_uint256(node: ast.VyperNode) -> tuple[str, Optional[int]]:
+            status, folded = fold_constant_expression_status(node, context.constants)
+            if status == "value" and isinstance(folded, ast.Int) and folded.value >= 0:
+                return status, folded.value
+            assert status != "invalid_constant"
+            return status, None
+
+        def _slice_ret_type(length: int) -> VyperType:
+            return StringT(length) if target_is_string else BytesT(length)
+
+        if target_is_string:
+            src_req_t: VyperType = StringT(max(target_bound, 1000))
+        elif self.rng.random() < 0.5:
+            src_req_t = BytesM_T(32)
         else:
-            # bytes32 has fixed length 32
-            len_call = ast_builder.uint256_literal(32)
+            src_req_t = BytesT(max(target_bound, 1000))
 
-        # Random uint expressions to feed into min/max
-        rand_u = self.generate(IntegerT(False, 256), context, arg_depth)
-        rand_v = self.generate(IntegerT(False, 256), context, arg_depth)
+        arg0 = self.generate(src_req_t, context, arg_depth)
+        src_t = self._expr_type(arg0)
+        src_bound = src_t.length
 
-        # Valid vs invalid selection
-        make_valid = self.rng.random() < cfg.slice_valid_prob
+        # If non-literal length would infer a larger bound than the target,
+        # force a literal length so assignment remains type-compatible.
+        force_literal_len = src_bound > target_bound
 
-        if make_valid:
-            # Start: if len == 0 -> 0 else rand % len
-            one = ast_builder.uint256_literal(1)
-            zero = ast_builder.uint256_literal(0)
+        start_expr = self.generate(uint256_t, context, arg_depth)
+        start_status, start_value = _folded_uint256(start_expr)
+        if (
+            start_statues == "value" and start_value >= src_bound
+        ):
+            start_expr = ast_builder.uint256_literal(self.rng.randint(0, src_bound - 1))
+            start_value = start_expr.value
 
-            len_is_zero = ast_builder.compare(len_call, ast.Eq(), zero)
-            start_else = ast_builder.uint256_binop(rand_u, ast.Mod(), len_call)
-            a1 = ast_builder.ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+        def _pick_literal_len() -> Optional[int]:
+            max_len = min(target_bound, src_bound)
+            if start_value is not None:
+                max_len = min(max_len, src_bound - start_value)
+            assert max_len >= 1
+            return self.rng.randint(1, max_len)
 
-            # remaining = len - start
-            remaining = ast_builder.uint256_binop(len_call, ast.Sub(), a1)
+        use_literal_len = force_literal_len or self.rng.random() < 0.1
+        # TODO this should be use_constexpr len
+        if use_literal_len:
+            literal_len = _pick_literal_len()
+            length_expr = ast_builder.uint256_literal(literal_len)
+            ret_t = _slice_ret_type(literal_len)
+            assert target_type.compare_type(ret_t):
+                return None
+            return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
 
-            # length: if remaining == 0 -> 1 (will be invalid but rare)
-            # else min((rand_v % bound)+1, remaining) where bound = ret_len (if >0) else remaining
-            rem_is_zero = ast_builder.compare(remaining, ast.Eq(), zero)
-            if ret_len > 0:
-                bound = ast_builder.uint256_literal(ret_len)
-            else:
-                bound = remaining
-            # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
-            rand_mod = ast_builder.uint256_binop(rand_v, ast.Mod(), bound)
-            plus_one = ast_builder.uint256_binop(rand_mod, ast.Add(), one)
-            len_else = ast_builder.builtin_call(
-                "min", [plus_one, remaining], len_ret_t, builtins
-            )
-            a2 = ast_builder.ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
+        length_expr = self.generate(uint256_t, context, arg_depth)
+        len_status, len_value = _folded_uint256(length_expr)
+        if len_status == "value":
+            max_const_len = target_bound
+            if start_value is not None:
+                max_const_len = min(max_const_len, src_bound - start_value)
+            if (
+                len_value is None
+                or len_value < 1
+                or max_const_len < 1
+                or len_value > max_const_len
+            ):
+                if max_const_len < 1:
+                    return None
+                len_value = self.rng.randint(1, max_const_len)
+                length_expr = ast_builder.uint256_literal(len_value)
+            ret_t = _slice_ret_type(len_value)
         else:
-            # Intentionally produce out-of-bounds in a dynamic way
-            one = ast_builder.uint256_literal(1)
-            two = ast_builder.uint256_literal(2)
-            ten = ast_builder.uint256_literal(10)
+            ret_t = _slice_ret_type(src_bound)
+            if not target_type.compare_type(ret_t):
+                literal_len = _pick_literal_len()
+                if literal_len is None:
+                    return None
+                length_expr = ast_builder.uint256_literal(literal_len)
+                ret_t = _slice_ret_type(literal_len)
 
-            choice = self.rng.random()
-            if choice < cfg.slice_invalid_start_at_len_prob:
-                # start = len(arg0) (or more); length = 1
-                a1 = len_call
-                a2 = one
-            elif choice < cfg.slice_invalid_start_plus_rand_prob:
-                # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
-                a1 = ast_builder.uint256_binop(
-                    len_call,
-                    ast.Add(),
-                    ast_builder.uint256_binop(rand_u, ast.Mod(), ten),
-                )
-                a2 = ast_builder.uint256_binop(
-                    ast_builder.uint256_binop(
-                        rand_v,
-                        ast.Mod(),
-                        ast_builder.uint256_literal(max(1, ret_len + 1)),
-                    ),
-                    ast.Add(),
-                    one,
-                )
-            else:
-                # start = (len(arg0) * 2); length = 1
-                a1 = ast_builder.uint256_binop(len_call, ast.Mult(), two)
-                a2 = one
+        if not target_type.compare_type(ret_t):
+            return None
 
-        return self._finalize_call(func_node, [arg0, a1, a2], target_type)
+        return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
