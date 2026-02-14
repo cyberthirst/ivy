@@ -388,6 +388,15 @@ class FuzzerReporter:
         return type(error).__name__
 
     @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
     def _merge_harness_stats(dst: RuntimeMetricsTotals, src: Any) -> None:
         fields = (
             "enumeration_calls",
@@ -480,10 +489,15 @@ class FuzzerReporter:
             self._clear_pending_metrics_state()
             return
 
-        self._pending_runtime_edges_sum += len(
-            getattr(artifacts, "runtime_edge_ids", set())
+        stmt_sites_total = getattr(artifacts, "runtime_stmt_sites_total", set())
+        branch_outcomes_total = getattr(
+            artifacts, "runtime_branch_outcomes_total", set()
         )
-        self._pending_runtime_edges_samples += 1
+        if stmt_sites_total or branch_outcomes_total:
+            self._pending_runtime_edges_sum += len(
+                getattr(artifacts, "runtime_edge_ids", set())
+            )
+            self._pending_runtime_edges_samples += 1
 
         contract_fingerprints = set(
             getattr(artifacts, "contract_fingerprints", set())
@@ -500,7 +514,6 @@ class FuzzerReporter:
         self._flush_contract_fingerprint_buffer()
 
         stmt_sites_seen = getattr(artifacts, "runtime_stmt_sites_seen", set())
-        stmt_sites_total = getattr(artifacts, "runtime_stmt_sites_total", set())
         if stmt_sites_total:
             self._pending_stmt_coverage_pct_sum += self._safe_pct(
                 len(stmt_sites_seen), len(stmt_sites_total)
@@ -509,9 +522,6 @@ class FuzzerReporter:
 
         branch_outcomes_seen = getattr(
             artifacts, "runtime_branch_outcomes_seen", set()
-        )
-        branch_outcomes_total = getattr(
-            artifacts, "runtime_branch_outcomes_total", set()
         )
         if branch_outcomes_total:
             self._pending_branch_coverage_pct_sum += self._safe_pct(
@@ -793,14 +803,22 @@ class FuzzerReporter:
         call_success_rate = self.get_runtime_call_success_rate()
         new_edges_interval = 0.0
         new_contracts_interval = 0.0
+        stmt_coverage_interval = 0.0
+        branch_coverage_interval = 0.0
         if snapshot is not None:
             coverage = snapshot.get("coverage", {})
             novelty = snapshot.get("novelty", {})
-            new_edges_interval = float(
+            new_edges_interval = self._safe_float(
                 coverage.get("runtime_edges_avg_per_scenario_interval", 0.0)
             )
-            new_contracts_interval = float(
+            new_contracts_interval = self._safe_float(
                 novelty.get("contracts_per_scenario_interval_avg", 0.0)
+            )
+            stmt_coverage_interval = self._safe_float(
+                coverage.get("stmt_coverage_pct_interval", 0.0)
+            )
+            branch_coverage_interval = self._safe_float(
+                coverage.get("branch_coverage_pct_interval", 0.0)
             )
 
         logging.info(
@@ -812,6 +830,8 @@ class FuzzerReporter:
             f"call_ok={call_success_rate:.1f}% | "
             f"avg_edges={new_edges_interval:.2f} | "
             f"avg_contracts={new_contracts_interval:.2f} | "
+            f"avg_stmt_cov={stmt_coverage_interval:.2f}% | "
+            f"avg_branch_cov={branch_coverage_interval:.2f}% | "
             f"rate={rate:.1f}/s"
         )
 

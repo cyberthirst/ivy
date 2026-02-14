@@ -184,7 +184,7 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
     assert first is not None
     assert first["coverage"]["stmt_coverage_pct"] is None
     assert first["coverage"]["branch_coverage_pct"] is None
-    assert first["coverage"]["runtime_edges_avg_per_scenario_interval"] == 2
+    assert first["coverage"]["runtime_edges_avg_per_scenario_interval"] == 0
     assert first["calls"]["calls_to_no_code_total"] == 1
     assert first["calls"]["calls_to_no_code_interval"] == 1
 
@@ -219,8 +219,8 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
         corpus_max_evolved=2,
     )
     assert second is not None
-    assert second["coverage"]["runtime_edges_avg_per_scenario"] == 2
-    assert second["coverage"]["runtime_edges_avg_per_scenario_interval"] == 2
+    assert second["coverage"]["runtime_edges_avg_per_scenario"] == 0
+    assert second["coverage"]["runtime_edges_avg_per_scenario_interval"] == 0
     assert second["novelty"]["contracts_per_scenario_interval_avg"] == 1
     assert second["calls"]["calls_to_no_code_total"] == 1
     assert second["calls"]["calls_to_no_code_interval"] == 0
@@ -502,7 +502,6 @@ def test_reporter_flushes_contract_fingerprints_on_save_statistics(tmp_path):
         "final-only"
     ]
     assert reporter._pending_unique_contract_fingerprints == set()
-
 
 def test_reporter_uses_unknown_error_type_when_error_missing(tmp_path):
     reporter = FuzzerReporter(seed=29, reports_dir=tmp_path)
