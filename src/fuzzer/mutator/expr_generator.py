@@ -105,7 +105,7 @@ class ExprGenerator(BaseGenerator):
             "keccak256": self._builtin_keccak256,
             "concat": self._builtin_concat,
             "convert": self._builtin_convert,
-            #"slice": self._builtin_slice,
+            "slice": self._builtin_slice,
         }
 
     def generate(
@@ -498,7 +498,12 @@ class ExprGenerator(BaseGenerator):
         if isinstance(ctx.target_type, InterfaceT):
             return self._generate_interface_literal(ctx)
         value = self.literal_generator.generate(ctx.target_type)
-        return ast_builder.literal(value, ctx.target_type)
+        literal_type = ctx.target_type
+        if isinstance(ctx.target_type, BytesT):
+            literal_type = BytesT(len(value))
+        elif isinstance(ctx.target_type, StringT):
+            literal_type = StringT(len(value))
+        return ast_builder.literal(value, literal_type)
 
     def _generate_array_literal(self, ctx: ExprGenCtx) -> ast.List:
         target_type = ctx.target_type
@@ -660,9 +665,9 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
+        node, node_t = built
         assert isinstance(node, ast.Attribute)
-        node._metadata["type"] = ctx.target_type
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
@@ -692,9 +697,9 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
+        node, node_t = built
         assert isinstance(node, ast.Subscript)
-        node._metadata["type"] = ctx.target_type
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
@@ -726,8 +731,8 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
-        node._metadata["type"] = ctx.target_type
+        node, node_t = built
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
@@ -1559,6 +1564,33 @@ class ExprGenerator(BaseGenerator):
                 return typ.length
             return None
 
+        def folded_arg_length(node: ast.VyperNode) -> Optional[int]:
+            status, folded = fold_constant_expression_status(node, context.constants)
+            if status != "value":
+                return None
+            assert folded is not None
+
+            if isinstance(folded, ast.Bytes):
+                return len(folded.value)
+            if isinstance(folded, ast.Str):
+                return len(folded.value.encode("utf-8", errors="surrogateescape"))
+
+            folded_t = self._expr_type(folded)
+            if isinstance(folded_t, BytesM_T):
+                return folded_t.length
+            return None
+
+        def arg_return_length(node: ast.VyperNode, fallback_capacity: int) -> int:
+            folded_len = folded_arg_length(node)
+            if folded_len is not None:
+                return folded_len
+
+            expr_t = self._expr_type(node)
+            expr_cap = arg_capacity(expr_t) if expr_t is not None else None
+            if expr_cap is not None:
+                return expr_cap
+            return fallback_capacity
+
         # Candidate-driven pass: consume compatible in-scope expressions first.
         scope_candidates = []
         for name, var_info in context.find_matching_vars(None):
@@ -1585,7 +1617,7 @@ class ExprGenerator(BaseGenerator):
                 name, var_info, cap = pool.pop(idx)
                 expr = self._generate_variable_ref((name, var_info), context)
                 args.append(expr)
-                arg_caps.append(cap)
+                arg_caps.append(arg_return_length(expr, cap))
                 remaining -= cap
 
         while len(args) < k:
@@ -1615,7 +1647,7 @@ class ExprGenerator(BaseGenerator):
                         t = BytesM_T(m)
                         expr = self.generate(t, context, arg_depth)
                         args.append(expr)
-                        arg_caps.append(m)
+                        arg_caps.append(arg_return_length(expr, m))
                         remaining -= m
                         continue
 
@@ -1626,7 +1658,7 @@ class ExprGenerator(BaseGenerator):
                     expr = self.generate(t, context, arg_depth)
 
             args.append(expr)
-            arg_caps.append(n)
+            arg_caps.append(arg_return_length(expr, n))
             remaining -= n
 
         self.rng.shuffle(args)
@@ -1641,106 +1673,99 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         **_,
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        # Generate slice with dynamic expressions for start/length.
-        # Bias towards valid slices, but still produce some invalid
-        # ones to ensure compiler/runtime checks are exercised.
         if not isinstance(target_type, (BytesT, StringT)):
             return None
+        if target_type.length < 1:
+            return None
 
-        cfg = self.cfg
-        builtins = self.function_registry.builtins if self.function_registry else {}
-        ret_len = target_type.length
-
-        # Choose source type:
-        # - For String target, must slice a String
-        # - For Bytes target, pick Bytes[..] or sometimes bytes32
-        if isinstance(target_type, StringT):
-            arg_len = ret_len + self.rng.randint(0, 32)
-            src_t = StringT(arg_len)
-        else:
-            if self.rng.random() < cfg.slice_use_bytes32_source_prob:
-                src_t = BytesM_T(32)
-                arg_len = 32
-            else:
-                arg_len = ret_len + self.rng.randint(0, 32)
-                src_t = BytesT(arg_len)
-
-        # Generate the source expression
+        target_bound = target_type.length
+        target_is_string = isinstance(target_type, StringT)
+        uint256_t = IntegerT(False, 256)
         arg_depth = self.child_depth(depth)
-        arg0 = self.generate(src_t, context, arg_depth)
 
-        # Build len(arg0) where applicable (Bytes/String only)
-        len_ret_t = IntegerT(False, 256)
-        if isinstance(src_t, (BytesT, StringT)):
-            len_arg = arg0
-            len_call = ast_builder.builtin_call("len", [len_arg], len_ret_t, builtins)
-        else:
-            # bytes32 has fixed length 32
-            len_call = ast_builder.uint256_literal(32)
+        def _folded_uint256(node: ast.VyperNode) -> tuple[str, Optional[int]]:
+            status, folded = fold_constant_expression_status(node, context.constants)
+            if status == "value" and isinstance(folded, ast.Int) and folded.value >= 0:
+                return status, folded.value
+            return status, None
 
-        # Random uint expressions to feed into min/max
-        rand_u = self.generate(IntegerT(False, 256), context, arg_depth)
-        rand_v = self.generate(IntegerT(False, 256), context, arg_depth)
+        def _slice_ret_type(length: int) -> VyperType:
+            return StringT(length) if target_is_string else BytesT(length)
 
-        # Valid vs invalid selection
-        make_valid = self.rng.random() < cfg.slice_valid_prob
+        def _max_constexpr_len(start_const: Optional[int]) -> int:
+            max_len = min(target_bound, src_bound)
+            if start_const is not None:
+                max_len = min(max_len, src_bound - start_const)
+            return max_len
 
-        if make_valid:
-            # Start: if len == 0 -> 0 else rand % len
-            one = ast_builder.uint256_literal(1)
-            zero = ast_builder.uint256_literal(0)
+        def _constexpr_len_predicate(
+            length_expr: ast.VyperNode, start_const: Optional[int]
+        ) -> bool:
+            status, value = _folded_uint256(length_expr)
+            if status != "value" or value is None:
+                return False
+            max_len = _max_constexpr_len(start_const)
+            return 1 <= value <= max_len
 
-            len_is_zero = ast_builder.compare(len_call, ast.Eq(), zero)
-            start_else = ast_builder.uint256_binop(rand_u, ast.Mod(), len_call)
-            a1 = ast_builder.ifexp(len_is_zero, zero, start_else, IntegerT(False, 256))
+        def _generate_constexpr_len(
+            *, start_const: Optional[int], retries: int = 5
+        ) -> Optional[tuple[ast.VyperNode, int]]:
+            max_len = _max_constexpr_len(start_const)
+            if max_len < 1:
+                return None
 
-            # remaining = len - start
-            remaining = ast_builder.uint256_binop(len_call, ast.Sub(), a1)
-
-            # length: if remaining == 0 -> 1 (will be invalid but rare)
-            # else min((rand_v % bound)+1, remaining) where bound = ret_len (if >0) else remaining
-            rem_is_zero = ast_builder.compare(remaining, ast.Eq(), zero)
-            if ret_len > 0:
-                bound = ast_builder.uint256_literal(ret_len)
-            else:
-                bound = remaining
-            # Avoid modulo by 0 by ensuring bound >= 1 when it's a literal
-            rand_mod = ast_builder.uint256_binop(rand_v, ast.Mod(), bound)
-            plus_one = ast_builder.uint256_binop(rand_mod, ast.Add(), one)
-            len_else = ast_builder.builtin_call(
-                "min", [plus_one, remaining], len_ret_t, builtins
+            expr = self._retry(
+                make_candidate=lambda: self.generate(uint256_t, context, arg_depth),
+                reject_if=lambda candidate: not _constexpr_len_predicate(
+                    candidate, start_const
+                ),
+                retries=retries,
+                fallback=lambda: ast_builder.uint256_literal(
+                    self.rng.randint(1, max_len)
+                ),
             )
-            a2 = ast_builder.ifexp(rem_is_zero, one, len_else, IntegerT(False, 256))
+            status, value = _folded_uint256(expr)
+            assert status == "value" and value is not None and 1 <= value <= max_len
+            return expr, value
+
+        if target_is_string:
+            src_req_t: VyperType = StringT(max(target_bound, 1000))
+        elif self.rng.random() < 0.5:
+            src_req_t = BytesM_T(32)
         else:
-            # Intentionally produce out-of-bounds in a dynamic way
-            one = ast_builder.uint256_literal(1)
-            two = ast_builder.uint256_literal(2)
-            ten = ast_builder.uint256_literal(10)
+            src_req_t = BytesT(max(target_bound, 1000))
 
-            choice = self.rng.random()
-            if choice < cfg.slice_invalid_start_at_len_prob:
-                # start = len(arg0) (or more); length = 1
-                a1 = len_call
-                a2 = one
-            elif choice < cfg.slice_invalid_start_plus_rand_prob:
-                # start = len(arg0) + (rand % 10); length = (rand_v % (ret_len+1)) + 1
-                a1 = ast_builder.uint256_binop(
-                    len_call,
-                    ast.Add(),
-                    ast_builder.uint256_binop(rand_u, ast.Mod(), ten),
-                )
-                a2 = ast_builder.uint256_binop(
-                    ast_builder.uint256_binop(
-                        rand_v,
-                        ast.Mod(),
-                        ast_builder.uint256_literal(max(1, ret_len + 1)),
-                    ),
-                    ast.Add(),
-                    one,
-                )
-            else:
-                # start = (len(arg0) * 2); length = 1
-                a1 = ast_builder.uint256_binop(len_call, ast.Mult(), two)
-                a2 = one
+        arg0 = self.generate(src_req_t, context, arg_depth)
+        src_t = self._expr_type(arg0)
+        assert src_t is not None
 
-        return self._finalize_call(func_node, [arg0, a1, a2], target_type)
+        src_bound = src_t.length
+        if src_bound < 1:
+            return None
+        force_constexpr_len = src_bound > target_bound
+
+        start_expr = self.generate(uint256_t, context, arg_depth)
+        start_status, start_value = _folded_uint256(start_expr)
+        if start_status == "value" and start_value >= src_bound:
+            start_expr = ast_builder.uint256_literal(self.rng.randint(0, src_bound - 1))
+            start_value = start_expr.value
+
+        use_constexpr_len = force_constexpr_len or self.rng.random() < 0.1
+        if use_constexpr_len:
+            constexpr = _generate_constexpr_len(start_const=start_value, retries=5)
+            length_expr, length_value = constexpr
+            ret_t = _slice_ret_type(length_value)
+            return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
+
+        length_expr = self.generate(uint256_t, context, arg_depth)
+        len_status, len_value = _folded_uint256(length_expr)
+        if len_status == "value":
+            max_const_len = _max_constexpr_len(start_value)
+            if not (1 <= len_value <= max_const_len):
+                constexpr = _generate_constexpr_len(start_const=start_value, retries=5)
+                length_expr, len_value = constexpr
+            ret_t = _slice_ret_type(len_value)
+        else:
+            ret_t = _slice_ret_type(src_bound)
+
+        return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
