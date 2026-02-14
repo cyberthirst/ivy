@@ -5,9 +5,10 @@ Ivy implementation of the scenario runner.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 import ivy
+from vyper.compiler.phases import CompilerData
 from ivy.frontend.loader import loads_from_solc_json
 from ivy.frontend.vyper_contract import VyperContract
 from ivy.types import Address
@@ -20,9 +21,6 @@ from fuzzer.runner.base_scenario_runner import (
 )
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import DeploymentTrace, Env
-
-if TYPE_CHECKING:
-    from vyper.compiler.phases import CompilerData
 
 
 @dataclass
