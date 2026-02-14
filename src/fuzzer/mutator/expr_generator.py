@@ -665,9 +665,9 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
+        node, node_t = built
         assert isinstance(node, ast.Attribute)
-        node._metadata["type"] = ctx.target_type
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
@@ -697,9 +697,9 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
+        node, node_t = built
         assert isinstance(node, ast.Subscript)
-        node._metadata["type"] = ctx.target_type
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
@@ -731,8 +731,8 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
-        node, _ = built
-        node._metadata["type"] = ctx.target_type
+        node, node_t = built
+        node._metadata["type"] = node_t
         return node
 
     @strategy(
