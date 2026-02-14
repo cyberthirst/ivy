@@ -1660,11 +1660,46 @@ class ExprGenerator(BaseGenerator):
             status, folded = fold_constant_expression_status(node, context.constants)
             if status == "value" and isinstance(folded, ast.Int) and folded.value >= 0:
                 return status, folded.value
-            assert status != "invalid_constant"
             return status, None
 
         def _slice_ret_type(length: int) -> VyperType:
             return StringT(length) if target_is_string else BytesT(length)
+
+        def _max_constexpr_len(start_const: Optional[int]) -> int:
+            max_len = min(target_bound, src_bound)
+            if start_const is not None:
+                max_len = min(max_len, src_bound - start_const)
+            return max_len
+
+        def _constexpr_len_predicate(
+            length_expr: ast.VyperNode, start_const: Optional[int]
+        ) -> bool:
+            status, value = _folded_uint256(length_expr)
+            if status != "value" or value is None:
+                return False
+            max_len = _max_constexpr_len(start_const)
+            return 1 <= value <= max_len
+
+        def _generate_constexpr_len(
+            *, start_const: Optional[int], retries: int = 5
+        ) -> Optional[tuple[ast.VyperNode, int]]:
+            max_len = _max_constexpr_len(start_const)
+            if max_len < 1:
+                return None
+
+            expr = self._retry(
+                make_candidate=lambda: self.generate(uint256_t, context, arg_depth),
+                reject_if=lambda candidate: not _constexpr_len_predicate(
+                    candidate, start_const
+                ),
+                retries=retries,
+                fallback=lambda: ast_builder.uint256_literal(
+                    self.rng.randint(1, max_len)
+                ),
+            )
+            status, value = _folded_uint256(expr)
+            assert status == "value" and value is not None and 1 <= value <= max_len
+            return expr, value
 
         if target_is_string:
             src_req_t: VyperType = StringT(max(target_bound, 1000))
@@ -1675,64 +1710,35 @@ class ExprGenerator(BaseGenerator):
 
         arg0 = self.generate(src_req_t, context, arg_depth)
         src_t = self._expr_type(arg0)
-        src_bound = src_t.length
+        assert src_t is not None
 
-        # If non-literal length would infer a larger bound than the target,
-        # force a literal length so assignment remains type-compatible.
-        force_literal_len = src_bound > target_bound
+        src_bound = src_t.length
+        if src_bound < 1:
+            return None
+        force_constexpr_len = src_bound > target_bound
 
         start_expr = self.generate(uint256_t, context, arg_depth)
         start_status, start_value = _folded_uint256(start_expr)
-        if (
-            start_statues == "value" and start_value >= src_bound
-        ):
+        if start_status == "value" and start_value >= src_bound:
             start_expr = ast_builder.uint256_literal(self.rng.randint(0, src_bound - 1))
             start_value = start_expr.value
 
-        def _pick_literal_len() -> Optional[int]:
-            max_len = min(target_bound, src_bound)
-            if start_value is not None:
-                max_len = min(max_len, src_bound - start_value)
-            assert max_len >= 1
-            return self.rng.randint(1, max_len)
-
-        use_literal_len = force_literal_len or self.rng.random() < 0.1
-        # TODO this should be use_constexpr len
-        if use_literal_len:
-            literal_len = _pick_literal_len()
-            length_expr = ast_builder.uint256_literal(literal_len)
-            ret_t = _slice_ret_type(literal_len)
-            assert target_type.compare_type(ret_t):
-                return None
+        use_constexpr_len = force_constexpr_len or self.rng.random() < 0.1
+        if use_constexpr_len:
+            constexpr = _generate_constexpr_len(start_const=start_value, retries=5)
+            length_expr, length_value = constexpr
+            ret_t = _slice_ret_type(length_value)
             return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
 
         length_expr = self.generate(uint256_t, context, arg_depth)
         len_status, len_value = _folded_uint256(length_expr)
         if len_status == "value":
-            max_const_len = target_bound
-            if start_value is not None:
-                max_const_len = min(max_const_len, src_bound - start_value)
-            if (
-                len_value is None
-                or len_value < 1
-                or max_const_len < 1
-                or len_value > max_const_len
-            ):
-                if max_const_len < 1:
-                    return None
-                len_value = self.rng.randint(1, max_const_len)
-                length_expr = ast_builder.uint256_literal(len_value)
+            max_const_len = _max_constexpr_len(start_value)
+            if not (1 <= len_value <= max_const_len):
+                constexpr = _generate_constexpr_len(start_const=start_value, retries=5)
+                length_expr, len_value = constexpr
             ret_t = _slice_ret_type(len_value)
         else:
             ret_t = _slice_ret_type(src_bound)
-            if not target_type.compare_type(ret_t):
-                literal_len = _pick_literal_len()
-                if literal_len is None:
-                    return None
-                length_expr = ast_builder.uint256_literal(literal_len)
-                ret_t = _slice_ret_type(literal_len)
-
-        if not target_type.compare_type(ret_t):
-            return None
 
         return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
