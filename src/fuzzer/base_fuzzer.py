@@ -85,7 +85,7 @@ class BaseFuzzer:
     def multi_runner(self) -> MultiRunner:
         if self._multi_runner is None:
             self._multi_runner = MultiRunner(
-                collect_storage_dumps=True,
+                collect_storage_dumps=self.harness_config.collect_storage_dumps,
             )
         return self._multi_runner
 

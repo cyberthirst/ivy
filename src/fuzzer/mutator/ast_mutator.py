@@ -604,8 +604,6 @@ class AstMutator(VyperNodeTransformer):
                 raise ValueError("CompilerData missing file path")
             source_key = str(resolved_path)
 
-            print(final_result)
-            print("===============")
             return MutationResult(
                 sources={source_key: final_result},
                 compilation_xfails=list(self.context.compilation_xfails),

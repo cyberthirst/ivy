@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, Set, TYPE_CHECKING
+from typing import Dict, Any, Optional, TYPE_CHECKING
 import time
 import json
 import logging
@@ -9,13 +9,12 @@ import traceback
 from pathlib import Path
 from datetime import datetime
 
-from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
-
 if TYPE_CHECKING:
     from .result_analyzer import AnalysisResult
     from fuzzer.runner.base_scenario_runner import ScenarioResult
 
 UNPARSABLE_INTEGRITY_SUM = "0" * 64
+CONTRACT_FINGERPRINT_LINE_BYTES = len(UNPARSABLE_INTEGRITY_SUM) + 1
 
 
 @dataclass
@@ -121,23 +120,27 @@ class FuzzerReporter:
     _last_snapshot_total_deployments: int = 0
     _last_snapshot_compilation_failures: int = 0
     _last_snapshot_compiler_crashes: int = 0
-    _seen_runtime_edges: Set[int] = field(default_factory=set)
-    _seen_contract_fingerprints: Set[str] = field(default_factory=set)
-    _seen_stmt_sites: Set[RuntimeStmtSite] = field(default_factory=set)
-    _seen_branch_outcomes: Set[RuntimeBranchOutcome] = field(default_factory=set)
-    _stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
-    _branch_outcomes_total: Set[RuntimeBranchOutcome] = field(default_factory=set)
+    _runtime_edges_sum: int = 0
+    _runtime_edges_samples: int = 0
+    _contracts_observed_sum: int = 0
+    _contracts_observed_samples: int = 0
+    _stmt_coverage_pct_sum: float = 0.0
+    _stmt_coverage_pct_samples: int = 0
+    _branch_coverage_pct_sum: float = 0.0
+    _branch_coverage_pct_samples: int = 0
     _runtime_totals: RuntimeMetricsTotals = field(default_factory=RuntimeMetricsTotals)
-    _pending_runtime_edge_ids: Set[int] = field(default_factory=set)
-    _pending_contract_fingerprints: Set[str] = field(default_factory=set)
-    _pending_stmt_sites_seen: Set[RuntimeStmtSite] = field(default_factory=set)
-    _pending_branch_outcomes_seen: Set[RuntimeBranchOutcome] = field(
-        default_factory=set
-    )
-    _pending_stmt_sites_total: Set[RuntimeStmtSite] = field(default_factory=set)
-    _pending_branch_outcomes_total: Set[RuntimeBranchOutcome] = field(
-        default_factory=set
-    )
+    _pending_runtime_edges_sum: int = 0
+    _pending_runtime_edges_samples: int = 0
+    _pending_contracts_observed_sum: int = 0
+    _pending_contracts_observed_samples: int = 0
+    _pending_stmt_coverage_pct_sum: float = 0.0
+    _pending_stmt_coverage_pct_samples: int = 0
+    _pending_branch_coverage_pct_sum: float = 0.0
+    _pending_branch_coverage_pct_samples: int = 0
+    _pending_unique_contract_fingerprints: set[str] = field(default_factory=set)
+    _pending_unique_contract_fingerprints_bytes: int = 0
+    _contract_fingerprints_path: Optional[Path] = None
+    _contract_fingerprint_flush_max_buffer_bytes: int = 100 * 1024 * 1024
 
     def record_compilation_failure(self):
         self.compilation_failures += 1
@@ -369,7 +372,7 @@ class FuzzerReporter:
         return (numerator / denominator) * 100.0
 
     @staticmethod
-    def _safe_rate(count: int, denominator: int | float) -> float:
+    def _safe_rate(count: int | float, denominator: int | float) -> float:
         if denominator <= 0:
             return 0.0
         return count / denominator
@@ -410,21 +413,36 @@ class FuzzerReporter:
                 getattr(dst, field_name) + int(getattr(src, field_name, 0)),
             )
 
-    @staticmethod
-    def _clear_pending_metrics_state(
-        pending_runtime_edge_ids: Set[int],
-        pending_contract_fingerprints: Set[str],
-        pending_stmt_sites_seen: Set[RuntimeStmtSite],
-        pending_branch_outcomes_seen: Set[RuntimeBranchOutcome],
-        pending_stmt_sites_total: Set[RuntimeStmtSite],
-        pending_branch_outcomes_total: Set[RuntimeBranchOutcome],
-    ) -> None:
-        pending_runtime_edge_ids.clear()
-        pending_contract_fingerprints.clear()
-        pending_stmt_sites_seen.clear()
-        pending_branch_outcomes_seen.clear()
-        pending_stmt_sites_total.clear()
-        pending_branch_outcomes_total.clear()
+    def _drain_contract_fingerprint_buffer(self) -> None:
+        if not self._pending_unique_contract_fingerprints:
+            return
+
+        assert self._contract_fingerprints_path is not None
+        self._contract_fingerprints_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._contract_fingerprints_path, "a") as f:
+            for fingerprint in self._pending_unique_contract_fingerprints:
+                f.write(fingerprint)
+                f.write("\n")
+
+        self._pending_unique_contract_fingerprints.clear()
+        self._pending_unique_contract_fingerprints_bytes = 0
+
+    def _flush_contract_fingerprint_buffer(self) -> None:
+        if self._pending_unique_contract_fingerprints_bytes < max(
+            1, self._contract_fingerprint_flush_max_buffer_bytes
+        ):
+            return
+        self._drain_contract_fingerprint_buffer()
+
+    def _clear_pending_metrics_state(self) -> None:
+        self._pending_runtime_edges_sum = 0
+        self._pending_runtime_edges_samples = 0
+        self._pending_contracts_observed_sum = 0
+        self._pending_contracts_observed_samples = 0
+        self._pending_stmt_coverage_pct_sum = 0.0
+        self._pending_stmt_coverage_pct_samples = 0
+        self._pending_branch_coverage_pct_sum = 0.0
+        self._pending_branch_coverage_pct_samples = 0
 
     def _reset_metrics_state(self) -> None:
         self._last_snapshot_elapsed_s = 0.0
@@ -435,22 +453,19 @@ class FuzzerReporter:
         self._last_snapshot_compilation_failures = 0
         self._last_snapshot_compiler_crashes = 0
 
-        self._seen_runtime_edges.clear()
-        self._seen_contract_fingerprints.clear()
-        self._seen_stmt_sites.clear()
-        self._seen_branch_outcomes.clear()
-        self._stmt_sites_total.clear()
-        self._branch_outcomes_total.clear()
+        self._runtime_edges_sum = 0
+        self._runtime_edges_samples = 0
+        self._contracts_observed_sum = 0
+        self._contracts_observed_samples = 0
+        self._stmt_coverage_pct_sum = 0.0
+        self._stmt_coverage_pct_samples = 0
+        self._branch_coverage_pct_sum = 0.0
+        self._branch_coverage_pct_samples = 0
+        self._pending_unique_contract_fingerprints.clear()
+        self._pending_unique_contract_fingerprints_bytes = 0
 
         self._runtime_totals = RuntimeMetricsTotals()
-        self._clear_pending_metrics_state(
-            self._pending_runtime_edge_ids,
-            self._pending_contract_fingerprints,
-            self._pending_stmt_sites_seen,
-            self._pending_branch_outcomes_seen,
-            self._pending_stmt_sites_total,
-            self._pending_branch_outcomes_total,
-        )
+        self._clear_pending_metrics_state()
 
     def ingest_run(self, analysis: AnalysisResult, artifacts: Any, *, debug_mode: bool):
         self.report(analysis, debug_mode=debug_mode)
@@ -462,34 +477,47 @@ class FuzzerReporter:
         # Avoid accumulating pending state when the metrics stream is disabled or
         # not initialized.
         if not self._metrics_enabled or self._metrics_path is None:
-            self._clear_pending_metrics_state(
-                self._pending_runtime_edge_ids,
-                self._pending_contract_fingerprints,
-                self._pending_stmt_sites_seen,
-                self._pending_branch_outcomes_seen,
-                self._pending_stmt_sites_total,
-                self._pending_branch_outcomes_total,
-            )
+            self._clear_pending_metrics_state()
             return
 
-        self._pending_runtime_edge_ids.update(
+        self._pending_runtime_edges_sum += len(
             getattr(artifacts, "runtime_edge_ids", set())
         )
-        self._pending_stmt_sites_seen.update(
-            getattr(artifacts, "runtime_stmt_sites_seen", set())
-        )
-        self._pending_branch_outcomes_seen.update(
-            getattr(artifacts, "runtime_branch_outcomes_seen", set())
-        )
-        self._pending_stmt_sites_total.update(
-            getattr(artifacts, "runtime_stmt_sites_total", set())
-        )
-        self._pending_branch_outcomes_total.update(
-            getattr(artifacts, "runtime_branch_outcomes_total", set())
-        )
-        self._pending_contract_fingerprints.update(
+        self._pending_runtime_edges_samples += 1
+
+        contract_fingerprints = set(
             getattr(artifacts, "contract_fingerprints", set())
         )
+        self._pending_contracts_observed_sum += len(contract_fingerprints)
+        self._pending_contracts_observed_samples += 1
+        new_fingerprints = contract_fingerprints.difference(
+            self._pending_unique_contract_fingerprints
+        )
+        self._pending_unique_contract_fingerprints.update(new_fingerprints)
+        self._pending_unique_contract_fingerprints_bytes += (
+            len(new_fingerprints) * CONTRACT_FINGERPRINT_LINE_BYTES
+        )
+        self._flush_contract_fingerprint_buffer()
+
+        stmt_sites_seen = getattr(artifacts, "runtime_stmt_sites_seen", set())
+        stmt_sites_total = getattr(artifacts, "runtime_stmt_sites_total", set())
+        if stmt_sites_total:
+            self._pending_stmt_coverage_pct_sum += self._safe_pct(
+                len(stmt_sites_seen), len(stmt_sites_total)
+            )
+            self._pending_stmt_coverage_pct_samples += 1
+
+        branch_outcomes_seen = getattr(
+            artifacts, "runtime_branch_outcomes_seen", set()
+        )
+        branch_outcomes_total = getattr(
+            artifacts, "runtime_branch_outcomes_total", set()
+        )
+        if branch_outcomes_total:
+            self._pending_branch_coverage_pct_sum += self._safe_pct(
+                len(branch_outcomes_seen), len(branch_outcomes_total)
+            )
+            self._pending_branch_coverage_pct_samples += 1
 
     def get_runtime_deployment_success_rate(self) -> float:
         return self._safe_pct(
@@ -504,6 +532,9 @@ class FuzzerReporter:
         )
 
     def start_metrics_stream(self, enabled: bool) -> None:
+        if self._metrics_enabled and self._contract_fingerprints_path is not None:
+            self._drain_contract_fingerprint_buffer()
+
         self._metrics_enabled = enabled
         self._reset_metrics_state()
         # If the reporter instance is reused across campaigns, treat the current
@@ -519,6 +550,7 @@ class FuzzerReporter:
         self._last_snapshot_compiler_crashes = self.compiler_crashes
         if not enabled:
             self._metrics_path = None
+            self._contract_fingerprints_path = None
             return
 
         stats_dir = self._get_run_reports_dir()
@@ -526,6 +558,9 @@ class FuzzerReporter:
         seed_part = str(self.seed) if self.seed is not None else "noseed"
         timestamp = datetime.now().strftime("%H%M%S")
         self._metrics_path = stats_dir / f"metrics_{seed_part}_{timestamp}.jsonl"
+        self._contract_fingerprints_path = (
+            stats_dir / f"contract_fingerprints_{seed_part}_{timestamp}.txt"
+        )
 
         logging.info(f"Interval metrics enabled at {self._metrics_path}")
 
@@ -536,17 +571,9 @@ class FuzzerReporter:
         corpus_seed_count: int,
         corpus_evolved_count: int,
         corpus_max_evolved: int,
-        include_coverage_percentages: bool,
     ) -> Optional[Dict[str, Any]]:
         if not self._metrics_enabled or self._metrics_path is None:
-            self._clear_pending_metrics_state(
-                self._pending_runtime_edge_ids,
-                self._pending_contract_fingerprints,
-                self._pending_stmt_sites_seen,
-                self._pending_branch_outcomes_seen,
-                self._pending_stmt_sites_total,
-                self._pending_branch_outcomes_total,
-            )
+            self._clear_pending_metrics_state()
             return None
 
         elapsed = self.get_elapsed_time()
@@ -587,32 +614,57 @@ class FuzzerReporter:
             self.compiler_crashes - self._last_snapshot_compiler_crashes
         )
 
-        prev_runtime_edges_total = len(self._seen_runtime_edges)
-        self._seen_runtime_edges.update(self._pending_runtime_edge_ids)
-        runtime_edges_total = len(self._seen_runtime_edges)
-        new_runtime_edges_interval = runtime_edges_total - prev_runtime_edges_total
+        self._runtime_edges_sum += self._pending_runtime_edges_sum
+        self._runtime_edges_samples += self._pending_runtime_edges_samples
+        runtime_edges_avg_per_scenario = self._safe_rate(
+            self._runtime_edges_sum,
+            self._runtime_edges_samples,
+        )
+        runtime_edges_avg_per_scenario_interval = self._safe_rate(
+            self._pending_runtime_edges_sum,
+            self._pending_runtime_edges_samples,
+        )
 
-        prev_contracts_total = len(self._seen_contract_fingerprints)
-        self._seen_contract_fingerprints.update(self._pending_contract_fingerprints)
-        contracts_seen_total = len(self._seen_contract_fingerprints)
-        new_contracts_interval = contracts_seen_total - prev_contracts_total
-
-        self._seen_stmt_sites.update(self._pending_stmt_sites_seen)
-        self._seen_branch_outcomes.update(self._pending_branch_outcomes_seen)
-        self._stmt_sites_total.update(self._pending_stmt_sites_total)
-        self._branch_outcomes_total.update(self._pending_branch_outcomes_total)
+        self._contracts_observed_sum += self._pending_contracts_observed_sum
+        self._contracts_observed_samples += self._pending_contracts_observed_samples
+        contracts_per_scenario_avg = self._safe_rate(
+            self._contracts_observed_sum,
+            self._contracts_observed_samples,
+        )
+        contracts_per_scenario_interval_avg = self._safe_rate(
+            self._pending_contracts_observed_sum,
+            self._pending_contracts_observed_samples,
+        )
 
         stmt_coverage_pct: Optional[float] = None
         branch_coverage_pct: Optional[float] = None
-        if include_coverage_percentages:
-            if self._stmt_sites_total:
-                stmt_coverage_pct = self._safe_pct(
-                    len(self._seen_stmt_sites), len(self._stmt_sites_total)
-                )
-            if self._branch_outcomes_total:
-                branch_coverage_pct = self._safe_pct(
-                    len(self._seen_branch_outcomes), len(self._branch_outcomes_total)
-                )
+        stmt_coverage_pct_interval: Optional[float] = None
+        branch_coverage_pct_interval: Optional[float] = None
+        self._stmt_coverage_pct_sum += self._pending_stmt_coverage_pct_sum
+        self._stmt_coverage_pct_samples += self._pending_stmt_coverage_pct_samples
+        self._branch_coverage_pct_sum += self._pending_branch_coverage_pct_sum
+        self._branch_coverage_pct_samples += self._pending_branch_coverage_pct_samples
+
+        if self._stmt_coverage_pct_samples:
+            stmt_coverage_pct = self._safe_rate(
+                self._stmt_coverage_pct_sum,
+                self._stmt_coverage_pct_samples,
+            )
+        if self._branch_coverage_pct_samples:
+            branch_coverage_pct = self._safe_rate(
+                self._branch_coverage_pct_sum,
+                self._branch_coverage_pct_samples,
+            )
+        if self._pending_stmt_coverage_pct_samples:
+            stmt_coverage_pct_interval = self._safe_rate(
+                self._pending_stmt_coverage_pct_sum,
+                self._pending_stmt_coverage_pct_samples,
+            )
+        if self._pending_branch_coverage_pct_samples:
+            branch_coverage_pct_interval = self._safe_rate(
+                self._pending_branch_coverage_pct_sum,
+                self._pending_branch_coverage_pct_samples,
+            )
 
         deployment_attempts_total = self._runtime_totals.deployment_attempts
         deployment_successes_total = self._runtime_totals.deployment_successes
@@ -672,17 +724,23 @@ class FuzzerReporter:
                 ),
             },
             "coverage": {
-                "runtime_edges_total": runtime_edges_total,
-                "new_runtime_edges_interval": new_runtime_edges_interval,
-                "new_runtime_edges_per_sec": (
-                    new_runtime_edges_interval / delta_elapsed
+                "runtime_edges_avg_per_scenario": runtime_edges_avg_per_scenario,
+                "runtime_edges_avg_per_scenario_interval": (
+                    runtime_edges_avg_per_scenario_interval
+                ),
+                "runtime_edges_avg_per_sec_interval": self._safe_rate(
+                    self._pending_runtime_edges_sum, delta_elapsed
                 ),
                 "stmt_coverage_pct": stmt_coverage_pct,
                 "branch_coverage_pct": branch_coverage_pct,
+                "stmt_coverage_pct_interval": stmt_coverage_pct_interval,
+                "branch_coverage_pct_interval": branch_coverage_pct_interval,
             },
             "novelty": {
-                "contracts_seen_total": contracts_seen_total,
-                "new_contracts_interval": new_contracts_interval,
+                "contracts_per_scenario_avg": contracts_per_scenario_avg,
+                "contracts_per_scenario_interval_avg": (
+                    contracts_per_scenario_interval_avg
+                ),
             },
             "runtime_phase": {
                 "enumeration_calls": self._runtime_totals.enumeration_calls,
@@ -716,14 +774,7 @@ class FuzzerReporter:
         self._last_snapshot_total_deployments = all_deployments_total
         self._last_snapshot_compilation_failures = self.compilation_failures
         self._last_snapshot_compiler_crashes = self.compiler_crashes
-        self._clear_pending_metrics_state(
-            self._pending_runtime_edge_ids,
-            self._pending_contract_fingerprints,
-            self._pending_stmt_sites_seen,
-            self._pending_branch_outcomes_seen,
-            self._pending_stmt_sites_total,
-            self._pending_branch_outcomes_total,
-        )
+        self._clear_pending_metrics_state()
 
         return snapshot
 
@@ -740,13 +791,17 @@ class FuzzerReporter:
         rate = iteration / elapsed if elapsed > 0 else 0
         deployment_success_rate = self.get_runtime_deployment_success_rate()
         call_success_rate = self.get_runtime_call_success_rate()
-        new_edges_interval = 0
-        new_contracts_interval = 0
+        new_edges_interval = 0.0
+        new_contracts_interval = 0.0
         if snapshot is not None:
             coverage = snapshot.get("coverage", {})
             novelty = snapshot.get("novelty", {})
-            new_edges_interval = int(coverage.get("new_runtime_edges_interval", 0))
-            new_contracts_interval = int(novelty.get("new_contracts_interval", 0))
+            new_edges_interval = float(
+                coverage.get("runtime_edges_avg_per_scenario_interval", 0.0)
+            )
+            new_contracts_interval = float(
+                novelty.get("contracts_per_scenario_interval_avg", 0.0)
+            )
 
         logging.info(
             f"iter={iteration} | "
@@ -755,8 +810,8 @@ class FuzzerReporter:
             f"divergences={self.divergences} | "
             f"deploy_ok={deployment_success_rate:.1f}% | "
             f"call_ok={call_success_rate:.1f}% | "
-            f"new_edges={new_edges_interval} | "
-            f"new_contracts={new_contracts_interval} | "
+            f"avg_edges={new_edges_interval:.2f} | "
+            f"avg_contracts={new_contracts_interval:.2f} | "
             f"rate={rate:.1f}/s"
         )
 
@@ -928,6 +983,8 @@ class FuzzerReporter:
 
     def save_statistics(self):
         """Save the campaign statistics to a JSON file."""
+        self._drain_contract_fingerprint_buffer()
+
         stats_dir = self._get_run_reports_dir()
         stats_dir.mkdir(parents=True, exist_ok=True)
 
@@ -938,6 +995,11 @@ class FuzzerReporter:
         stats_data = self.to_dict()
         stats_data["timestamp"] = datetime.now().isoformat()
         stats_data["seed"] = self.seed
+        stats_data["contract_fingerprints_path"] = (
+            str(self._contract_fingerprints_path)
+            if self._contract_fingerprints_path is not None
+            else None
+        )
 
         with open(filepath, "w") as f:
             json.dump(stats_data, f, indent=2, default=str)

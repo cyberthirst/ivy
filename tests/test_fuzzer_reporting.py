@@ -114,7 +114,6 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path):
         corpus_seed_count=20,
         corpus_evolved_count=15,
         corpus_max_evolved=40,
-        include_coverage_percentages=True,
     )
 
     assert snapshot is not None
@@ -123,11 +122,11 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path):
     assert snapshot["calls"]["calls_to_no_code_total"] == 2
     assert snapshot["calls"]["calls_to_no_code_interval"] == 2
     assert snapshot["calls"]["calls_to_no_code_pct"] == (2 / 9) * 100
-    assert snapshot["coverage"]["runtime_edges_total"] == 3
-    assert snapshot["coverage"]["new_runtime_edges_interval"] == 3
+    assert snapshot["coverage"]["runtime_edges_avg_per_scenario"] == 3
+    assert snapshot["coverage"]["runtime_edges_avg_per_scenario_interval"] == 3
     assert snapshot["coverage"]["stmt_coverage_pct"] == 50.0
     assert snapshot["coverage"]["branch_coverage_pct"] == 50.0
-    assert snapshot["novelty"]["new_contracts_interval"] == 1
+    assert snapshot["novelty"]["contracts_per_scenario_interval_avg"] == 1
 
     assert reporter._metrics_path is not None
     lines = reporter._metrics_path.read_text().strip().splitlines()
@@ -135,12 +134,14 @@ def test_reporter_writes_interval_metrics_jsonl(tmp_path):
     payload = json.loads(lines[0])
     assert payload["iteration"] == 10
     assert payload["corpus"]["seed_count"] == 20
-    assert reporter._pending_runtime_edge_ids == set()
-    assert reporter._pending_contract_fingerprints == set()
-    assert reporter._pending_stmt_sites_seen == set()
-    assert reporter._pending_branch_outcomes_seen == set()
-    assert reporter._pending_stmt_sites_total == set()
-    assert reporter._pending_branch_outcomes_total == set()
+    assert reporter._pending_runtime_edges_sum == 0
+    assert reporter._pending_runtime_edges_samples == 0
+    assert reporter._pending_contracts_observed_sum == 0
+    assert reporter._pending_contracts_observed_samples == 0
+    assert reporter._pending_stmt_coverage_pct_sum == 0.0
+    assert reporter._pending_stmt_coverage_pct_samples == 0
+    assert reporter._pending_branch_coverage_pct_sum == 0.0
+    assert reporter._pending_branch_coverage_pct_samples == 0
 
 
 def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
@@ -179,12 +180,11 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
         corpus_seed_count=1,
         corpus_evolved_count=0,
         corpus_max_evolved=2,
-        include_coverage_percentages=True,
     )
     assert first is not None
     assert first["coverage"]["stmt_coverage_pct"] is None
     assert first["coverage"]["branch_coverage_pct"] is None
-    assert first["coverage"]["new_runtime_edges_interval"] == 2
+    assert first["coverage"]["runtime_edges_avg_per_scenario_interval"] == 2
     assert first["calls"]["calls_to_no_code_total"] == 1
     assert first["calls"]["calls_to_no_code_interval"] == 1
 
@@ -217,12 +217,11 @@ def test_reporter_interval_delta_and_empty_coverage_denominator(tmp_path):
         corpus_seed_count=1,
         corpus_evolved_count=1,
         corpus_max_evolved=2,
-        include_coverage_percentages=True,
     )
     assert second is not None
-    assert second["coverage"]["runtime_edges_total"] == 3
-    assert second["coverage"]["new_runtime_edges_interval"] == 1
-    assert second["novelty"]["new_contracts_interval"] == 0
+    assert second["coverage"]["runtime_edges_avg_per_scenario"] == 2
+    assert second["coverage"]["runtime_edges_avg_per_scenario_interval"] == 2
+    assert second["novelty"]["contracts_per_scenario_interval_avg"] == 1
     assert second["calls"]["calls_to_no_code_total"] == 1
     assert second["calls"]["calls_to_no_code_interval"] == 0
 
@@ -257,13 +256,14 @@ def test_reporter_uses_unparsable_integrity_sum_sentinel(tmp_path):
         corpus_seed_count=1,
         corpus_evolved_count=0,
         corpus_max_evolved=1,
-        include_coverage_percentages=False,
     )
 
     assert snapshot is not None
-    assert snapshot["novelty"]["contracts_seen_total"] == 1
-    assert snapshot["novelty"]["new_contracts_interval"] == 1
-    assert reporter._seen_contract_fingerprints == {UNPARSABLE_INTEGRITY_SUM}
+    assert snapshot["novelty"]["contracts_per_scenario_avg"] == 1
+    assert snapshot["novelty"]["contracts_per_scenario_interval_avg"] == 1
+    assert reporter._contracts_observed_sum == 1
+    assert reporter._contracts_observed_samples == 1
+
 
 def test_reporter_start_metrics_stream_reuse_resets_interval_baselines(tmp_path):
     reporter = FuzzerReporter(seed=31, reports_dir=tmp_path)
@@ -290,7 +290,6 @@ def test_reporter_start_metrics_stream_reuse_resets_interval_baselines(tmp_path)
         corpus_seed_count=0,
         corpus_evolved_count=0,
         corpus_max_evolved=0,
-        include_coverage_percentages=False,
     )
 
     assert snapshot is not None
@@ -339,14 +338,16 @@ def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
     assert reporter._metrics_path is None
     assert reporter.get_runtime_deployment_success_rate() == 100.0
     assert reporter.get_runtime_call_success_rate() == 50.0
-    assert reporter._pending_runtime_edge_ids == set()
-    assert reporter._pending_contract_fingerprints == set()
-    assert reporter._pending_stmt_sites_seen == set()
-    assert reporter._pending_branch_outcomes_seen == set()
-    assert reporter._pending_stmt_sites_total == set()
-    assert reporter._pending_branch_outcomes_total == set()
-    assert reporter._seen_runtime_edges == set()
-    assert reporter._seen_contract_fingerprints == set()
+    assert reporter._pending_runtime_edges_sum == 0
+    assert reporter._pending_runtime_edges_samples == 0
+    assert reporter._pending_contracts_observed_sum == 0
+    assert reporter._pending_contracts_observed_samples == 0
+    assert reporter._pending_stmt_coverage_pct_sum == 0.0
+    assert reporter._pending_stmt_coverage_pct_samples == 0
+    assert reporter._pending_branch_coverage_pct_sum == 0.0
+    assert reporter._pending_branch_coverage_pct_samples == 0
+    assert reporter._runtime_edges_sum == 0
+    assert reporter._contracts_observed_sum == 0
     assert reporter._runtime_totals.calls_to_no_code == 2
 
     snapshot = reporter.record_interval_metrics(
@@ -354,11 +355,153 @@ def test_reporter_does_not_accumulate_pending_state_when_metrics_disabled(
         corpus_seed_count=1,
         corpus_evolved_count=1,
         corpus_max_evolved=1,
-        include_coverage_percentages=True,
     )
     assert snapshot is None
-    assert reporter._pending_runtime_edge_ids == set()
-    assert reporter._pending_contract_fingerprints == set()
+    assert reporter._pending_runtime_edges_sum == 0
+    assert reporter._pending_contracts_observed_sum == 0
+
+
+def test_reporter_spools_contract_fingerprints_periodically(tmp_path):
+    reporter = FuzzerReporter(seed=37, reports_dir=tmp_path)
+    reporter.start_timer()
+    reporter.start_metrics_stream(True)
+    reporter._contract_fingerprint_flush_max_buffer_bytes = 1
+
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(),
+            runtime_edge_ids=set(),
+            runtime_stmt_sites_seen=set(),
+            runtime_branch_outcomes_seen=set(),
+            runtime_stmt_sites_total=set(),
+            runtime_branch_outcomes_total=set(),
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+            contract_fingerprints={"a", "b"},
+        ),
+        debug_mode=False,
+    )
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(),
+            runtime_edge_ids=set(),
+            runtime_stmt_sites_seen=set(),
+            runtime_branch_outcomes_seen=set(),
+            runtime_stmt_sites_total=set(),
+            runtime_branch_outcomes_total=set(),
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+            contract_fingerprints={"a"},
+        ),
+        debug_mode=False,
+    )
+
+    assert reporter._contract_fingerprints_path is not None
+    lines = reporter._contract_fingerprints_path.read_text().splitlines()
+    assert len(lines) == 3
+    assert lines.count("a") == 2
+    assert lines.count("b") == 1
+
+
+def test_reporter_contract_fingerprint_buffer_survives_metric_snapshot(tmp_path):
+    reporter = FuzzerReporter(seed=41, reports_dir=tmp_path)
+    reporter.start_timer()
+    reporter.start_metrics_stream(True)
+    reporter._contract_fingerprint_flush_max_buffer_bytes = 20
+
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(),
+            runtime_edge_ids=set(),
+            runtime_stmt_sites_seen=set(),
+            runtime_branch_outcomes_seen=set(),
+            runtime_stmt_sites_total=set(),
+            runtime_branch_outcomes_total=set(),
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+            contract_fingerprints={"persist-a"},
+        ),
+        debug_mode=False,
+    )
+    _ = reporter.record_interval_metrics(
+        iteration=1,
+        corpus_seed_count=1,
+        corpus_evolved_count=0,
+        corpus_max_evolved=1,
+    )
+
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(),
+            runtime_edge_ids=set(),
+            runtime_stmt_sites_seen=set(),
+            runtime_branch_outcomes_seen=set(),
+            runtime_stmt_sites_total=set(),
+            runtime_branch_outcomes_total=set(),
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+            contract_fingerprints={"persist-b"},
+        ),
+        debug_mode=False,
+    )
+
+    assert reporter._contract_fingerprints_path is not None
+    lines = reporter._contract_fingerprints_path.read_text().splitlines()
+    assert len(lines) == 2
+    assert set(lines) == {"persist-a", "persist-b"}
+
+
+def test_reporter_flushes_contract_fingerprints_on_save_statistics(tmp_path):
+    reporter = FuzzerReporter(seed=43, reports_dir=tmp_path)
+    reporter.start_timer()
+    reporter.start_metrics_stream(True)
+    reporter._contract_fingerprint_flush_max_buffer_bytes = 10_000
+
+    reporter.ingest_run(
+        _empty_analysis(),
+        _make_artifacts(
+            harness_stats=HarnessStats(),
+            runtime_edge_ids=set(),
+            runtime_stmt_sites_seen=set(),
+            runtime_branch_outcomes_seen=set(),
+            runtime_stmt_sites_total=set(),
+            runtime_branch_outcomes_total=set(),
+            finalized_scenario=Scenario(
+                traces=[_make_deployment_trace(solc_json={"sources": {}})],
+                dependencies=[],
+                use_python_args=True,
+            ),
+            contract_fingerprints={"final-only"},
+        ),
+        debug_mode=False,
+    )
+
+    assert reporter._contract_fingerprints_path is not None
+    assert not reporter._contract_fingerprints_path.exists()
+
+    reporter.save_statistics()
+
+    assert reporter._contract_fingerprints_path.exists()
+    assert reporter._contract_fingerprints_path.read_text().splitlines() == [
+        "final-only"
+    ]
+    assert reporter._pending_unique_contract_fingerprints == set()
 
 
 def test_reporter_uses_unknown_error_type_when_error_missing(tmp_path):

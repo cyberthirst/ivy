@@ -56,7 +56,7 @@ class HarnessConfig:
     map_size: int = 1 << 16
 
     # Runner behavior
-    collect_storage_dumps: bool = False  # Disabled during exploration
+    collect_storage_dumps: bool = True
     max_deploy_retries: int = 30
 
     # Corpus settings
@@ -65,7 +65,6 @@ class HarnessConfig:
 
     # Reporting toggles
     enable_interval_metrics: bool = True
-    enable_coverage_percentages: bool = True
 
 
 @dataclass
@@ -271,13 +270,12 @@ class RuntimeFuzzEngine:
                 ):
                     all_functions.append(FunctionInfo(addr, fn_name, func_t))
 
-            if self.config.enable_coverage_percentages:
-                for contract in deployed_contracts.values():
-                    stmt_sites, branch_outcomes = (
-                        self._collect_static_coverage_sites_for_contract(contract)
-                    )
-                    runtime_stmt_sites_total.update(stmt_sites)
-                    runtime_branch_outcomes_total.update(branch_outcomes)
+            for contract in deployed_contracts.values():
+                stmt_sites, branch_outcomes = (
+                    self._collect_static_coverage_sites_for_contract(contract)
+                )
+                runtime_stmt_sites_total.update(stmt_sites)
+                runtime_branch_outcomes_total.update(branch_outcomes)
 
             # Create corpus for mutation-based fuzzing
             corpus = Corpus(
@@ -477,13 +475,12 @@ class RuntimeFuzzEngine:
         state_modified = metadata.state_modified
         stmt_sites: Set[RuntimeStmtSite] = set()
         branch_outcomes: Set[RuntimeBranchOutcome] = set()
-        if self.config.enable_coverage_percentages:
-            for addr, source_node_ids in metadata.coverage.items():
-                addr_str = str(addr)
-                for source_id, node_id in source_node_ids:
-                    stmt_sites.add((addr_str, int(source_id), int(node_id)))
-            for addr, source_id, node_id, taken in metadata.branches:
-                branch_outcomes.add((str(addr), int(source_id), int(node_id), taken))
+        for addr, source_node_ids in metadata.coverage.items():
+            addr_str = str(addr)
+            for source_id, node_id in source_node_ids:
+                stmt_sites.add((addr_str, int(source_id), int(node_id)))
+        for addr, source_id, node_id, taken in metadata.branches:
+            branch_outcomes.add((str(addr), int(source_id), int(node_id), taken))
 
         return CallOutcome(
             new_cov=new_cov,

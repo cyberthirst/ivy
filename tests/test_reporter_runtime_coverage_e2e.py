@@ -131,7 +131,6 @@ def right():
         corpus_seed_count=1,
         corpus_evolved_count=0,
         corpus_max_evolved=1,
-        include_coverage_percentages=True,
     )
 
     assert snapshot is not None

@@ -186,9 +186,6 @@ class GenerativeFuzzer(BaseFuzzer):
                         corpus_seed_count=self.corpus.seed_count,
                         corpus_evolved_count=self.corpus.evolved_count,
                         corpus_max_evolved=self.corpus.max_evolved,
-                        include_coverage_percentages=(
-                            self.harness_config.enable_coverage_percentages
-                        ),
                     )
                     self.reporter.log_generative_progress(
                         iteration=self._iteration,
@@ -205,7 +202,6 @@ class GenerativeFuzzer(BaseFuzzer):
             corpus_seed_count=self.corpus.seed_count,
             corpus_evolved_count=self.corpus.evolved_count,
             corpus_max_evolved=self.corpus.max_evolved,
-            include_coverage_percentages=self.harness_config.enable_coverage_percentages,
         )
         self.reporter.log_generative_progress(
             iteration=self._iteration,
