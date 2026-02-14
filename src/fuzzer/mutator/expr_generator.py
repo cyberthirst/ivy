@@ -1564,6 +1564,33 @@ class ExprGenerator(BaseGenerator):
                 return typ.length
             return None
 
+        def folded_arg_length(node: ast.VyperNode) -> Optional[int]:
+            status, folded = fold_constant_expression_status(node, context.constants)
+            if status != "value":
+                return None
+            assert folded is not None
+
+            if isinstance(folded, ast.Bytes):
+                return len(folded.value)
+            if isinstance(folded, ast.Str):
+                return len(folded.value.encode("utf-8", errors="surrogateescape"))
+
+            folded_t = self._expr_type(folded)
+            if isinstance(folded_t, BytesM_T):
+                return folded_t.length
+            return None
+
+        def arg_return_length(node: ast.VyperNode, fallback_capacity: int) -> int:
+            folded_len = folded_arg_length(node)
+            if folded_len is not None:
+                return folded_len
+
+            expr_t = self._expr_type(node)
+            expr_cap = arg_capacity(expr_t) if expr_t is not None else None
+            if expr_cap is not None:
+                return expr_cap
+            return fallback_capacity
+
         # Candidate-driven pass: consume compatible in-scope expressions first.
         scope_candidates = []
         for name, var_info in context.find_matching_vars(None):
@@ -1590,7 +1617,7 @@ class ExprGenerator(BaseGenerator):
                 name, var_info, cap = pool.pop(idx)
                 expr = self._generate_variable_ref((name, var_info), context)
                 args.append(expr)
-                arg_caps.append(cap)
+                arg_caps.append(arg_return_length(expr, cap))
                 remaining -= cap
 
         while len(args) < k:
@@ -1620,7 +1647,7 @@ class ExprGenerator(BaseGenerator):
                         t = BytesM_T(m)
                         expr = self.generate(t, context, arg_depth)
                         args.append(expr)
-                        arg_caps.append(m)
+                        arg_caps.append(arg_return_length(expr, m))
                         remaining -= m
                         continue
 
@@ -1631,7 +1658,7 @@ class ExprGenerator(BaseGenerator):
                     expr = self.generate(t, context, arg_depth)
 
             args.append(expr)
-            arg_caps.append(n)
+            arg_caps.append(arg_return_length(expr, n))
             remaining -= n
 
         self.rng.shuffle(args)
