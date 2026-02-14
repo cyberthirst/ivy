@@ -4,7 +4,7 @@ import hashlib
 import random
 from array import array
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 import ivy
 from ivy.execution_metadata import ExecutionMetadata
@@ -37,6 +37,9 @@ from fuzzer.runtime_engine.static_coverage import (
     collect_static_coverage_sites_for_contract,
 )
 from fuzzer.runner.ivy_scenario_runner import IvyScenarioRunner
+
+if TYPE_CHECKING:
+    from vyper.compiler.phases import CompilerData
 
 
 @dataclass
@@ -347,7 +350,7 @@ class RuntimeFuzzEngine:
                 contract_fingerprints=contract_fingerprints,
             )
 
-    def _get_constructor_function(self, compiled: Any) -> Any:
+    def _get_constructor_function(self, compiled: CompilerData) -> Any:
         return getattr(getattr(compiled, "global_ctx", None), "init_function", None)
 
     def _execute_deployment_with_retries(
@@ -358,14 +361,21 @@ class RuntimeFuzzEngine:
         stats: HarnessStats,
         contract_fingerprints: Set[str],
     ) -> TraceResult:
-        prepared = self.runner.prepare_deployment_context(trace, trace_index)
-        if isinstance(prepared, TraceResult):
-            assert isinstance(prepared.result, DeploymentResult)
-            stats.record_deployment_result(prepared.result)
-            return prepared
+        prepared = self.runner.prepare_deployment_context(trace)
+        contract_fingerprints.add(prepared.contract_fingerprint)
 
-        deployment_ctx = prepared
-        contract_fingerprints.add(deployment_ctx.contract_fingerprint)
+        if prepared.compilation_error is not None:
+            stats.record_deployment_result(prepared.compilation_error)
+            return TraceResult(
+                trace_type="deployment",
+                trace_index=trace_index,
+                result=prepared.compilation_error,
+                compilation_xfails=list(trace.compilation_xfails),
+                runtime_xfails=list(trace.runtime_xfails),
+            )
+
+        compiled = prepared.compiled
+        assert compiled is not None
         sender = self.runner._get_sender(trace.env.tx.origin if trace.env else None)
         attempt_budget = max(1, self.config.max_deploy_retries)
         last_trace_result: Optional[TraceResult] = None
@@ -382,7 +392,7 @@ class RuntimeFuzzEngine:
         )
         base_value = trace.value
         init_function = (
-            self._get_constructor_function(deployment_ctx.compiled)
+            self._get_constructor_function(compiled)
             if use_python_args and trace.python_args
             else None
         )
@@ -411,7 +421,7 @@ class RuntimeFuzzEngine:
                 trace=trace,
                 trace_index=trace_index,
                 use_python_args=use_python_args,
-                deployment_ctx=deployment_ctx,
+                compiled_artifact=compiled,
             )
             last_trace_result = trace_result
 

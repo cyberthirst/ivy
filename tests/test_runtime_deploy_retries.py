@@ -6,8 +6,10 @@ from typing import Any, Dict, List, Optional
 
 from fuzzer.runner.base_scenario_runner import (
     BaseScenarioRunner,
-    DeploymentExecutionContext,
+    DeploymentResult,
+    UNPARSABLE_CONTRACT_FINGERPRINT,
 )
+from fuzzer.runner.ivy_scenario_runner import IvyDeploymentPreparation
 from fuzzer.runner.scenario import Scenario
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig, RuntimeFuzzEngine
 from fuzzer.trace_types import CallTrace, DeploymentTrace, Env, Tx
@@ -165,6 +167,46 @@ class InstrumentedRunner(BaseScenarioRunner):
         del trace_env
         return None
 
+    def prepare_deployment_context(
+        self,
+        trace: DeploymentTrace,
+    ) -> IvyDeploymentPreparation:
+        merged_settings = self._get_merged_compiler_settings(trace)
+        solc_json = trace.solc_json
+        if not solc_json:
+            return IvyDeploymentPreparation(
+                contract_fingerprint=UNPARSABLE_CONTRACT_FINGERPRINT,
+                compilation_error=DeploymentResult(
+                    success=False,
+                    error=ValueError("No solc_json available for deployment"),
+                    solc_json=None,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+            )
+
+        try:
+            compiled = self._compile_from_solc_json(
+                solc_json=solc_json,
+                compiler_settings=merged_settings,
+            )
+        except Exception as e:
+            return IvyDeploymentPreparation(
+                contract_fingerprint=UNPARSABLE_CONTRACT_FINGERPRINT,
+                compilation_error=DeploymentResult(
+                    success=False,
+                    error=e,
+                    solc_json=solc_json,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+            )
+
+        return IvyDeploymentPreparation(
+            contract_fingerprint=UNPARSABLE_CONTRACT_FINGERPRINT,
+            compiled=compiled,
+        )
+
 
 def _make_deployment_trace(
     *,
@@ -224,10 +266,7 @@ def test_execute_trace_reuses_precompiled_deployment_context():
         **(trace.compiler_settings or {}),
         **runner.compiler_settings,
     }
-    prepared = DeploymentExecutionContext(
-        compiled=runner._compile_from_solc_json(trace.solc_json, merged_settings),
-        contract_fingerprint="abc",
-    )
+    prepared = runner._compile_from_solc_json(trace.solc_json, merged_settings)
 
     result = None
     for i in range(3):
@@ -239,7 +278,7 @@ def test_execute_trace_reuses_precompiled_deployment_context():
             trace=trace,
             trace_index=0,
             use_python_args=True,
-            deployment_ctx=prepared,
+            compiled_artifact=prepared,
         )
 
     assert result is not None

@@ -5,6 +5,8 @@ This module provides the base class for running scenarios across different
 execution environments (Ivy, Boa) with all shared execution logic.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, cast
@@ -168,12 +170,6 @@ class ScenarioResult:
         ]
 
 
-@dataclass
-class DeploymentExecutionContext:
-    compiled: Any
-    contract_fingerprint: str
-
-
 class BaseScenarioRunner(ABC):
     """Base class for scenario runners that handle all trace types and dependencies."""
 
@@ -291,63 +287,6 @@ class BaseScenarioRunner(ABC):
             **self.compiler_settings,
         }
 
-    def prepare_deployment_context(
-        self,
-        trace: DeploymentTrace,
-        trace_index: int,
-    ) -> TraceResult | DeploymentExecutionContext:
-        self._set_block_env(trace.env)
-        merged_settings = self._get_merged_compiler_settings(trace)
-        solc_json = trace.solc_json
-        if not solc_json:
-            return TraceResult(
-                trace_type="deployment",
-                trace_index=trace_index,
-                result=DeploymentResult(
-                    success=False,
-                    error=ValueError("No solc_json available for deployment"),
-                    solc_json=None,
-                    error_phase="compile",
-                    compiler_settings=merged_settings,
-                ),
-                compilation_xfails=list(trace.compilation_xfails),
-                runtime_xfails=list(trace.runtime_xfails),
-            )
-
-        try:
-            compiled = self._compile_from_solc_json(
-                solc_json=solc_json,
-                compiler_settings=merged_settings,
-            )
-        except Exception as e:
-            return TraceResult(
-                trace_type="deployment",
-                trace_index=trace_index,
-                result=DeploymentResult(
-                    success=False,
-                    error=e,
-                    solc_json=solc_json,
-                    error_phase="compile",
-                    compiler_settings=merged_settings,
-                ),
-                compilation_xfails=list(trace.compilation_xfails),
-                runtime_xfails=list(trace.runtime_xfails),
-            )
-
-        try:
-            integrity_sum = getattr(compiled, "integrity_sum", None)
-        except Exception:
-            integrity_sum = None
-
-        contract_fingerprint = UNPARSABLE_CONTRACT_FINGERPRINT
-        if isinstance(integrity_sum, str) and integrity_sum:
-            contract_fingerprint = integrity_sum
-
-        return DeploymentExecutionContext(
-            compiled=compiled,
-            contract_fingerprint=contract_fingerprint,
-        )
-
     def run(self, scenario: Scenario) -> ScenarioResult:
         """Run a complete scenario (including dependencies)"""
         # Reset state
@@ -380,13 +319,13 @@ class BaseScenarioRunner(ABC):
         trace: Trace,
         trace_index: int,
         use_python_args: bool,
-        deployment_ctx: Optional[DeploymentExecutionContext] = None,
+        compiled_artifact: Optional[Any] = None,
     ) -> TraceResult:
         if isinstance(trace, DeploymentTrace):
             deployment_result = self._execute_deployment(
                 trace=trace,
                 use_python_args=use_python_args,
-                deployment_ctx=deployment_ctx,
+                compiled_artifact=compiled_artifact,
             )
             return TraceResult(
                 trace_type="deployment",
@@ -431,7 +370,7 @@ class BaseScenarioRunner(ABC):
         self,
         trace: DeploymentTrace,
         use_python_args: bool = False,
-        deployment_ctx: Optional[DeploymentExecutionContext] = None,
+        compiled_artifact: Optional[Any] = None,
     ) -> DeploymentResult:
         """Execute a deployment trace."""
         self._set_block_env(trace.env)
@@ -456,7 +395,7 @@ class BaseScenarioRunner(ABC):
                 args = []
                 kwargs = {"value": trace.value}
 
-            compiled = deployment_ctx.compiled if deployment_ctx is not None else None
+            compiled = compiled_artifact
             if compiled is None:
                 try:
                     compiled = self._compile_from_solc_json(

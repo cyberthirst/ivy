@@ -2,7 +2,7 @@
 Boa implementation of the scenario runner.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
 
 import boa
 from boa.contracts.vyper.vyper_contract import VyperDeployer
@@ -25,7 +25,7 @@ from fuzzer.coverage.collector import ArcCoverageCollector
 def _deployer_from_solc_json(
     solc_json: Dict[str, Any],
     compiler_args: Optional[Dict[str, Any]] = None,
-) -> Any:
+) -> VyperDeployer:
     sources = get_inputs(solc_json)
     output_formats = get_output_formats(solc_json)
     search_paths = get_json_search_paths(solc_json)
@@ -93,7 +93,8 @@ class BoaScenarioRunner(BaseScenarioRunner):
             self.env.set_balance(
                 sender, self._get_balance(sender) + kwargs.get("value", 0) + 10**18
             )
-            return compiled.deploy(*args, **kwargs)
+            deployer = cast(VyperDeployer, compiled)
+            return deployer.deploy(*args, **kwargs)
 
     def _call_method(
         self,

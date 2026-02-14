@@ -2,16 +2,34 @@
 Ivy implementation of the scenario runner.
 """
 
-from typing import Any, Dict, List, Optional
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 import ivy
 from ivy.frontend.loader import loads_from_solc_json
 from ivy.frontend.vyper_contract import VyperContract
 from ivy.types import Address
 
-from fuzzer.runner.base_scenario_runner import BaseScenarioRunner, ScenarioResult
+from fuzzer.runner.base_scenario_runner import (
+    BaseScenarioRunner,
+    DeploymentResult,
+    ScenarioResult,
+    UNPARSABLE_CONTRACT_FINGERPRINT,
+)
 from fuzzer.runner.scenario import Scenario
-from fuzzer.trace_types import Env
+from fuzzer.trace_types import DeploymentTrace, Env
+
+if TYPE_CHECKING:
+    from vyper.compiler.phases import CompilerData
+
+
+@dataclass
+class IvyDeploymentPreparation:
+    contract_fingerprint: str
+    compiled: Optional[CompilerData] = None
+    compilation_error: Optional[DeploymentResult] = None
 
 
 class IvyScenarioRunner(BaseScenarioRunner):
@@ -29,17 +47,71 @@ class IvyScenarioRunner(BaseScenarioRunner):
         self,
         solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
-    ) -> Any:
-        compiler_data = loads_from_solc_json(solc_json, get_compiler_data=True)
+    ) -> CompilerData:
+        compiler_data = cast(
+            CompilerData,
+            loads_from_solc_json(solc_json, get_compiler_data=True),
+        )
 
         # Force initcode compilation to surface compile-time errors here.
         _ = compiler_data.bytecode
 
         return compiler_data
 
+    def _resolve_contract_fingerprint(self, compiled: CompilerData) -> str:
+        try:
+            integrity_sum = getattr(compiled, "integrity_sum", None)
+        except Exception:
+            integrity_sum = None
+
+        if isinstance(integrity_sum, str) and integrity_sum:
+            return integrity_sum
+
+        return UNPARSABLE_CONTRACT_FINGERPRINT
+
+    def prepare_deployment_context(
+        self,
+        trace: DeploymentTrace,
+    ) -> IvyDeploymentPreparation:
+        merged_settings = self._get_merged_compiler_settings(trace)
+        solc_json = trace.solc_json
+        if not solc_json:
+            return IvyDeploymentPreparation(
+                contract_fingerprint=UNPARSABLE_CONTRACT_FINGERPRINT,
+                compilation_error=DeploymentResult(
+                    success=False,
+                    error=ValueError("No solc_json available for deployment"),
+                    solc_json=None,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+            )
+
+        try:
+            compiled = self._compile_from_solc_json(
+                solc_json=solc_json,
+                compiler_settings=merged_settings,
+            )
+        except Exception as e:
+            return IvyDeploymentPreparation(
+                contract_fingerprint=UNPARSABLE_CONTRACT_FINGERPRINT,
+                compilation_error=DeploymentResult(
+                    success=False,
+                    error=e,
+                    solc_json=solc_json,
+                    error_phase="compile",
+                    compiler_settings=merged_settings,
+                ),
+            )
+
+        return IvyDeploymentPreparation(
+            contract_fingerprint=self._resolve_contract_fingerprint(compiled),
+            compiled=compiled,
+        )
+
     def _deploy_compiled(
         self,
-        compiled: Any,
+        compiled: CompilerData,
         args: List[Any],
         kwargs: Dict[str, Any],
         sender: Optional[str] = None,
@@ -53,7 +125,9 @@ class IvyScenarioRunner(BaseScenarioRunner):
                 self.env.get_balance(self.env.eoa) + kwargs.get("value", 0) + 10**18,
             )
             filename = getattr(compiled, "contract_path", None)
-            return VyperContract(compiled, *args, filename=filename, **kwargs)
+            if isinstance(filename, str):
+                return VyperContract(compiled, *args, filename=filename, **kwargs)
+            return VyperContract(compiled, *args, **kwargs)
 
     def _call_method(
         self,
