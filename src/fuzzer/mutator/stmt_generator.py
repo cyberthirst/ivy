@@ -790,6 +790,7 @@ class StatementGenerator(BaseGenerator):
                         context,
                         depth=self.expr_generator.root_depth(),
                         allow_tuple_literal=allow_tuple_literal,
+                        allow_empty_list=not isinstance(var_info.typ, DArrayT),
                     )
             else:
                 init_val = self.expr_generator.generate(
