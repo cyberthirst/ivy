@@ -147,7 +147,7 @@ class StatementGenerator(BaseGenerator):
         prelude = metadata.pop("_ivy_prelude", [])
         if not isinstance(prelude, list):
             return []
-        return [node for node in prelude if isinstance(node, ast.VyperNode)]
+        return prelude
 
     def generate_type(
         self,
@@ -441,12 +441,15 @@ class StatementGenerator(BaseGenerator):
             context={"ctx": ctx},
         )
 
-        return self._strategy_executor.execute_with_retry(
+        stmt = self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",
             fallback=lambda: ast.Pass(),
             context={"ctx": ctx},
         )
+        prelude = self.expr_generator.drain_tmp_decls()
+        self._set_stmt_prelude(stmt, prelude)
+        return stmt
 
     @strategy(
         name="stmt.if",
