@@ -226,6 +226,12 @@ def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
         outcome = OUTCOME_SUCCESS
     elif result.is_compiler_crash:
         outcome = OUTCOME_ICE
+        tb = "".join(
+            traceback.format_exception(
+                type(result.error), result.error, result.error.__traceback__
+            )
+        )
+        failure_text = f"{source}\n\n{tb}"
     elif mutator.context.compilation_xfails:
         outcome = OUTCOME_XFAIL
     else:
@@ -284,9 +290,14 @@ def main():
     args = parser.parse_args()
 
     failures_dir = None
+    ice_dir = None
+    compilation_dir = None
     if args.save_failures:
         failures_dir = Path(args.save_failures)
-        failures_dir.mkdir(parents=True, exist_ok=True)
+        ice_dir = failures_dir / "ice"
+        compilation_dir = failures_dir / "compilation"
+        ice_dir.mkdir(parents=True, exist_ok=True)
+        compilation_dir.mkdir(parents=True, exist_ok=True)
 
     focus_regions = []
     for raw_region in args.focus:
@@ -321,13 +332,14 @@ def main():
                     _update_focus_accumulators(focus_accumulators, arcs, focus_line_sets)
             elif outcome == OUTCOME_ICE:
                 ice += 1
+                if ice_dir and failure_text:
+                    (ice_dir / f"seed_{seed_i}.txt").write_text(failure_text)
             elif outcome == OUTCOME_XFAIL:
                 successful_xfail += 1
             else:
                 failed += 1
-                if failures_dir and failure_text:
-                    failure_path = failures_dir / f"seed_{seed_i}.txt"
-                    failure_path.write_text(failure_text)
+                if compilation_dir and failure_text:
+                    (compilation_dir / f"seed_{seed_i}.txt").write_text(failure_text)
 
             done += 1
             if done % 100 == 0:
