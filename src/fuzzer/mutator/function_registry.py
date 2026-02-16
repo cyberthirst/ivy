@@ -349,6 +349,10 @@ class FunctionRegistry:
 
             func = self.functions[name]
 
+            if caller_mutability == StateMutability.PURE and func.is_external:
+                # TODO: we can't generate the `self` address in pure functions.
+                continue
+
             # Check type compatibility when a target type is specified
             if return_type is not None:
                 if func.return_type is None or not return_type.compare_type(func.return_type):
@@ -433,12 +437,15 @@ class FunctionRegistry:
 
         # Choose function properties
         if visibility is None:
-            visibility = self.rng.choice(
-                [
-                    FunctionVisibility.INTERNAL,
-                    FunctionVisibility.EXTERNAL,
-                ]
-            )
+            visibility_choices = [FunctionVisibility.INTERNAL, FunctionVisibility.EXTERNAL]
+            if caller_mutability == StateMutability.PURE:
+                visibility_choices = [FunctionVisibility.INTERNAL]
+            visibility = self.rng.choice(visibility_choices)
+        elif (
+            caller_mutability == StateMutability.PURE
+            and visibility == FunctionVisibility.EXTERNAL
+        ):
+            return None
 
         # Choose state mutability
         mutability_options = [

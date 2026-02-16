@@ -1411,7 +1411,7 @@ class ExprGenerator(BaseGenerator):
                 args.append(self.generate(pos_arg.typ, context, arg_depth))
 
         if func_t.is_external:
-            result_node = self._generate_external_call(func_t, args, context)
+            result_node = self._generate_external_call(func_t, args)
         else:
             assert func_t.is_internal, (
                 f"Expected internal or external function, got {func_t}"
@@ -1485,18 +1485,13 @@ class ExprGenerator(BaseGenerator):
         self,
         func: ContractFunctionT,
         args: list,
-        context: GenerationContext,
     ) -> Union[ast.StaticCall, ast.ExtCall]:
         """Build AST for an external call through an interface."""
         _, iface_type = self.interface_registry.create_interface(func)
 
-        if context.current_function_mutability == StateMutability.PURE:
-            # TODO: we can't generate the `self` address in pure functions.
-            address_value = self.literal_generator.generate(AddressT())
-            address_node = ast_builder.literal(address_value, AddressT())
-        else:
-            address_node = ast.Name(id="self")
-            address_node._metadata = {"type": AddressT()}
+        # Address is always `self` for now.
+        address_node = ast.Name(id="self")
+        address_node._metadata = {"type": AddressT()}
 
         # Build: InterfaceName(address)
         iface_cast = ast_builder.interface_cast(iface_type, address_node)
