@@ -26,6 +26,7 @@ from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_dereferenceable,
@@ -146,45 +147,13 @@ class StatementGenerator(BaseGenerator):
         """Generate a type, biasing towards existing types and preferred fuzzing types."""
         skip = skip or set()
 
-        # Bias towards accessible variable types and callable return types
-        accessible_vars = context.find_matching_vars()
-        if self.rng.random() < self.cfg.existing_type_bias_prob and accessible_vars:
-            seen: set[str] = set()
-            all_types: list[VyperType] = []
-
-            def add_type(typ: VyperType) -> None:
-                if type(typ) in skip:
-                    return
-                key = str(typ)
-                if key in seen:
-                    return
-                seen.add(key)
-                all_types.append(typ)
-
-            for _name, var_info in accessible_vars:
-                var_type = var_info.typ
-                add_type(var_type)
-                for child_t, _depth in collect_dereference_types(
-                    var_type, max_steps=self.cfg.deref_chain_max_steps
-                ):
-                    add_type(child_t)
-
-            # Include return types of callable functions
-            func_registry = self.expr_generator.function_registry
-            if func_registry and func_registry.current_function:
-                callable_funcs = func_registry.get_callable_functions(
-                    from_function=func_registry.current_function,
-                    caller_mutability=context.current_function_mutability,
-                )
-                for func in callable_funcs:
-                    if func.return_type is not None:
-                        add_type(func.return_type)
-                        for child_t, _depth in collect_dereference_types(
-                            func.return_type,
-                            max_steps=self.cfg.deref_chain_max_steps,
-                        ):
-                            add_type(child_t)
-
+        if self.rng.random() < self.cfg.existing_type_bias_prob:
+            all_types = collect_existing_reachable_types(
+                context=context,
+                deref_max_steps=self.cfg.deref_chain_max_steps,
+                function_registry=self.expr_generator.function_registry,
+                skip=skip,
+            )
             if all_types:
                 return self.rng.choice(all_types)
 

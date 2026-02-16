@@ -42,6 +42,7 @@ from fuzzer.mutator.constant_folding import (
     fold_constant_expression_status,
 )
 from fuzzer.mutator.context import GenerationContext, ExprMutability
+from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.indexing import (
     small_literal_index,
@@ -255,6 +256,19 @@ class ExprGenerator(BaseGenerator):
         if ctx.context.current_mutability == ExprMutability.CONST:
             return False
         return not ctx.context.is_module_scope
+
+    def _existing_reachable_types(
+        self,
+        context: GenerationContext,
+        *,
+        skip: Optional[set[type]] = None,
+    ) -> list[VyperType]:
+        return collect_existing_reachable_types(
+            context=context,
+            deref_max_steps=self.cfg.subscript_chain_max_steps,
+            function_registry=self.function_registry,
+            skip=skip,
+        )
 
     def _find_deref_bases(
         self,
@@ -1329,16 +1343,6 @@ class ExprGenerator(BaseGenerator):
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
 
-    def _can_emit_function_call(
-        self, func_t: ContractFunctionT, context: GenerationContext
-    ) -> bool:
-        if not func_t.is_external:
-            return True
-        # External calls currently use `self` as the target address.
-        if context.current_function_mutability == StateMutability.PURE:
-            return False
-        return True
-
     def _get_callable_functions(
         self,
         context: GenerationContext,
@@ -1354,7 +1358,7 @@ class ExprGenerator(BaseGenerator):
             from_function=current_func,
             caller_mutability=context.current_function_mutability,
         )
-        return [f for f in funcs if self._can_emit_function_call(f, context)]
+        return funcs
 
     def _get_compatible_builtins(
         self, target_type: VyperType, context: GenerationContext
@@ -1389,8 +1393,6 @@ class ExprGenerator(BaseGenerator):
             return None
 
         func_t = func_def._metadata["func_type"]
-        if not self._can_emit_function_call(func_t, context):
-            return None
         return func_t
 
     def _generate_call_to_function(
@@ -1401,8 +1403,6 @@ class ExprGenerator(BaseGenerator):
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         if func_t.return_type is None:
             return None
-        if not self._can_emit_function_call(func_t, context):
-            return None
 
         arg_depth = self.child_depth(depth)
         args = []
@@ -1411,7 +1411,7 @@ class ExprGenerator(BaseGenerator):
                 args.append(self.generate(pos_arg.typ, context, arg_depth))
 
         if func_t.is_external:
-            result_node = self._generate_external_call(func_t, args)
+            result_node = self._generate_external_call(func_t, args, context)
         else:
             assert func_t.is_internal, (
                 f"Expected internal or external function, got {func_t}"
@@ -1482,15 +1482,21 @@ class ExprGenerator(BaseGenerator):
         return self._generate_call_to_function(func_t, ctx.context, ctx.depth)
 
     def _generate_external_call(
-        self, func: ContractFunctionT, args: list
+        self,
+        func: ContractFunctionT,
+        args: list,
+        context: GenerationContext,
     ) -> Union[ast.StaticCall, ast.ExtCall]:
         """Build AST for an external call through an interface."""
         _, iface_type = self.interface_registry.create_interface(func)
 
-        # Address is always `self` for now
-        # TODO support random addresses
-        address_node = ast.Name(id="self")
-        address_node._metadata = {"type": AddressT()}
+        if context.current_function_mutability == StateMutability.PURE:
+            # TODO: we can't generate the `self` address in pure functions.
+            address_value = self.literal_generator.generate(AddressT())
+            address_node = ast_builder.literal(address_value, AddressT())
+        else:
+            address_node = ast.Name(id="self")
+            address_node._metadata = {"type": AddressT()}
 
         # Build: InterfaceName(address)
         iface_cast = ast_builder.interface_cast(iface_type, address_node)
