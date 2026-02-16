@@ -876,6 +876,14 @@ class ExprGenerator(BaseGenerator):
         - OOB literal that forces compilation xfail (rare)
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
+
+        # When the base is a function call, the guarded-index idiom
+        # (expr[i % max(len(expr), 1)]) duplicates the call, which makes
+        # the compiler panic about overlapping memory regions.  Use a simple
+        # literal index instead.
+        if isinstance(base_node, (ast.Call, ast.StaticCall, ast.ExtCall)):
+            return small_literal_index(self.rng, seq_t.length)
+
         cfg = self.cfg
         if self.rng.random() < cfg.index_guard_prob:
             return self._generate_guarded_index(base_node, seq_t, context, depth)
