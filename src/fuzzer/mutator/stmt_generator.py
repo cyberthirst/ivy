@@ -264,7 +264,10 @@ class StatementGenerator(BaseGenerator):
             max_stmts = min_stmts
 
         num_vars = self.rng.randint(min_stmts, max_stmts)
-        for i in range(num_vars):
+        # Drain tmp decls manually here because create_vardecl_and_register
+        # bypasses stmt generate() which normally handles the drain.
+        inserted = 0
+        for _ in range(num_vars):
             ctx = StmtGenCtx(
                 context=context,
                 parent=parent,
@@ -273,9 +276,13 @@ class StatementGenerator(BaseGenerator):
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
-            body.insert(i, var_decl)
+            prelude = self.expr_generator.drain_tmp_decls()
+            body[inserted:inserted] = prelude
+            inserted += len(prelude)
+            body.insert(inserted, var_decl)
+            inserted += 1
 
-        return num_vars
+        return inserted
 
     def inject_random_statements(
         self,
