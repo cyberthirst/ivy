@@ -27,6 +27,7 @@ from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
+from fuzzer.mutator.name_generator import FreshNameGenerator
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_dereferenceable,
@@ -44,17 +45,6 @@ class StmtGenCtx:
     gen: StatementGenerator
 
 
-class FreshNameGenerator:
-    def __init__(self, prefix: str = "gen_var"):
-        self.prefix = prefix
-        self.counter = 0
-
-    def generate(self) -> str:
-        name = f"{self.prefix}{self.counter}"
-        self.counter += 1
-        return name
-
-
 class StatementGenerator(BaseGenerator):
     def __init__(
         self,
@@ -63,11 +53,12 @@ class StatementGenerator(BaseGenerator):
         rng: random.Random,
         cfg: Optional[StmtGeneratorConfig] = None,
         depth_cfg: Optional[DepthConfig] = None,
+        name_generator: Optional[FreshNameGenerator] = None,
     ):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
         self.cfg = cfg or StmtGeneratorConfig()
-        self.name_generator = FreshNameGenerator()
+        self.name_generator = name_generator or FreshNameGenerator()
 
         super().__init__(rng, depth_cfg)
 
@@ -136,6 +127,27 @@ class StatementGenerator(BaseGenerator):
 
     def add_variable(self, context, name: str, var_info: VarInfo):
         context.add_variable(name, var_info)
+
+    def _set_stmt_prelude(
+        self, stmt: ast.VyperNode, prelude: list[ast.VyperNode]
+    ) -> ast.VyperNode:
+        if not prelude:
+            return stmt
+        metadata = getattr(stmt, "_metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        metadata["_ivy_prelude"] = list(prelude)
+        stmt._metadata = metadata
+        return stmt
+
+    def _take_stmt_prelude(self, stmt: ast.VyperNode) -> list[ast.VyperNode]:
+        metadata = getattr(stmt, "_metadata", None)
+        if not isinstance(metadata, dict):
+            return []
+        prelude = metadata.pop("_ivy_prelude", [])
+        if not isinstance(prelude, list):
+            return []
+        return [node for node in prelude if isinstance(node, ast.VyperNode)]
 
     def generate_type(
         self,
@@ -312,9 +324,30 @@ class StatementGenerator(BaseGenerator):
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate(context, parent, depth)
+            prelude = self._take_stmt_prelude(stmt)
+
+            decl_prelude = [
+                node
+                for node in prelude
+                if isinstance(node, (ast.AnnAssign, ast.VariableDecl))
+            ]
+            if decl_prelude:
+                body[num_vars:num_vars] = decl_prelude
+                num_vars += len(decl_prelude)
+
+            nondecl_prelude = [
+                node
+                for node in prelude
+                if not isinstance(node, (ast.AnnAssign, ast.VariableDecl))
+            ]
+            stmt_chunk = nondecl_prelude + [stmt]
+            stmt_decl_count = sum(
+                isinstance(node, (ast.AnnAssign, ast.VariableDecl))
+                for node in stmt_chunk
+            )
             if isinstance(stmt, ast.AnnAssign):
-                body.insert(num_vars, stmt)
-                num_vars += 1
+                body[num_vars:num_vars] = stmt_chunk
+                num_vars += stmt_decl_count
                 continue
             # Insert before the last statement to avoid inserting after return
             # If body is empty or only has vars, append at the end
@@ -323,7 +356,9 @@ class StatementGenerator(BaseGenerator):
                 insert_pos = self.rng.randint(num_vars, max_pos)
             else:
                 insert_pos = num_vars
-            body.insert(insert_pos, stmt)
+            body[insert_pos:insert_pos] = stmt_chunk
+            if insert_pos == num_vars:
+                num_vars += stmt_decl_count
 
         # Ensure function scope terminates with a return when required.
         if isinstance(parent, ast.FunctionDef):

@@ -23,7 +23,7 @@ from vyper.semantics.types import (
     InterfaceT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
-from vyper.semantics.analysis.base import VarInfo, Modifiability
+from vyper.semantics.analysis.base import DataLocation, VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator import ast_builder
@@ -55,6 +55,7 @@ from fuzzer.mutator.indexing import (
 )
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.literal_generator import LiteralGenerator
+from fuzzer.mutator.name_generator import FreshNameGenerator
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     DerefCandidate,
@@ -87,14 +88,18 @@ class ExprGenerator(BaseGenerator):
         type_generator: TypeGenerator,
         cfg: Optional[ExprGeneratorConfig] = None,
         depth_cfg: Optional[DepthConfig] = None,
+        name_generator: Optional[FreshNameGenerator] = None,
     ):
         self.literal_generator = literal_generator
         self.function_registry: FunctionRegistry = function_registry
         self.interface_registry: InterfaceRegistry = interface_registry
         self.type_generator = type_generator
         self.cfg = cfg or ExprGeneratorConfig()
+        self.name_generator = name_generator or FreshNameGenerator()
 
         super().__init__(rng, depth_cfg)
+        self._pending_tmp_decls: list[ast.VyperNode] = []
+        self._active_context: Optional[GenerationContext] = None
 
         self._builtin_handlers = {
             "min": self._builtin_min_max,
@@ -110,6 +115,69 @@ class ExprGenerator(BaseGenerator):
             "abi_encode": self._builtin_abi_encode,
         }
 
+    def reset_state(self) -> None:
+        self._pending_tmp_decls = []
+        self._active_context = None
+
+    def drain_tmp_decls(self) -> list[ast.VyperNode]:
+        decls = self._pending_tmp_decls
+        self._pending_tmp_decls = []
+        return decls
+
+    def hoist_to_tmp_var(self, expr: ast.VyperNode) -> ast.VyperNode:
+        context = self._active_context
+        if context is None:
+            raise ValueError("hoist_to_tmp_var requires an active generation context")
+
+        expr_type = self._expr_type(expr)
+        if expr_type is None:
+            raise ValueError("cannot hoist expression without inferred type metadata")
+
+        while True:
+            name = self.name_generator.generate()
+            if name in context.all_vars:
+                continue
+            break
+
+        if context.is_module_scope:
+            var_info = VarInfo(
+                typ=expr_type,
+                location=DataLocation.UNSET,
+                modifiability=Modifiability.CONSTANT,
+            )
+            annotation = ast.Call(
+                func=ast.Name(id="constant"),
+                args=[ast.Name(id=str(expr_type))],
+            )
+            decl: ast.VyperNode = ast.VariableDecl(
+                target=ast.Name(id=name),
+                annotation=annotation,
+                value=expr,
+            )
+            try:
+                value = evaluate_constant_expression(expr, context.constants)
+            except Exception:
+                pass
+            else:
+                context.add_constant(name, value)
+        else:
+            var_info = VarInfo(
+                typ=expr_type,
+                location=DataLocation.MEMORY,
+                modifiability=Modifiability.MODIFIABLE,
+            )
+            decl = ast.AnnAssign(
+                target=ast.Name(id=name),
+                annotation=ast.Name(id=str(expr_type)),
+                value=expr,
+            )
+
+        context.add_variable(name, var_info)
+        self._pending_tmp_decls.append(decl)
+        ref = ast_builder.var_ref(name, var_info)
+        ref._metadata = {"type": expr_type, "varinfo": var_info}
+        return ref
+
     def generate(
         self,
         target_type: VyperType,
@@ -120,6 +188,7 @@ class ExprGenerator(BaseGenerator):
         allow_recursion: bool = False,
         allow_empty_list: bool = True,
     ) -> ast.VyperNode:
+        self._active_context = context
         ctx = ExprGenCtx(
             target_type=target_type,
             context=context,
