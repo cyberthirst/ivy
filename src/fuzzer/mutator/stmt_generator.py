@@ -148,14 +148,28 @@ class StatementGenerator(BaseGenerator):
 
         # Bias towards existing variable types to enable compatible expressions
         if self.rng.random() < self.cfg.existing_type_bias_prob and context.all_vars:
-            valid_vars = []
-            for var_info in context.all_vars.values():
-                if type(var_info.typ) not in skip:
-                    valid_vars.append(var_info)
+            seen: set[str] = set()
+            all_types: list[VyperType] = []
 
-            if valid_vars:
-                var_info = self.rng.choice(valid_vars)
-                return var_info.typ
+            def add_type(typ: VyperType) -> None:
+                if type(typ) in skip:
+                    return
+                key = str(typ)
+                if key in seen:
+                    return
+                seen.add(key)
+                all_types.append(typ)
+
+            for var_info in context.all_vars.values():
+                var_type = var_info.typ
+                add_type(var_type)
+                for child_t, _depth in collect_dereference_types(
+                    var_type, max_steps=self.cfg.deref_chain_max_steps
+                ):
+                    add_type(child_t)
+
+            if all_types:
+                return self.rng.choice(all_types)
 
         # Struct fragments are stored in type_generator.source_fragments
         return self.type_generator.generate_biased_type(
