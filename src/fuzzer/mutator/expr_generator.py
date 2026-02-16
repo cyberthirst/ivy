@@ -130,14 +130,7 @@ class ExprGenerator(BaseGenerator):
             raise ValueError("hoist_to_tmp_var requires an active generation context")
 
         expr_type = self._expr_type(expr)
-        if expr_type is None:
-            raise ValueError("cannot hoist expression without inferred type metadata")
-
-        while True:
-            name = self.name_generator.generate()
-            if name in context.all_vars:
-                continue
-            break
+        name = self.name_generator.generate()
 
         if context.is_module_scope:
             var_info = VarInfo(
