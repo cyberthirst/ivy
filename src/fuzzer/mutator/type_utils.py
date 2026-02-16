@@ -182,7 +182,7 @@ def find_nested_subscript_bases(
     return result
 
 
-def find_dereference_bases(
+def find_dereferenceable_vars(
     target_type: VyperType,
     vars_dict: dict[str, VarInfo],
     max_steps: int,

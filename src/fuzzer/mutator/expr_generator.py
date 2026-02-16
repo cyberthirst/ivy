@@ -41,7 +41,7 @@ from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_dereferenceable,
-    find_dereference_bases,
+    find_dereferenceable_vars,
     find_dereference_sources,
 )
 from fuzzer.mutator.constant_folding import (
@@ -272,7 +272,7 @@ class ExprGenerator(BaseGenerator):
                 for name, var_info in vars_dict.items()
                 if not self._is_empty_constant_array(name, var_info, ctx.context)
             }
-        return find_dereference_bases(
+        return find_dereferenceable_vars(
             ctx.target_type,
             vars_dict,
             max_steps=self.cfg.subscript_chain_max_steps,
