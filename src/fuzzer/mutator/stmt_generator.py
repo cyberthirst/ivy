@@ -146,8 +146,9 @@ class StatementGenerator(BaseGenerator):
         """Generate a type, biasing towards existing types and preferred fuzzing types."""
         skip = skip or set()
 
-        # Bias towards existing variable types to enable compatible expressions
-        if self.rng.random() < self.cfg.existing_type_bias_prob and context.all_vars:
+        # Bias towards accessible variable types to enable compatible expressions
+        accessible_vars = context.find_matching_vars()
+        if self.rng.random() < self.cfg.existing_type_bias_prob and accessible_vars:
             seen: set[str] = set()
             all_types: list[VyperType] = []
 
@@ -160,7 +161,7 @@ class StatementGenerator(BaseGenerator):
                 seen.add(key)
                 all_types.append(typ)
 
-            for var_info in context.all_vars.values():
+            for _name, var_info in accessible_vars:
                 var_type = var_info.typ
                 add_type(var_type)
                 for child_t, _depth in collect_dereference_types(
