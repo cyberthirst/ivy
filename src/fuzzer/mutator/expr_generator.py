@@ -42,6 +42,7 @@ from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.type_utils import (
     is_dereferenceable,
     find_dereference_bases,
+    find_dereference_sources,
 )
 from fuzzer.mutator.constant_folding import (
     ConstEvalError,
@@ -89,8 +90,8 @@ class ExprGenerator(BaseGenerator):
         depth_cfg: Optional[DepthConfig] = None,
     ):
         self.literal_generator = literal_generator
-        self.function_registry = function_registry
-        self.interface_registry = interface_registry
+        self.function_registry: FunctionRegistry = function_registry
+        self.interface_registry: InterfaceRegistry = interface_registry
         self.type_generator = type_generator
         self.cfg = cfg or ExprGeneratorConfig()
 
@@ -279,6 +280,26 @@ class ExprGenerator(BaseGenerator):
             allow_subscript=allow_subscript,
         )
 
+    def _find_deref_func_bases(
+        self,
+        *,
+        ctx: ExprGenCtx,
+        allow_attribute: bool,
+        allow_subscript: bool,
+    ) -> list[tuple[ContractFunctionT, VyperType]]:
+        funcs = self._get_callable_functions(ctx.context)
+        return find_dereference_sources(
+            ctx.target_type,
+            (
+                (func, func.return_type)
+                for func in funcs
+                if func.return_type is not None
+            ),
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+
     def _is_empty_constant_array(
         self,
         name: str,
@@ -321,6 +342,15 @@ class ExprGenerator(BaseGenerator):
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
 
+    def _is_dereference_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        if not self._is_func_call_applicable(ctx=ctx):
+            return False
+        return bool(
+            self._find_deref_func_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=True
+            )
+        )
+
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
         return ctx.context.current_mutability != ExprMutability.CONST
@@ -357,6 +387,14 @@ class ExprGenerator(BaseGenerator):
     def _weight_dereference_var(self, *, ctx: ExprGenCtx, **_) -> float:
         n = len(
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
+        )
+        return self._weight_deref_like(n)
+
+    def _weight_dereference_func_call(self, *, ctx: ExprGenCtx, **_) -> float:
+        n = len(
+            self._find_deref_func_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=True
+            )
         )
         return self._weight_deref_like(n)
 
@@ -420,8 +458,6 @@ class ExprGenerator(BaseGenerator):
         target_type: VyperType,
         context: GenerationContext,
     ) -> Optional[ast.Call]:
-        if not self.function_registry:
-            return None
         src_type = self._expr_type(src_expr)
         if src_type is None:
             return None
@@ -443,9 +479,6 @@ class ExprGenerator(BaseGenerator):
     def _pick_convert_source_expr(
         self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> Optional[ast.VyperNode]:
-        if not self.function_registry:
-            return None
-
         var_candidates = [
             (name, info)
             for name, info in context.find_matching_vars(None)
@@ -733,6 +766,43 @@ class ExprGenerator(BaseGenerator):
         )
         if not built:
             return None
+        node, node_t = built
+        node._metadata["type"] = node_t
+        return node
+
+    @strategy(
+        name="expr.dereference_func_call",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_dereference_func_call_applicable",
+        weight="_weight_dereference_func_call",
+    )
+    def _generate_dereference_func_call(
+        self, *, ctx: ExprGenCtx, **_
+    ) -> Optional[ast.VyperNode]:
+        bases = self._find_deref_func_bases(
+            ctx=ctx, allow_attribute=True, allow_subscript=True
+        )
+        if not bases:
+            return None
+
+        func_t, base_t = ctx.gen.rng.choice(bases)
+        base_node = self._generate_call_to_function(func_t, ctx.context, ctx.depth)
+        if base_node is None:
+            return None
+
+        built = self.build_dereference_chain_to_target(
+            base_node,
+            base_t,
+            ctx.target_type,
+            ctx.context,
+            self.child_depth(ctx.depth),
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=True,
+        )
+        if not built:
+            return None
+
         node, node_t = built
         node._metadata["type"] = node_t
         return node
@@ -1252,6 +1322,106 @@ class ExprGenerator(BaseGenerator):
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
 
+    def _can_emit_function_call(
+        self, func_t: ContractFunctionT, context: GenerationContext
+    ) -> bool:
+        if not func_t.is_external:
+            return True
+        # External calls currently use `self` as the target address.
+        if context.current_function_mutability == StateMutability.PURE:
+            return False
+        return True
+
+    def _get_callable_functions(
+        self,
+        context: GenerationContext,
+        *,
+        return_type: Optional[VyperType] = None,
+    ) -> list[ContractFunctionT]:
+        current_func = self.function_registry.current_function
+        if current_func is None:
+            return []
+
+        funcs = self.function_registry.get_callable_functions(
+            return_type=return_type,
+            from_function=current_func,
+            caller_mutability=context.current_function_mutability,
+        )
+        return [f for f in funcs if self._can_emit_function_call(f, context)]
+
+    def _get_compatible_builtins(
+        self, target_type: VyperType, context: GenerationContext
+    ) -> list[tuple[str, object]]:
+        candidates = self.function_registry.get_compatible_builtins(
+            target_type,
+            caller_mutability=context.current_function_mutability,
+        )
+        return [(name, builtin) for name, builtin in candidates if name != "convert"]
+
+    def _create_callable_function(
+        self,
+        *,
+        return_type: VyperType,
+        context: GenerationContext,
+    ) -> Optional[ContractFunctionT]:
+        current_func = self.function_registry.current_function
+        if current_func is None:
+            return None
+
+        caller_nonreentrant_ctx = self.function_registry.reachable_from_nonreentrant(
+            current_func
+        )
+        func_def = self.function_registry.create_new_function(
+            return_type=return_type,
+            type_generator=self.type_generator,
+            max_args=2,
+            caller_mutability=context.current_function_mutability,
+            allow_nonreentrant=not caller_nonreentrant_ctx,
+        )
+        if func_def is None:
+            return None
+
+        func_t = func_def._metadata["func_type"]
+        if not self._can_emit_function_call(func_t, context):
+            return None
+        return func_t
+
+    def _generate_call_to_function(
+        self,
+        func_t: ContractFunctionT,
+        context: GenerationContext,
+        depth: int,
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
+        if func_t.return_type is None:
+            return None
+        if not self._can_emit_function_call(func_t, context):
+            return None
+
+        arg_depth = self.child_depth(depth)
+        args = []
+        for pos_arg in func_t.positional_args:
+            if pos_arg.typ:
+                args.append(self.generate(pos_arg.typ, context, arg_depth))
+
+        if func_t.is_external:
+            result_node = self._generate_external_call(func_t, args)
+        else:
+            assert func_t.is_internal, (
+                f"Expected internal or external function, got {func_t}"
+            )
+            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_t.name)
+            func_node._metadata = {"type": func_t}
+            result_node = self._finalize_call(func_node, args, func_t.return_type)
+
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function,
+                func_t.name,
+                internal=func_t.is_internal,
+            )
+
+        return result_node
+
     @strategy(
         name="expr.func_call",
         tags=frozenset({"expr", "recursive"}),
@@ -1260,38 +1430,15 @@ class ExprGenerator(BaseGenerator):
     def _generate_func_call(
         self, *, ctx: ExprGenCtx, **_
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        if not self.function_registry:
-            return None
-
-        current_func = self.function_registry.current_function
-        assert current_func is not None
-
-        caller_mutability = ctx.context.current_function_mutability
-        caller_nonreentrant_ctx = self.function_registry.reachable_from_nonreentrant(
-            current_func
+        compatible_funcs = self._get_callable_functions(
+            ctx.context, return_type=ctx.target_type
         )
-
-        # Gather candidates
-        compatible_func = self.function_registry.get_compatible_function(
-            ctx.target_type,
-            current_func,
-            caller_mutability=caller_mutability,
-        )
-        compatible_builtins = self.function_registry.get_compatible_builtins(
-            ctx.target_type,
-            caller_mutability=caller_mutability,
-        )
-        if compatible_builtins:
-            compatible_builtins = [
-                (name, builtin)
-                for name, builtin in compatible_builtins
-                if name != "convert"
-            ]
+        compatible_builtins = self._get_compatible_builtins(ctx.target_type, ctx.context)
 
         # Decide path: prefer user function, but sometimes pick builtin
         use_builtin = False
         if compatible_builtins:
-            if not compatible_func:
+            if not compatible_funcs:
                 use_builtin = True
             else:
                 use_builtin = (
@@ -1304,67 +1451,28 @@ class ExprGenerator(BaseGenerator):
                 name, builtin, ctx.target_type, ctx.context, ctx.depth
             )
 
-        # Fall back to user function (existing or create new)
-        if (
-            not compatible_func
-            or ctx.gen.rng.random() < self.cfg.create_new_function_prob
+        func_t: Optional[ContractFunctionT] = None
+        if compatible_funcs and (
+            ctx.gen.rng.random() >= self.cfg.create_new_function_prob
         ):
-            # Create a new function (returns ast.FunctionDef or None)
-            func_def = self.function_registry.create_new_function(
+            func_t = ctx.gen.rng.choice(compatible_funcs)
+        else:
+            func_t = self._create_callable_function(
                 return_type=ctx.target_type,
-                type_generator=self.type_generator,
-                max_args=2,
-                caller_mutability=caller_mutability,
-                allow_nonreentrant=not caller_nonreentrant_ctx,
+                context=ctx.context,
             )
-            if func_def is None:
-                # Can't create more functions; try builtin if available
-                if compatible_builtins:
-                    name, builtin = ctx.gen.rng.choice(compatible_builtins)
-                    return self._generate_builtin_call(
-                        name, builtin, ctx.target_type, ctx.context, ctx.depth
-                    )
-                return None
-            func_t = func_def._metadata["func_type"]
-        else:
-            func_t = compatible_func
+            if func_t is None and compatible_funcs:
+                func_t = ctx.gen.rng.choice(compatible_funcs)
 
-        func_name = func_t.name
+        if func_t is None:
+            if compatible_builtins:
+                name, builtin = ctx.gen.rng.choice(compatible_builtins)
+                return self._generate_builtin_call(
+                    name, builtin, ctx.target_type, ctx.context, ctx.depth
+                )
+            return None
 
-        # Generate arguments
-        arg_depth = self.child_depth(ctx.depth)
-        args = []
-        for pos_arg in func_t.positional_args:
-            if pos_arg.typ:
-                arg_expr = self.generate(pos_arg.typ, ctx.context, arg_depth)
-                args.append(arg_expr)
-
-        if func_t.is_external:
-            # External functions must be called through an interface
-            if not self.interface_registry:
-                return None
-            # External calls use `self` as address, which is not allowed in @pure
-            # TODO: support literal addresses for pure function calls
-            if ctx.context.current_function_mutability == StateMutability.PURE:
-                return None
-            result_node = self._generate_external_call(func_t, args)
-        else:
-            assert func_t.is_internal, (
-                f"Expected internal or external function, got {func_t}"
-            )
-            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_name)
-            func_node._metadata = {"type": func_t}
-            result_node = self._finalize_call(func_node, args, func_t.return_type)
-
-        # Record the call in the call graph
-        if self.function_registry.current_function:
-            self.function_registry.add_call(
-                self.function_registry.current_function,
-                func_name,
-                internal=func_t.is_internal,
-            )
-
-        return result_node
+        return self._generate_call_to_function(func_t, ctx.context, ctx.depth)
 
     def _generate_external_call(
         self, func: ContractFunctionT, args: list
@@ -1514,6 +1622,7 @@ class ExprGenerator(BaseGenerator):
                 continue
 
             max_arity = max(1, min(3, payload_budget // 32))
+
             if max_arity == 1:
                 arity = 1
             else:

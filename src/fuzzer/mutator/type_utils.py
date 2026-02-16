@@ -4,7 +4,7 @@ Pure functions for analyzing and traversing Vyper type structures,
 particularly for subscriptable types (HashMaps, arrays, tuples).
 """
 
-from typing import Generator
+from typing import Generator, Iterable, TypeVar
 
 from vyper.semantics.types import (
     VyperType,
@@ -15,6 +15,8 @@ from vyper.semantics.types import (
     StructT,
 )
 from vyper.semantics.analysis.base import VarInfo
+
+TSource = TypeVar("TSource")
 
 
 def is_subscriptable(t: VyperType) -> bool:
@@ -189,21 +191,40 @@ def find_dereference_bases(
     allow_subscript: bool = True,
 ) -> list[tuple[str, VyperType]]:
     """Find variables that can reach target_type via dereferencing."""
-    result: list[tuple[str, VyperType]] = []
+    return find_dereference_sources(
+        target_type,
+        ((name, var_info.typ) for name, var_info in vars_dict.items()),
+        max_steps,
+        allow_attribute=allow_attribute,
+        allow_subscript=allow_subscript,
+    )
 
-    for name, var_info in vars_dict.items():
-        t = var_info.typ
+
+def find_dereference_sources(
+    target_type: VyperType,
+    sources: Iterable[tuple[TSource, VyperType]],
+    max_steps: int,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> list[tuple[TSource, VyperType]]:
+    """Find typed sources that can reach target_type via dereferencing."""
+    result: list[tuple[TSource, VyperType]] = []
+
+    for source, source_t in sources:
         if not is_dereferenceable(
-            t, allow_attribute=allow_attribute, allow_subscript=allow_subscript
+            source_t,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
         ):
             continue
         if can_reach_type_via_deref(
-            t,
+            source_t,
             target_type,
             max_steps,
             allow_attribute=allow_attribute,
             allow_subscript=allow_subscript,
         ):
-            result.append((name, t))
+            result.append((source, source_t))
 
     return result
