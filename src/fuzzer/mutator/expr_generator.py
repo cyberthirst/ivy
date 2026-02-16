@@ -330,6 +330,17 @@ class ExprGenerator(BaseGenerator):
         except Exception:
             return getattr(value, "length", None) == 0
 
+    def _folded_constant_sequence_length(
+        self,
+        node: ast.VyperNode,
+        constants: dict[str, object],
+    ) -> Optional[int]:
+        try:
+            value = evaluate_constant_expression(node, constants)
+        except Exception:
+            return None
+        return len(value)
+
     def _weight_deref_like(self, n: int) -> float:
         cfg = self.cfg
         if n == 0:
@@ -929,9 +940,15 @@ class ExprGenerator(BaseGenerator):
             )
             len_call = ast_builder.uint256_literal(seq_t.length)
             return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
+        dyn_const_len: Optional[int] = None
         if isinstance(seq_t, DArrayT):
-            len_call = build_len_call(base_node)
+            dyn_const_len = self._folded_constant_sequence_length(
+                base_node, context.constants
+            )
             if self.rng.random() < cfg.dynarray_last_index_in_guard_prob:
+                if dyn_const_len is not None and dyn_const_len > 0:
+                    return ast_builder.uint256_literal(dyn_const_len - 1)
+                len_call = build_len_call(base_node)
                 return build_dyn_last_index(len_call)
 
         # Choose the raw index expression (biased towards small literals for DynArray)
@@ -948,6 +965,10 @@ class ExprGenerator(BaseGenerator):
                 fallback=lambda: small_literal_index(self.rng, seq_t.length),
                 reject_if=self._static_index_is_invalid_constant,
             )
+
+        if dyn_const_len is not None and dyn_const_len > 0:
+            len_lit = ast_builder.uint256_literal(dyn_const_len)
+            return ast_builder.uint256_binop(i_expr, ast.Mod(), len_lit)
 
         len_call = build_len_call(base_node)
         return build_guarded_index(i_expr, len_call)
