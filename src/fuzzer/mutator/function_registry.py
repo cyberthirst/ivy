@@ -349,7 +349,7 @@ class FunctionRegistry:
 
             func = self.functions[name]
 
-            if caller_mutability == StateMutability.PURE and func.is_external:
+            if caller_mutability is StateMutability.PURE and func.is_external:
                 # TODO: we can't generate the `self` address in pure functions.
                 continue
 
@@ -438,12 +438,12 @@ class FunctionRegistry:
         # Choose function properties
         if visibility is None:
             visibility_choices = [FunctionVisibility.INTERNAL, FunctionVisibility.EXTERNAL]
-            if caller_mutability == StateMutability.PURE:
+            if caller_mutability is StateMutability.PURE:
                 visibility_choices = [FunctionVisibility.INTERNAL]
             visibility = self.rng.choice(visibility_choices)
         elif (
-            caller_mutability == StateMutability.PURE
-            and visibility == FunctionVisibility.EXTERNAL
+            caller_mutability is StateMutability.PURE
+            and visibility is FunctionVisibility.EXTERNAL
         ):
             return None
 
