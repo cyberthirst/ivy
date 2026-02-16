@@ -60,6 +60,7 @@ class ExprGeneratorConfig:
     # Function call generation
     use_builtin_when_both_available_prob: float = 0.4
     create_new_function_prob: float = 0.1  # When compatible function exists
+    dereference_func_call_weight: float = 0.3
 
     # Builtin: slice
     slice_use_bytes32_source_prob: float = 0.25

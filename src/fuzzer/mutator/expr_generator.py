@@ -391,12 +391,7 @@ class ExprGenerator(BaseGenerator):
         return self._weight_deref_like(n)
 
     def _weight_dereference_func_call(self, *, ctx: ExprGenCtx, **_) -> float:
-        n = len(
-            self._find_deref_func_bases(
-                ctx=ctx, allow_attribute=True, allow_subscript=True
-            )
-        )
-        return self._weight_deref_like(n)
+        return self.cfg.dereference_func_call_weight
 
     def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
         return getattr(node, "_metadata", {}).get("type")
