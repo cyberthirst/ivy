@@ -26,24 +26,14 @@ from vyper.semantics.types.subscriptable import _SequenceT
 from vyper.semantics.analysis.base import VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
-from fuzzer.mutator.literal_generator import LiteralGenerator
-from fuzzer.mutator.context import GenerationContext, ExprMutability
-from fuzzer.mutator.function_registry import FunctionRegistry
-from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.convert_utils import (
     convert_is_valid,
     convert_target_supported,
     pick_convert_source_type,
 )
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
-from fuzzer.mutator.base_generator import BaseGenerator
-from fuzzer.mutator.strategy import strategy
-from fuzzer.mutator.type_utils import (
-    is_dereferenceable,
-    find_dereferenceable_vars,
-    find_dereference_sources,
-)
 from fuzzer.mutator.constant_folding import (
     ConstEvalError,
     ConstEvalNonConstant,
@@ -51,10 +41,8 @@ from fuzzer.mutator.constant_folding import (
     evaluate_constant_expression,
     fold_constant_expression_status,
 )
-from fuzzer.mutator.dereference_utils import (
-    DerefCandidate,
-    dereference_candidates,
-)
+from fuzzer.mutator.context import GenerationContext, ExprMutability
+from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.indexing import (
     small_literal_index,
     random_literal_index,
@@ -63,6 +51,16 @@ from fuzzer.mutator.indexing import (
     build_guarded_index,
     build_dyn_last_index,
     INDEX_TYPE,
+)
+from fuzzer.mutator.interface_registry import InterfaceRegistry
+from fuzzer.mutator.literal_generator import LiteralGenerator
+from fuzzer.mutator.strategy import strategy
+from fuzzer.mutator.type_utils import (
+    DerefCandidate,
+    dereference_candidates,
+    find_dereference_sources,
+    find_dereferenceable_vars,
+    is_dereferenceable,
 )
 from fuzzer.type_generator import TypeGenerator
 from ivy.builtins.builtins import builtin_convert

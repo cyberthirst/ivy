@@ -14,24 +14,24 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
-from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
-from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.ast_utils import ast_equivalent, body_is_terminated
-from fuzzer.mutator.constant_folding import evaluate_constant_expression
-from fuzzer.mutator.type_utils import is_dereferenceable
-from fuzzer.mutator.dereference_utils import (
-    pick_dereference_target_type,
-    collect_dereference_types,
-)
 from fuzzer.mutator.augassign_utils import (
     augassign_ops_for_type,
     is_augassignable_type,
     augassign_rhs_type,
     can_reach_augassignable,
 )
+from fuzzer.mutator.base_generator import BaseGenerator
+from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
+from fuzzer.mutator.constant_folding import evaluate_constant_expression
+from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
 from fuzzer.mutator.strategy import strategy
+from fuzzer.mutator.type_utils import (
+    is_dereferenceable,
+    pick_dereference_target_type,
+    collect_dereference_types,
+)
 
 
 @dataclass
