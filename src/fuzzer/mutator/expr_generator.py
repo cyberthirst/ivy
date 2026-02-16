@@ -1364,6 +1364,17 @@ class ExprGenerator(BaseGenerator):
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
 
+    def _effective_call_mutability(
+        self, context: GenerationContext
+    ) -> StateMutability:
+        caller_mutability = context.current_function_mutability
+        if (
+            context.in_iterable_expr
+            and caller_mutability not in (StateMutability.PURE, StateMutability.VIEW)
+        ):
+            return StateMutability.VIEW
+        return caller_mutability
+
     def _get_callable_functions(
         self,
         context: GenerationContext,
@@ -1374,19 +1385,21 @@ class ExprGenerator(BaseGenerator):
         if current_func is None:
             return []
 
+        caller_mutability = self._effective_call_mutability(context)
         funcs = self.function_registry.get_callable_functions(
             return_type=return_type,
             from_function=current_func,
-            caller_mutability=context.current_function_mutability,
+            caller_mutability=caller_mutability,
         )
         return funcs
 
     def _get_compatible_builtins(
         self, target_type: VyperType, context: GenerationContext
     ) -> list[tuple[str, object]]:
+        caller_mutability = self._effective_call_mutability(context)
         candidates = self.function_registry.get_compatible_builtins(
             target_type,
-            caller_mutability=context.current_function_mutability,
+            caller_mutability=caller_mutability,
         )
         return [(name, builtin) for name, builtin in candidates if name != "convert"]
 
@@ -1407,7 +1420,7 @@ class ExprGenerator(BaseGenerator):
             return_type=return_type,
             type_generator=self.type_generator,
             max_args=2,
-            caller_mutability=context.current_function_mutability,
+            caller_mutability=self._effective_call_mutability(context),
             allow_nonreentrant=not caller_nonreentrant_ctx,
         )
         if func_def is None:

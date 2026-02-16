@@ -870,11 +870,12 @@ class StatementGenerator(BaseGenerator):
         # Generate 1-5 elements
         num_elements = ctx.gen.rng.randint(1, 5)
         elements = []
-        for _ in range(num_elements):
-            elem = self.expr_generator.generate(
-                element_type, ctx.context, depth=self.expr_generator.root_depth()
-            )
-            elements.append(elem)
+        with ctx.context.iterable_expr():
+            for _ in range(num_elements):
+                elem = self.expr_generator.generate(
+                    element_type, ctx.context, depth=self.expr_generator.root_depth()
+                )
+                elements.append(elem)
 
         iter_node = ast.List(elements=elements)
         return iter_node, element_type, None, None

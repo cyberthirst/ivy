@@ -57,6 +57,7 @@ class GenerationContext:
     current_access_mode: AccessMode = AccessMode.READ
     in_init: bool = False
     remaining_immutables: Set[str] = field(default_factory=set)
+    iterable_expr_depth: int = 0
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)
@@ -114,6 +115,10 @@ class GenerationContext:
             return True
         return any(scope.scope_type == ScopeType.FOR for scope in self.scope_stack)
 
+    @property
+    def in_iterable_expr(self) -> bool:
+        return self.iterable_expr_depth > 0
+
     @contextmanager
     def new_scope(self, scope_type: ScopeType):
         self._push_scope(scope_type)
@@ -148,6 +153,14 @@ class GenerationContext:
             yield
         finally:
             self.current_access_mode = prev
+
+    @contextmanager
+    def iterable_expr(self):
+        self.iterable_expr_depth += 1
+        try:
+            yield
+        finally:
+            self.iterable_expr_depth -= 1
 
     def _is_var_accessible(self, name: str, var_info: VarInfo) -> bool:
         if self.current_mutability == ExprMutability.CONST:
