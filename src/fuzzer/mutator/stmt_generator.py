@@ -146,7 +146,7 @@ class StatementGenerator(BaseGenerator):
         """Generate a type, biasing towards existing types and preferred fuzzing types."""
         skip = skip or set()
 
-        # Bias towards accessible variable types to enable compatible expressions
+        # Bias towards accessible variable types and callable return types
         accessible_vars = context.find_matching_vars()
         if self.rng.random() < self.cfg.existing_type_bias_prob and accessible_vars:
             seen: set[str] = set()
@@ -168,6 +168,22 @@ class StatementGenerator(BaseGenerator):
                     var_type, max_steps=self.cfg.deref_chain_max_steps
                 ):
                     add_type(child_t)
+
+            # Include return types of callable functions
+            func_registry = self.expr_generator.function_registry
+            if func_registry and func_registry.current_function:
+                callable_funcs = func_registry.get_callable_functions(
+                    from_function=func_registry.current_function,
+                    caller_mutability=context.current_function_mutability,
+                )
+                for func in callable_funcs:
+                    if func.return_type is not None:
+                        add_type(func.return_type)
+                        for child_t, _depth in collect_dereference_types(
+                            func.return_type,
+                            max_steps=self.cfg.deref_chain_max_steps,
+                        ):
+                            add_type(child_t)
 
             if all_types:
                 return self.rng.choice(all_types)
