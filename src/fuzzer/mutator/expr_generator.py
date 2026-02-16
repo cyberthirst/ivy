@@ -353,7 +353,13 @@ class ExprGenerator(BaseGenerator):
 
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
-        return ctx.context.current_mutability != ExprMutability.CONST
+        if ctx.context.current_mutability == ExprMutability.CONST:
+            return False
+        # TODO: enable once https://github.com/vyperlang/vyper/issues/3480
+        # or https://github.com/vyperlang/vyper/issues/4825 is fixed
+        if isinstance(ctx.target_type, TupleT):
+            return False
+        return True
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         if ctx.context.current_mutability == ExprMutability.CONST:
