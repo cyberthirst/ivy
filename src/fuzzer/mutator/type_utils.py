@@ -19,6 +19,7 @@ from vyper.semantics.types import (
 )
 
 TSource = TypeVar("TSource")
+SUBSCRIPTABLE_TYPES = (HashMapT, SArrayT, DArrayT, TupleT)
 
 
 @dataclass(frozen=True)
@@ -31,7 +32,18 @@ class DerefCandidate:
 
 def is_subscriptable(t: VyperType) -> bool:
     """Check if type supports subscript access."""
-    return isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT))
+    return isinstance(t, SUBSCRIPTABLE_TYPES)
+
+
+def subscript_child_types(
+    t: VyperType,
+) -> Generator[tuple[VyperType, Optional[int]], None, None]:
+    """Yield child types and optional tuple index for subscriptable types."""
+    if isinstance(t, (HashMapT, SArrayT, DArrayT)):
+        yield t.value_type, None
+    elif isinstance(t, TupleT):
+        for i, member_t in enumerate(getattr(t, "member_types", [])):
+            yield member_t, i
 
 
 def is_dereferenceable(
@@ -41,7 +53,7 @@ def is_dereferenceable(
     allow_subscript: bool = True,
 ) -> bool:
     """Check if type supports attribute or subscript dereferencing."""
-    if allow_subscript and isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT)):
+    if allow_subscript and is_subscriptable(t):
         return True
     if allow_attribute and isinstance(t, StructT):
         return True
@@ -50,12 +62,8 @@ def is_dereferenceable(
 
 def child_types(t: VyperType) -> Generator[VyperType, None, None]:
     """Yield element/value types accessible via subscript."""
-    if isinstance(t, HashMapT):
-        yield t.value_type
-    elif isinstance(t, (SArrayT, DArrayT)):
-        yield t.value_type
-    elif isinstance(t, TupleT):
-        yield from getattr(t, "member_types", [])
+    for child_t, _ in subscript_child_types(t):
+        yield child_t
 
 
 def dereference_child_types(
@@ -208,47 +216,23 @@ def dereference_candidates(
                 )
             )
 
-    if allow_subscript and is_subscriptable(cur_t):
-        if isinstance(cur_t, HashMapT):
-            child_t = cur_t.value_type
-            if allow_deref_candidate(
+    if allow_subscript:
+        for child_t, tuple_index in subscript_child_types(cur_t):
+            if not allow_deref_candidate(
                 child_t,
                 target_type=target_type,
                 max_steps_remaining=max_steps_remaining,
                 allow_attribute=allow_attribute,
                 allow_subscript=allow_subscript,
             ):
-                candidates.append(DerefCandidate(kind="subscript", child_type=child_t))
-
-        elif isinstance(cur_t, (SArrayT, DArrayT)):
-            child_t = cur_t.value_type
-            if allow_deref_candidate(
-                child_t,
-                target_type=target_type,
-                max_steps_remaining=max_steps_remaining,
-                allow_attribute=allow_attribute,
-                allow_subscript=allow_subscript,
-            ):
-                candidates.append(DerefCandidate(kind="subscript", child_type=child_t))
-
-        elif isinstance(cur_t, TupleT):
-            mtypes = list(getattr(cur_t, "member_types", []))
-            for i, mt in enumerate(mtypes):
-                if not allow_deref_candidate(
-                    mt,
-                    target_type=target_type,
-                    max_steps_remaining=max_steps_remaining,
-                    allow_attribute=allow_attribute,
-                    allow_subscript=allow_subscript,
-                ):
-                    continue
-                candidates.append(
-                    DerefCandidate(
-                        kind="subscript",
-                        child_type=mt,
-                        tuple_index=i,
-                    )
+                continue
+            candidates.append(
+                DerefCandidate(
+                    kind="subscript",
+                    child_type=child_t,
+                    tuple_index=tuple_index,
                 )
+            )
 
     return candidates
 
