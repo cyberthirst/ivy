@@ -36,51 +36,6 @@ from fuzzer.mutator.type_utils import (
 )
 
 
-class BodyBuilder:
-    def __init__(self, body: list, expr_gen, num_decls: int = 0):
-        self._body = body
-        self._expr_gen = expr_gen
-        self.num_decls = num_decls
-
-    def _drain_prelude(self) -> list:
-        return self._expr_gen.drain_tmp_decls()
-
-    def append_decl(self, decl):
-        prelude = self._drain_prelude()
-        self._body[self.num_decls:self.num_decls] = prelude
-        self.num_decls += len(prelude)
-        self._body.insert(self.num_decls, decl)
-        self.num_decls += 1
-
-    def append_generated_decl(self, decl):
-        prelude = self._drain_prelude()
-        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        self._body[self.num_decls:self.num_decls] = decls
-        self.num_decls += len(decls)
-        self._body[self.num_decls:self.num_decls] = nondecls + [decl]
-        self.num_decls += 1
-
-    def append_stmt(self, stmt):
-        prelude = self._drain_prelude()
-        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        self._body[self.num_decls:self.num_decls] = decls
-        self.num_decls += len(decls)
-        self._body.extend(nondecls + [stmt])
-
-    def insert_stmt(self, stmt, pos: int):
-        prelude = self._drain_prelude()
-        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
-        self._body[self.num_decls:self.num_decls] = decls
-        self.num_decls += len(decls)
-        # Adjust pos for any decls we just inserted above it
-        pos = max(pos + len(decls), self.num_decls)
-        chunk = nondecls + [stmt]
-        self._body[pos:pos] = chunk
-
-
 @dataclass
 class StmtGenCtx:
     context: GenerationContext
@@ -288,7 +243,7 @@ class StatementGenerator(BaseGenerator):
             max_stmts = min_stmts
 
         num_vars = self.rng.randint(min_stmts, max_stmts)
-        bb = BodyBuilder(body, self.expr_generator)
+        num_decls = 0
         for _ in range(num_vars):
             ctx = StmtGenCtx(
                 context=context,
@@ -298,9 +253,10 @@ class StatementGenerator(BaseGenerator):
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
-            bb.append_decl(var_decl)
+            body.insert(num_decls, var_decl)
+            num_decls += 1
 
-        return bb.num_decls
+        return num_decls
 
     def inject_random_statements(
         self,
@@ -346,23 +302,22 @@ class StatementGenerator(BaseGenerator):
         if context.is_module_scope:
             return
 
-        bb = BodyBuilder(body, self.expr_generator, num_decls=num_vars)
-
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate(context, parent, depth)
 
             if isinstance(stmt, ast.AnnAssign):
-                bb.append_generated_decl(stmt)
+                body.insert(num_vars, stmt)
+                num_vars += 1
                 continue
             # Insert before the last statement to avoid inserting after return
             # If body is empty or only has vars, append at the end
-            max_pos = max(bb.num_decls, len(body) - 1)
-            if bb.num_decls <= max_pos:
-                insert_pos = self.rng.randint(bb.num_decls, max_pos)
+            max_pos = max(num_vars, len(body) - 1)
+            if num_vars <= max_pos:
+                insert_pos = self.rng.randint(num_vars, max_pos)
             else:
-                insert_pos = bb.num_decls
-            bb.insert_stmt(stmt, insert_pos)
+                insert_pos = num_vars
+            body.insert(insert_pos, stmt)
 
         # Ensure function scope terminates with a return when required.
         if isinstance(parent, ast.FunctionDef):
@@ -376,7 +331,7 @@ class StatementGenerator(BaseGenerator):
                     depth=self.expr_generator.root_depth(),
                     allow_tuple_literal=True,
                 )
-                bb.append_stmt(ast.Return(value=ret_expr))
+                body.append(ast.Return(value=ret_expr))
 
         if allow_loop_terminator:
             self._maybe_append_loop_terminator(body, context, parent)
@@ -741,8 +696,6 @@ class StatementGenerator(BaseGenerator):
                 depth=self.expr_generator.root_depth(),
                 allow_tuple_literal=False,
             )
-            prelude = self.expr_generator.drain_tmp_decls()
-            stmts.extend(prelude)
             stmts.append(ast.Assign(targets=[target], value=value_expr))
             context.mark_immutable_assigned(name)
         return stmts

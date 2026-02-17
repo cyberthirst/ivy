@@ -119,9 +119,6 @@ class ExprGenerator(BaseGenerator):
         self._hoist_seq = 0
         self._active_context = None
 
-    def drain_tmp_decls(self) -> list[ast.VyperNode]:
-        return []
-
     def hoist_to_tmp_var(self, expr: ast.VyperNode) -> ast.VyperNode:
         context = self._active_context
         if context is None:
