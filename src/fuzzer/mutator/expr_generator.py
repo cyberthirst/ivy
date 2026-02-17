@@ -98,7 +98,7 @@ class ExprGenerator(BaseGenerator):
         self.name_generator = name_generator or FreshNameGenerator()
 
         super().__init__(rng, depth_cfg)
-        self._pending_tmp_decls: list[ast.VyperNode] = []
+        self._hoist_seq: int = 0
         self._active_context: Optional[GenerationContext] = None
 
         self._builtin_handlers = {
@@ -116,13 +116,11 @@ class ExprGenerator(BaseGenerator):
         }
 
     def reset_state(self) -> None:
-        self._pending_tmp_decls = []
+        self._hoist_seq = 0
         self._active_context = None
 
     def drain_tmp_decls(self) -> list[ast.VyperNode]:
-        decls = self._pending_tmp_decls
-        self._pending_tmp_decls = []
-        return decls
+        return []
 
     def hoist_to_tmp_var(self, expr: ast.VyperNode) -> ast.VyperNode:
         context = self._active_context
@@ -166,9 +164,11 @@ class ExprGenerator(BaseGenerator):
             )
 
         context.add_variable(name, var_info)
-        self._pending_tmp_decls.append(decl)
         ref = ast_builder.var_ref(name, var_info)
         ref._metadata = {"type": expr_type, "varinfo": var_info}
+        ref._metadata["hoisted_prelude"] = decl
+        ref._metadata["hoist_seq"] = self._hoist_seq
+        self._hoist_seq += 1
         return ref
 
     def generate(

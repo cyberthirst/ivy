@@ -18,7 +18,7 @@ from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
-from fuzzer.mutator.ast_utils import body_is_terminated
+from fuzzer.mutator.ast_utils import body_is_terminated, hoist_prelude_decls
 from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
@@ -176,6 +176,7 @@ class AstMutator(VyperNodeTransformer):
             self._maybe_create_init(new_root)
             self._dispatch_pending_functions(new_root)
             self._add_interface_definitions(new_root)
+            hoist_prelude_decls(new_root)
             return new_root
         else:
             # Deep copy the root to avoid modifying the original
@@ -190,6 +191,7 @@ class AstMutator(VyperNodeTransformer):
         new_root = self.visit(new_root)
         assert isinstance(new_root, ast.Module)
 
+        hoist_prelude_decls(new_root)
         return new_root
 
     def _generate_module(self) -> ast.Module:
