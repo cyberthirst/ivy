@@ -36,6 +36,51 @@ from fuzzer.mutator.type_utils import (
 )
 
 
+class BodyBuilder:
+    def __init__(self, body: list, expr_gen, num_decls: int = 0):
+        self._body = body
+        self._expr_gen = expr_gen
+        self.num_decls = num_decls
+
+    def _drain_prelude(self) -> list:
+        return self._expr_gen.drain_tmp_decls()
+
+    def append_decl(self, decl):
+        prelude = self._drain_prelude()
+        self._body[self.num_decls:self.num_decls] = prelude
+        self.num_decls += len(prelude)
+        self._body.insert(self.num_decls, decl)
+        self.num_decls += 1
+
+    def append_generated_decl(self, decl):
+        prelude = self._drain_prelude()
+        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        self._body[self.num_decls:self.num_decls] = decls
+        self.num_decls += len(decls)
+        self._body[self.num_decls:self.num_decls] = nondecls + [decl]
+        self.num_decls += 1
+
+    def append_stmt(self, stmt):
+        prelude = self._drain_prelude()
+        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        self._body[self.num_decls:self.num_decls] = decls
+        self.num_decls += len(decls)
+        self._body.extend(nondecls + [stmt])
+
+    def insert_stmt(self, stmt, pos: int):
+        prelude = self._drain_prelude()
+        decls = [n for n in prelude if isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        nondecls = [n for n in prelude if not isinstance(n, (ast.AnnAssign, ast.VariableDecl))]
+        self._body[self.num_decls:self.num_decls] = decls
+        self.num_decls += len(decls)
+        # Adjust pos for any decls we just inserted above it
+        pos = max(pos + len(decls), self.num_decls)
+        chunk = nondecls + [stmt]
+        self._body[pos:pos] = chunk
+
+
 @dataclass
 class StmtGenCtx:
     context: GenerationContext
@@ -127,27 +172,6 @@ class StatementGenerator(BaseGenerator):
 
     def add_variable(self, context, name: str, var_info: VarInfo):
         context.add_variable(name, var_info)
-
-    def _set_stmt_prelude(
-        self, stmt: ast.VyperNode, prelude: list[ast.VyperNode]
-    ) -> ast.VyperNode:
-        if not prelude:
-            return stmt
-        metadata = getattr(stmt, "_metadata", {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        metadata["_ivy_prelude"] = list(prelude)
-        stmt._metadata = metadata
-        return stmt
-
-    def _take_stmt_prelude(self, stmt: ast.VyperNode) -> list[ast.VyperNode]:
-        metadata = getattr(stmt, "_metadata", None)
-        if not isinstance(metadata, dict):
-            return []
-        prelude = metadata.pop("_ivy_prelude", [])
-        if not isinstance(prelude, list):
-            return []
-        return prelude
 
     def generate_type(
         self,
@@ -264,9 +288,7 @@ class StatementGenerator(BaseGenerator):
             max_stmts = min_stmts
 
         num_vars = self.rng.randint(min_stmts, max_stmts)
-        # Drain tmp decls manually here because create_vardecl_and_register
-        # bypasses stmt generate() which normally handles the drain.
-        inserted = 0
+        bb = BodyBuilder(body, self.expr_generator)
         for _ in range(num_vars):
             ctx = StmtGenCtx(
                 context=context,
@@ -276,13 +298,9 @@ class StatementGenerator(BaseGenerator):
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
-            prelude = self.expr_generator.drain_tmp_decls()
-            body[inserted:inserted] = prelude
-            inserted += len(prelude)
-            body.insert(inserted, var_decl)
-            inserted += 1
+            bb.append_decl(var_decl)
 
-        return inserted
+        return bb.num_decls
 
     def inject_random_statements(
         self,
@@ -328,44 +346,23 @@ class StatementGenerator(BaseGenerator):
         if context.is_module_scope:
             return
 
+        bb = BodyBuilder(body, self.expr_generator, num_decls=num_vars)
+
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate(context, parent, depth)
-            prelude = self._take_stmt_prelude(stmt)
 
-            decl_prelude = [
-                node
-                for node in prelude
-                if isinstance(node, (ast.AnnAssign, ast.VariableDecl))
-            ]
-            if decl_prelude:
-                body[num_vars:num_vars] = decl_prelude
-                num_vars += len(decl_prelude)
-
-            nondecl_prelude = [
-                node
-                for node in prelude
-                if not isinstance(node, (ast.AnnAssign, ast.VariableDecl))
-            ]
-            stmt_chunk = nondecl_prelude + [stmt]
-            stmt_decl_count = sum(
-                isinstance(node, (ast.AnnAssign, ast.VariableDecl))
-                for node in stmt_chunk
-            )
             if isinstance(stmt, ast.AnnAssign):
-                body[num_vars:num_vars] = stmt_chunk
-                num_vars += stmt_decl_count
+                bb.append_generated_decl(stmt)
                 continue
             # Insert before the last statement to avoid inserting after return
             # If body is empty or only has vars, append at the end
-            max_pos = max(num_vars, len(body) - 1)
-            if num_vars <= max_pos:
-                insert_pos = self.rng.randint(num_vars, max_pos)
+            max_pos = max(bb.num_decls, len(body) - 1)
+            if bb.num_decls <= max_pos:
+                insert_pos = self.rng.randint(bb.num_decls, max_pos)
             else:
-                insert_pos = num_vars
-            body[insert_pos:insert_pos] = stmt_chunk
-            if insert_pos == num_vars:
-                num_vars += stmt_decl_count
+                insert_pos = bb.num_decls
+            bb.insert_stmt(stmt, insert_pos)
 
         # Ensure function scope terminates with a return when required.
         if isinstance(parent, ast.FunctionDef):
@@ -379,7 +376,7 @@ class StatementGenerator(BaseGenerator):
                     depth=self.expr_generator.root_depth(),
                     allow_tuple_literal=True,
                 )
-                body.append(ast.Return(value=ret_expr))
+                bb.append_stmt(ast.Return(value=ret_expr))
 
         if allow_loop_terminator:
             self._maybe_append_loop_terminator(body, context, parent)
@@ -454,8 +451,6 @@ class StatementGenerator(BaseGenerator):
             fallback=lambda: ast.Pass(),
             context={"ctx": ctx},
         )
-        prelude = self.expr_generator.drain_tmp_decls()
-        self._set_stmt_prelude(stmt, prelude)
         return stmt
 
     @strategy(
@@ -735,8 +730,8 @@ class StatementGenerator(BaseGenerator):
         self,
         context: GenerationContext,
         immutables: list[tuple[str, VarInfo]],
-    ) -> list[ast.Assign]:
-        assignments = []
+    ) -> list[ast.VyperNode]:
+        stmts: list[ast.VyperNode] = []
         for name, var_info in immutables:
             target = ast_builder.var_ref(name, var_info)
             target._metadata = {"type": var_info.typ, "varinfo": var_info}
@@ -746,9 +741,11 @@ class StatementGenerator(BaseGenerator):
                 depth=self.expr_generator.root_depth(),
                 allow_tuple_literal=False,
             )
-            assignments.append(ast.Assign(targets=[target], value=value_expr))
+            prelude = self.expr_generator.drain_tmp_decls()
+            stmts.extend(prelude)
+            stmts.append(ast.Assign(targets=[target], value=value_expr))
             context.mark_immutable_assigned(name)
-        return assignments
+        return stmts
 
     @strategy(
         name="stmt.vardecl",
