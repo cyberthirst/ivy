@@ -15,7 +15,7 @@ from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.candidate_selector import CandidateSelector
 from fuzzer.mutator.function_registry import FunctionRegistry, KWARG_PLACEHOLDER_TAG
 from fuzzer.mutator.interface_registry import InterfaceRegistry
-from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
+from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
 from fuzzer.mutator.ast_utils import body_is_terminated, hoist_prelude_decls
@@ -415,9 +415,12 @@ class AstMutator(VyperNodeTransformer):
                 KWARG_PLACEHOLDER_TAG
             ):
                 continue
-            default_expr = self.expr_generator.generate_kwarg_default(
-                kw_arg.typ, self.context
-            )
+            with self.context.mutability(ExprMutability.DEFAULT_ARG):
+                default_expr = self.expr_generator.generate(
+                    kw_arg.typ,
+                    self.context,
+                    depth=self.expr_generator.root_depth(),
+                )
             kw_arg.default_value = default_expr
             node.args.defaults[i] = default_expr
 
