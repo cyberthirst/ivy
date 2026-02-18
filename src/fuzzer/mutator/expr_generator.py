@@ -1669,7 +1669,10 @@ class ExprGenerator(BaseGenerator):
         return self.maybe_convert_expr(src_expr, target_type, context)
 
     def _random_abi_encode_arg_type(self, payload_budget: int) -> VyperType:
-        static_choices = [BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32)]
+        static_choices = [
+            BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
+            IntegerT(False, 256), IntegerT(True, 128), AddressT(),
+        ]
         can_use_dynamic = payload_budget >= 64 and self.rng.random() < 0.35
         if not can_use_dynamic:
             return self.rng.choice(static_choices)
@@ -1715,6 +1718,102 @@ class ExprGenerator(BaseGenerator):
             return ast_builder.literal(value, BytesM_T(4))
         return ast_builder.literal(value, BytesT(4))
 
+    def _pick_abi_encode_arg_types(
+        self,
+        context: GenerationContext,
+        arity: int,
+        ensure_tuple: bool,
+        has_method_id: bool,
+        target_length: int,
+    ) -> Optional[list[VyperType]]:
+        existing = self._existing_reachable_types(
+            context, skip={HashMapT}
+        )
+        self.rng.shuffle(existing)
+
+        arg_types: list[VyperType] = []
+        for t in existing:
+            if len(arg_types) >= arity:
+                break
+            candidate = arg_types + [t]
+            maxlen = self._abi_encode_maxlen(
+                candidate, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+            )
+            if maxlen is not None and maxlen <= target_length:
+                arg_types.append(t)
+
+        # Greedily fill remaining slots; arity is a soft max
+        while len(arg_types) < arity:
+            if arg_types:
+                used = self._abi_encode_maxlen(
+                    arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+                ) or 0
+            else:
+                used = 4 if has_method_id else 0
+
+            budget = target_length - used
+
+            candidates: list[VyperType] = []
+            if budget >= 32:
+                candidates.extend([
+                    BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
+                    IntegerT(False, 256), IntegerT(True, 128), AddressT(),
+                ])
+            # Dynamic types: offset(32) + length(32) + ceil(n/32)*32 data
+            if budget >= 96:
+                max_dyn_len = max(1, (budget - 64) // 32 * 32)
+                candidates.append(BytesT(self.rng.randint(1, max_dyn_len)))
+                candidates.append(StringT(self.rng.randint(1, max_dyn_len)))
+
+            if not candidates:
+                break
+
+            self.rng.shuffle(candidates)
+            for t in candidates:
+                trial = arg_types + [t]
+                maxlen = self._abi_encode_maxlen(
+                    trial, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+                )
+                if maxlen is not None and maxlen <= target_length:
+                    arg_types.append(t)
+                    break
+            else:
+                break
+
+        return arg_types if arg_types else None
+
+    def _maybe_hoist_abi_encode_arg(
+        self, expr: ast.VyperNode, context: GenerationContext
+    ) -> ast.VyperNode:
+        # Literal lists must be hoisted to get a type annotation
+        if isinstance(expr, ast.List):
+            return self.hoist_to_tmp_var(expr)
+
+        # Tuple literals: hoist any list-literal elements within
+        if isinstance(expr, ast.Tuple):
+            for i, elt in enumerate(expr.elements):
+                if isinstance(elt, ast.List):
+                    expr.elements[i] = self.hoist_to_tmp_var(elt)
+            return expr
+
+        # Expressions that constant-fold to an integer are ambiguous
+        # (could be uint8, int256, uint256, etc.) — but variable references
+        # (Name, Attribute) have declared types so are not ambiguous.
+        if not isinstance(expr, (ast.Name, ast.Attribute)):
+            status, folded = fold_constant_expression_status(
+                expr, context.constants
+            )
+            if status == "value" and isinstance(folded, ast.Int):
+                return self.hoist_to_tmp_var(expr)
+
+        # 0x 20-byte hex literals are ambiguous between address and bytes20
+        if isinstance(expr, ast.Hex):
+            hex_val = expr.value
+            if hex_val.startswith(("0x", "0X")) and len(hex_val) == 42:
+                return self.hoist_to_tmp_var(expr)
+
+        return expr
+
     def _builtin_abi_encode(
         self,
         *,
@@ -1726,59 +1825,64 @@ class ExprGenerator(BaseGenerator):
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
         if not isinstance(target_type, BytesT):
             return None
+        if target_type.length < 32:
+            return None
 
-        for _ in range(12):
-            has_method_id = target_type.length >= 36 and self.rng.random() < 0.35
-            payload_budget = target_type.length - (4 if has_method_id else 0)
-            if payload_budget < 32:
-                continue
+        has_method_id = target_type.length >= 36 and self.rng.random() < 0.35
+        max_arity = max(1, min(5, target_type.length // 32))
+        weights = [0.5 ** i for i in range(max_arity)]
+        arity = self.rng.choices(range(1, max_arity + 1), weights=weights, k=1)[0]
 
-            max_arity = max(1, min(3, payload_budget // 32))
+        ensure_tuple = self.rng.choice([True, False]) if arity == 1 else True
 
-            if max_arity == 1:
-                arity = 1
-            else:
-                arity = self.rng.choices(
-                    list(range(1, max_arity + 1)),
-                    weights=[4, 2, 1][:max_arity],
-                    k=1,
-                )[0]
+        arg_types = self._pick_abi_encode_arg_types(
+            context=context,
+            arity=arity,
+            ensure_tuple=ensure_tuple,
+            has_method_id=has_method_id,
+            target_length=target_type.length,
+        )
+        if arg_types is None:
+            return None
 
-            ensure_tuple = self.rng.choice([True, False]) if arity == 1 else True
-            arg_types = [
-                self._random_abi_encode_arg_type(payload_budget) for _ in range(arity)
-            ]
+        maxlen = self._abi_encode_maxlen(
+            arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+        )
+        if maxlen is None or maxlen > target_type.length:
+            return None
 
-            maxlen = self._abi_encode_maxlen(
-                arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+        arg_depth = self.child_depth(depth)
+        args = [
+            self._maybe_hoist_abi_encode_arg(
+                self._generate_abi_encode_arg_expr(arg_t, context, arg_depth),
+                context,
             )
-            if maxlen is None or maxlen > target_type.length:
-                continue
+            for arg_t in arg_types
+        ]
 
-            arg_depth = self.child_depth(depth)
-            args = [
-                self._generate_abi_encode_arg_expr(arg_t, context, arg_depth)
-                for arg_t in arg_types
-            ]
-
-            keywords = []
-            if arity == 1 or self.rng.random() < 0.35:
-                keywords.append(
-                    ast.keyword(
-                        arg="ensure_tuple",
-                        value=ast_builder.literal(ensure_tuple, BoolT()),
-                    )
+        keywords = []
+        if not ensure_tuple:
+            keywords.append(
+                ast.keyword(
+                    arg="ensure_tuple",
+                    value=ast_builder.literal(False, BoolT()),
                 )
-            if has_method_id:
-                keywords.append(
-                    ast.keyword(arg="method_id", value=self._generate_abi_encode_method_id())
+            )
+        elif self.rng.random() < 0.5:
+            keywords.append(
+                ast.keyword(
+                    arg="ensure_tuple",
+                    value=ast_builder.literal(True, BoolT()),
                 )
+            )
+        if has_method_id:
+            keywords.append(
+                ast.keyword(arg="method_id", value=self._generate_abi_encode_method_id())
+            )
 
-            call_node = ast.Call(func=func_node, args=args, keywords=keywords)
-            call_node._metadata = {"type": BytesT(maxlen)}
-            return call_node
-
-        return None
+        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
+        call_node._metadata = {"type": BytesT(maxlen)}
+        return call_node
 
     def _builtin_min_max(
         self,
