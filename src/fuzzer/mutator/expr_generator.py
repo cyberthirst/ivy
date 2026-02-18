@@ -654,8 +654,9 @@ class ExprGenerator(BaseGenerator):
 
         arg_types = [arg.typ for arg in func.positional_args]
         if not arg_types:
-            method_id_node._metadata = {"type": BytesM_T(4)}
-            return method_id_node
+            selector_node = ast_builder.literal(selector_bytes, BytesT(4))
+            selector_node._metadata = {"type": BytesT(4)}
+            return selector_node
 
         args = [
             self._maybe_hoist_abi_encode_arg(
