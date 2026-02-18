@@ -767,7 +767,7 @@ requires-dist = [
     { name = "rlp", specifier = ">=4.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
     { name = "titanoboa", marker = "extra == 'dev'", git = "https://github.com/cyberthirst/titanoboa.git?rev=fuzzing" },
-    { name = "vyper", git = "https://github.com/vyperlang/vyper.git?rev=6a77d89f2eb68a57b9b43e4e1f1df8e956e35286" },
+    { name = "vyper", git = "https://github.com/vyperlang/vyper.git?rev=54cb28e1790f50487df1b6dfe75027d6bd9c16a0" },
 ]
 provides-extras = ["dev"]
 
@@ -1669,7 +1669,7 @@ wheels = [
 [[package]]
 name = "vyper"
 version = "0.4.4"
-source = { git = "https://github.com/vyperlang/vyper.git?rev=6a77d89f2eb68a57b9b43e4e1f1df8e956e35286#6a77d89f2eb68a57b9b43e4e1f1df8e956e35286" }
+source = { git = "https://github.com/vyperlang/vyper.git?rev=54cb28e1790f50487df1b6dfe75027d6bd9c16a0#54cb28e1790f50487df1b6dfe75027d6bd9c16a0" }
 dependencies = [
     { name = "cbor2" },
     { name = "immutables" },
