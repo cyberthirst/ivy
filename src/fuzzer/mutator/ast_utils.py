@@ -101,6 +101,19 @@ def hoist_prelude_decls(root: ast.Module) -> None:
     _process_body(root.body)
 
 
+def contains_call(node: ast.VyperNode) -> bool:
+    if isinstance(node, (ast.Call, ast.StaticCall, ast.ExtCall)):
+        return True
+    for field in node.get_fields():
+        val = getattr(node, field, None)
+        if isinstance(val, ast.VyperNode) and contains_call(val):
+            return True
+        if isinstance(val, list):
+            if any(isinstance(v, ast.VyperNode) and contains_call(v) for v in val):
+                return True
+    return False
+
+
 def body_is_terminated(body: list[ast.VyperNode]) -> bool:
     if not body:
         return False

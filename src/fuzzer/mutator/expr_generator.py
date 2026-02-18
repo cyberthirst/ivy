@@ -27,6 +27,7 @@ from vyper.semantics.analysis.base import DataLocation, VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.ast_utils import contains_call
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.convert_utils import (
     convert_is_valid,
@@ -119,13 +120,15 @@ class ExprGenerator(BaseGenerator):
         self._hoist_seq = 0
         self._active_context = None
 
-    def hoist_to_tmp_var(self, expr: ast.VyperNode) -> ast.VyperNode:
+    def hoist_to_tmp_var(
+        self, expr: ast.VyperNode, *, prefix: Optional[str] = None
+    ) -> ast.VyperNode:
         context = self._active_context
         if context is None:
             raise ValueError("hoist_to_tmp_var requires an active generation context")
 
         expr_type = self._expr_type(expr)
-        name = self.name_generator.generate()
+        name = self.name_generator.generate(prefix=prefix)
 
         if context.is_module_scope:
             var_info = VarInfo(
@@ -959,18 +962,21 @@ class ExprGenerator(BaseGenerator):
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
 
-        # When the base is a function call, the guarded-index idiom
-        # (expr[i % max(len(expr), 1)]) duplicates the call, which makes
-        # the compiler panic about overlapping memory regions.  Use a simple
-        # literal index instead.
-        if isinstance(base_node, (ast.Call, ast.StaticCall, ast.ExtCall)):
-            return small_literal_index(self.rng, seq_t.length)
-
         cfg = self.cfg
         if self.rng.random() < cfg.index_guard_prob:
             return self._generate_guarded_index(base_node, seq_t, context, depth)
         else:
             return self._generate_random_index(seq_t, context, depth)
+
+    def _build_len_call_maybe_hoisted(
+        self, base_node: ast.VyperNode
+    ) -> ast.VyperNode:
+        # Hoist len() to avoid duplicating calls in the same
+        # expression, which triggers a Vyper ICE (overlapping memory).
+        len_call = build_len_call(base_node)
+        if contains_call(base_node):
+            return self.hoist_to_tmp_var(len_call, prefix="tmp_len")
+        return len_call
 
     def _generate_guarded_index(
         self,
@@ -1007,8 +1013,9 @@ class ExprGenerator(BaseGenerator):
             if self.rng.random() < cfg.dynarray_last_index_in_guard_prob:
                 if dyn_const_len is not None and dyn_const_len > 0:
                     return ast_builder.uint256_literal(dyn_const_len - 1)
-                len_call = build_len_call(base_node)
-                return build_dyn_last_index(len_call)
+                return build_dyn_last_index(
+                    self._build_len_call_maybe_hoisted(base_node)
+                )
 
         # Choose the raw index expression (biased towards small literals for DynArray)
         use_small = (
@@ -1029,8 +1036,9 @@ class ExprGenerator(BaseGenerator):
             len_lit = ast_builder.uint256_literal(dyn_const_len)
             return ast_builder.uint256_binop(i_expr, ast.Mod(), len_lit)
 
-        len_call = build_len_call(base_node)
-        return build_guarded_index(i_expr, len_call)
+        return build_guarded_index(
+            i_expr, self._build_len_call_maybe_hoisted(base_node)
+        )
 
     def _generate_random_index(
         self,

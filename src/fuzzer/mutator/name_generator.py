@@ -6,8 +6,8 @@ class FreshNameGenerator:
         self.prefix = prefix
         self.counter = 0
 
-    def generate(self) -> str:
-        name = f"{self.prefix}{self.counter}"
+    def generate(self, prefix: str | None = None) -> str:
+        name = f"{prefix or self.prefix}{self.counter}"
         self.counter += 1
         return name
 
