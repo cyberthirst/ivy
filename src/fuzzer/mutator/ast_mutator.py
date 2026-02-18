@@ -446,6 +446,10 @@ class AstMutator(VyperNodeTransformer):
                 self.context.function_mutability(func_state_mut),
                 init_ctx,
             ):
+                # Fill kwarg defaults before registering args —
+                # defaults are evaluated at module scope, not function scope.
+                self._fill_kwarg_defaults(node, func_type)
+
                 for arg in func_type.arguments:
                     if func_type.is_internal:
                         location = DataLocation.MEMORY
@@ -464,8 +468,6 @@ class AstMutator(VyperNodeTransformer):
                         else None,
                     )
                     self.add_variable(arg.name, var_info)
-
-                self._fill_kwarg_defaults(node, func_type)
 
                 # Generated functions with empty bodies need statements
                 if not node.body:
