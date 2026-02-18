@@ -649,11 +649,17 @@ class ExprGenerator(BaseGenerator):
         context: GenerationContext,
         depth: int,
     ) -> ast.VyperNode:
-        selector_int = next(iter(func.method_ids.values()))
+        num_kwargs = 0
+        if func.keyword_args:
+            num_kwargs = self.rng.randint(0, len(func.keyword_args))
+
+        method_id_values = list(func.method_ids.values())
+        selector_int = method_id_values[num_kwargs]
         selector_bytes = selector_int.to_bytes(4, "big")
         method_id_node = ast_builder.literal(selector_bytes, BytesM_T(4))
 
         arg_types = [arg.typ for arg in func.positional_args]
+        arg_types += [kw.typ for kw in func.keyword_args[:num_kwargs]]
         if not arg_types:
             selector_node = ast_builder.literal(selector_bytes, BytesT(4))
             selector_node._metadata = {"type": BytesT(4)}
@@ -1746,6 +1752,12 @@ class ExprGenerator(BaseGenerator):
         for pos_arg in func_t.positional_args:
             if pos_arg.typ:
                 args.append(self.generate(pos_arg.typ, context, arg_depth))
+
+        if func_t.keyword_args:
+            num_kwargs = self.rng.randint(0, len(func_t.keyword_args))
+            for kw_arg in func_t.keyword_args[:num_kwargs]:
+                if kw_arg.typ:
+                    args.append(self.generate(kw_arg.typ, context, arg_depth))
 
         if func_t.is_external:
             result_node = self._generate_external_call(func_t, args)
