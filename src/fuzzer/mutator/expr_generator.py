@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
+from vyper.abi_types import ABI_Tuple
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -22,26 +23,18 @@ from vyper.semantics.types import (
     InterfaceT,
 )
 from vyper.semantics.types.subscriptable import _SequenceT
-from vyper.semantics.analysis.base import VarInfo, Modifiability
+from vyper.semantics.analysis.base import DataLocation, VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
-from fuzzer.mutator.literal_generator import LiteralGenerator
-from fuzzer.mutator.context import GenerationContext, ExprMutability
-from fuzzer.mutator.function_registry import FunctionRegistry
-from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.ast_utils import contains_call
+from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.convert_utils import (
     convert_is_valid,
     convert_target_supported,
     pick_convert_source_type,
 )
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
-from fuzzer.mutator.base_generator import BaseGenerator
-from fuzzer.mutator.strategy import strategy
-from fuzzer.mutator.type_utils import (
-    is_dereferenceable,
-    find_dereference_bases,
-)
 from fuzzer.mutator.constant_folding import (
     ConstEvalError,
     ConstEvalNonConstant,
@@ -49,10 +42,9 @@ from fuzzer.mutator.constant_folding import (
     evaluate_constant_expression,
     fold_constant_expression_status,
 )
-from fuzzer.mutator.dereference_utils import (
-    DerefCandidate,
-    dereference_candidates,
-)
+from fuzzer.mutator.context import GenerationContext, ExprMutability
+from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
+from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.indexing import (
     small_literal_index,
     random_literal_index,
@@ -61,6 +53,17 @@ from fuzzer.mutator.indexing import (
     build_guarded_index,
     build_dyn_last_index,
     INDEX_TYPE,
+)
+from fuzzer.mutator.interface_registry import InterfaceRegistry
+from fuzzer.mutator.literal_generator import LiteralGenerator
+from fuzzer.mutator.name_generator import FreshNameGenerator
+from fuzzer.mutator.strategy import strategy
+from fuzzer.mutator.type_utils import (
+    DerefCandidate,
+    dereference_candidates,
+    find_dereference_sources,
+    find_dereferenceable_vars,
+    is_dereferenceable,
 )
 from fuzzer.type_generator import TypeGenerator
 from ivy.builtins.builtins import builtin_convert
@@ -86,14 +89,18 @@ class ExprGenerator(BaseGenerator):
         type_generator: TypeGenerator,
         cfg: Optional[ExprGeneratorConfig] = None,
         depth_cfg: Optional[DepthConfig] = None,
+        name_generator: Optional[FreshNameGenerator] = None,
     ):
         self.literal_generator = literal_generator
-        self.function_registry = function_registry
-        self.interface_registry = interface_registry
+        self.function_registry: FunctionRegistry = function_registry
+        self.interface_registry: InterfaceRegistry = interface_registry
         self.type_generator = type_generator
         self.cfg = cfg or ExprGeneratorConfig()
+        self.name_generator = name_generator or FreshNameGenerator()
 
         super().__init__(rng, depth_cfg)
+        self._hoist_seq: int = 0
+        self._active_context: Optional[GenerationContext] = None
 
         self._builtin_handlers = {
             "min": self._builtin_min_max,
@@ -106,7 +113,66 @@ class ExprGenerator(BaseGenerator):
             "concat": self._builtin_concat,
             "convert": self._builtin_convert,
             "slice": self._builtin_slice,
+            "abi_encode": self._builtin_abi_encode,
         }
+
+    def reset_state(self) -> None:
+        self._hoist_seq = 0
+        self._active_context = None
+
+    def hoist_to_tmp_var(
+        self, expr: ast.VyperNode, *, prefix: Optional[str] = None
+    ) -> ast.VyperNode:
+        context = self._active_context
+        if context is None:
+            raise ValueError("hoist_to_tmp_var requires an active generation context")
+
+        expr_type = self._expr_type(expr)
+        name = self.name_generator.generate(prefix=prefix)
+
+        if context.is_module_scope:
+            var_info = VarInfo(
+                typ=expr_type,
+                location=DataLocation.UNSET,
+                modifiability=Modifiability.CONSTANT,
+            )
+            annotation = ast.Call(
+                func=ast.Name(id="constant"),
+                args=[ast.Name(id=str(expr_type))],
+            )
+            decl: ast.VyperNode = ast.VariableDecl(
+                target=ast.Name(id=name),
+                annotation=annotation,
+                value=expr,
+            )
+            try:
+                value = evaluate_constant_expression(expr, context.constants)
+            except Exception:
+                pass
+            else:
+                context.add_constant(name, value)
+        else:
+            var_info = VarInfo(
+                typ=expr_type,
+                location=DataLocation.MEMORY,
+                modifiability=Modifiability.MODIFIABLE,
+            )
+            decl = ast.AnnAssign(
+                target=ast.Name(id=name),
+                annotation=ast.Name(id=str(expr_type)),
+                value=expr,
+            )
+
+        # Don't add to context: hoisted temps are internal to the expression
+        # being built. Adding them makes them visible to find_matching_vars(),
+        # which lets later statement generation emit assignments to the name
+        # before hoist_prelude_decls inserts the declaration.
+        ref = ast_builder.var_ref(name, var_info)
+        ref._metadata = {"type": expr_type, "varinfo": var_info}
+        ref._metadata["hoisted_prelude"] = decl
+        ref._metadata["hoist_seq"] = self._hoist_seq
+        self._hoist_seq += 1
+        return ref
 
     def generate(
         self,
@@ -118,6 +184,7 @@ class ExprGenerator(BaseGenerator):
         allow_recursion: bool = False,
         allow_empty_list: bool = True,
     ) -> ast.VyperNode:
+        self._active_context = context
         ctx = ExprGenCtx(
             target_type=target_type,
             context=context,
@@ -292,6 +359,19 @@ class ExprGenerator(BaseGenerator):
     def _is_raw_call_expr_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         return self.can_generate_raw_call(ctx.context, ctx.target_type)
 
+    def _existing_reachable_types(
+        self,
+        context: GenerationContext,
+        *,
+        skip: Optional[set[type]] = None,
+    ) -> list[VyperType]:
+        return collect_existing_reachable_types(
+            context=context,
+            deref_max_steps=self.cfg.subscript_chain_max_steps,
+            function_registry=self.function_registry,
+            skip=skip,
+        )
+
     def _find_deref_bases(
         self,
         *,
@@ -306,9 +386,29 @@ class ExprGenerator(BaseGenerator):
                 for name, var_info in vars_dict.items()
                 if not self._is_empty_constant_array(name, var_info, ctx.context)
             }
-        return find_dereference_bases(
+        return find_dereferenceable_vars(
             ctx.target_type,
             vars_dict,
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+
+    def _find_deref_func_bases(
+        self,
+        *,
+        ctx: ExprGenCtx,
+        allow_attribute: bool,
+        allow_subscript: bool,
+    ) -> list[tuple[ContractFunctionT, VyperType]]:
+        funcs = self._get_callable_functions(ctx.context)
+        return find_dereference_sources(
+            ctx.target_type,
+            (
+                (func, func.return_type)
+                for func in funcs
+                if func.return_type is not None
+            ),
             max_steps=self.cfg.subscript_chain_max_steps,
             allow_attribute=allow_attribute,
             allow_subscript=allow_subscript,
@@ -331,6 +431,17 @@ class ExprGenerator(BaseGenerator):
             return len(value) == 0
         except Exception:
             return getattr(value, "length", None) == 0
+
+    def _folded_constant_sequence_length(
+        self,
+        node: ast.VyperNode,
+        constants: dict[str, object],
+    ) -> Optional[int]:
+        try:
+            value = evaluate_constant_expression(node, constants)
+        except Exception:
+            return None
+        return len(value)
 
     def _weight_deref_like(self, n: int) -> float:
         cfg = self.cfg
@@ -356,9 +467,24 @@ class ExprGenerator(BaseGenerator):
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
 
+    def _is_dereference_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
+        if not self._is_func_call_applicable(ctx=ctx):
+            return False
+        return bool(
+            self._find_deref_func_bases(
+                ctx=ctx, allow_attribute=True, allow_subscript=True
+            )
+        )
+
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # Disallow if-expressions in constant contexts due to compiler limitation
-        return ctx.context.current_mutability != ExprMutability.CONST
+        if ctx.context.current_mutability == ExprMutability.CONST:
+            return False
+        # TODO: enable once https://github.com/vyperlang/vyper/issues/3480
+        # or https://github.com/vyperlang/vyper/issues/4825 is fixed
+        if isinstance(ctx.target_type, TupleT):
+            return False
+        return True
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         if ctx.context.current_mutability == ExprMutability.CONST:
@@ -397,6 +523,9 @@ class ExprGenerator(BaseGenerator):
             self._find_deref_bases(ctx=ctx, allow_attribute=True, allow_subscript=True)
         )
         return self._weight_deref_like(n)
+
+    def _weight_dereference_func_call(self, *, ctx: ExprGenCtx, **_) -> float:
+        return self.cfg.dereference_func_call_weight
 
     def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
         return getattr(node, "_metadata", {}).get("type")
@@ -458,8 +587,6 @@ class ExprGenerator(BaseGenerator):
         target_type: VyperType,
         context: GenerationContext,
     ) -> Optional[ast.Call]:
-        if not self.function_registry:
-            return None
         src_type = self._expr_type(src_expr)
         if src_type is None:
             return None
@@ -481,9 +608,6 @@ class ExprGenerator(BaseGenerator):
     def _pick_convert_source_expr(
         self, target_type: VyperType, context: GenerationContext, depth: int
     ) -> Optional[ast.VyperNode]:
-        if not self.function_registry:
-            return None
-
         var_candidates = [
             (name, info)
             for name, info in context.find_matching_vars(None)
@@ -876,6 +1000,43 @@ class ExprGenerator(BaseGenerator):
         return node
 
     @strategy(
+        name="expr.dereference_func_call",
+        tags=frozenset({"expr", "recursive"}),
+        is_applicable="_is_dereference_func_call_applicable",
+        weight="_weight_dereference_func_call",
+    )
+    def _generate_dereference_func_call(
+        self, *, ctx: ExprGenCtx, **_
+    ) -> Optional[ast.VyperNode]:
+        bases = self._find_deref_func_bases(
+            ctx=ctx, allow_attribute=True, allow_subscript=True
+        )
+        if not bases:
+            return None
+
+        func_t, base_t = ctx.gen.rng.choice(bases)
+        base_node = self._generate_call_to_function(func_t, ctx.context, ctx.depth)
+        if base_node is None:
+            return None
+
+        built = self.build_dereference_chain_to_target(
+            base_node,
+            base_t,
+            ctx.target_type,
+            ctx.context,
+            self.child_depth(ctx.depth),
+            max_steps=self.cfg.subscript_chain_max_steps,
+            allow_attribute=True,
+            allow_subscript=True,
+        )
+        if not built:
+            return None
+
+        node, node_t = built
+        node._metadata["type"] = node_t
+        return node
+
+    @strategy(
         name="expr.ifexp",
         tags=frozenset({"expr", "recursive"}),
         is_applicable="_is_ifexp_applicable",
@@ -943,11 +1104,22 @@ class ExprGenerator(BaseGenerator):
         - OOB literal that forces compilation xfail (rare)
         """
         assert isinstance(seq_t, (SArrayT, DArrayT))
+
         cfg = self.cfg
         if self.rng.random() < cfg.index_guard_prob:
             return self._generate_guarded_index(base_node, seq_t, context, depth)
         else:
             return self._generate_random_index(seq_t, context, depth)
+
+    def _build_len_call_maybe_hoisted(
+        self, base_node: ast.VyperNode
+    ) -> ast.VyperNode:
+        # Hoist len() to avoid duplicating calls in the same
+        # expression, which triggers a Vyper ICE (overlapping memory).
+        len_call = build_len_call(base_node)
+        if contains_call(base_node):
+            return self.hoist_to_tmp_var(len_call, prefix="tmp_len")
+        return len_call
 
     def _generate_guarded_index(
         self,
@@ -976,10 +1148,17 @@ class ExprGenerator(BaseGenerator):
             )
             len_call = ast_builder.uint256_literal(seq_t.length)
             return ast_builder.uint256_binop(idx_expr, ast.Mod(), len_call)
+        dyn_const_len: Optional[int] = None
         if isinstance(seq_t, DArrayT):
-            len_call = build_len_call(base_node)
+            dyn_const_len = self._folded_constant_sequence_length(
+                base_node, context.constants
+            )
             if self.rng.random() < cfg.dynarray_last_index_in_guard_prob:
-                return build_dyn_last_index(len_call)
+                if dyn_const_len is not None and dyn_const_len > 0:
+                    return ast_builder.uint256_literal(dyn_const_len - 1)
+                return build_dyn_last_index(
+                    self._build_len_call_maybe_hoisted(base_node)
+                )
 
         # Choose the raw index expression (biased towards small literals for DynArray)
         use_small = (
@@ -996,8 +1175,13 @@ class ExprGenerator(BaseGenerator):
                 reject_if=self._static_index_is_invalid_constant,
             )
 
-        len_call = build_len_call(base_node)
-        return build_guarded_index(i_expr, len_call)
+        if dyn_const_len is not None and dyn_const_len > 0:
+            len_lit = ast_builder.uint256_literal(dyn_const_len)
+            return ast_builder.uint256_binop(i_expr, ast.Mod(), len_lit)
+
+        return build_guarded_index(
+            i_expr, self._build_len_call_maybe_hoisted(base_node)
+        )
 
     def _generate_random_index(
         self,
@@ -1390,6 +1574,105 @@ class ExprGenerator(BaseGenerator):
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
 
+    def _effective_call_mutability(
+        self, context: GenerationContext
+    ) -> StateMutability:
+        caller_mutability = context.current_function_mutability
+        if (
+            context.in_iterable_expr
+            and caller_mutability not in (StateMutability.PURE, StateMutability.VIEW)
+        ):
+            return StateMutability.VIEW
+        return caller_mutability
+
+    def _get_callable_functions(
+        self,
+        context: GenerationContext,
+        *,
+        return_type: Optional[VyperType] = None,
+    ) -> list[ContractFunctionT]:
+        current_func = self.function_registry.current_function
+        if current_func is None:
+            return []
+
+        caller_mutability = self._effective_call_mutability(context)
+        funcs = self.function_registry.get_callable_functions(
+            return_type=return_type,
+            from_function=current_func,
+            caller_mutability=caller_mutability,
+        )
+        return funcs
+
+    def _get_compatible_builtins(
+        self, target_type: VyperType, context: GenerationContext
+    ) -> list[tuple[str, object]]:
+        caller_mutability = self._effective_call_mutability(context)
+        candidates = self.function_registry.get_compatible_builtins(
+            target_type,
+            caller_mutability=caller_mutability,
+        )
+        return [(name, builtin) for name, builtin in candidates if name != "convert"]
+
+    def _create_callable_function(
+        self,
+        *,
+        return_type: VyperType,
+        context: GenerationContext,
+    ) -> Optional[ContractFunctionT]:
+        current_func = self.function_registry.current_function
+        if current_func is None:
+            return None
+
+        caller_nonreentrant_ctx = self.function_registry.reachable_from_nonreentrant(
+            current_func
+        )
+        func_def = self.function_registry.create_new_function(
+            return_type=return_type,
+            type_generator=self.type_generator,
+            max_args=2,
+            caller_mutability=self._effective_call_mutability(context),
+            allow_nonreentrant=not caller_nonreentrant_ctx,
+        )
+        if func_def is None:
+            return None
+
+        func_t = func_def._metadata["func_type"]
+        return func_t
+
+    def _generate_call_to_function(
+        self,
+        func_t: ContractFunctionT,
+        context: GenerationContext,
+        depth: int,
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
+        if func_t.return_type is None:
+            return None
+
+        arg_depth = self.child_depth(depth)
+        args = []
+        for pos_arg in func_t.positional_args:
+            if pos_arg.typ:
+                args.append(self.generate(pos_arg.typ, context, arg_depth))
+
+        if func_t.is_external:
+            result_node = self._generate_external_call(func_t, args)
+        else:
+            assert func_t.is_internal, (
+                f"Expected internal or external function, got {func_t}"
+            )
+            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_t.name)
+            func_node._metadata = {"type": func_t}
+            result_node = self._finalize_call(func_node, args, func_t.return_type)
+
+        if self.function_registry.current_function:
+            self.function_registry.add_call(
+                self.function_registry.current_function,
+                func_t.name,
+                internal=func_t.is_internal,
+            )
+
+        return result_node
+
     @strategy(
         name="expr.raw_call",
         tags=frozenset({"expr", "recursive"}),
@@ -1412,38 +1695,15 @@ class ExprGenerator(BaseGenerator):
     def _generate_func_call(
         self, *, ctx: ExprGenCtx, **_
     ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
-        if not self.function_registry:
-            return None
-
-        current_func = self.function_registry.current_function
-        assert current_func is not None
-
-        caller_mutability = ctx.context.current_function_mutability
-        caller_nonreentrant_ctx = self.function_registry.reachable_from_nonreentrant(
-            current_func
+        compatible_funcs = self._get_callable_functions(
+            ctx.context, return_type=ctx.target_type
         )
-
-        # Gather candidates
-        compatible_func = self.function_registry.get_compatible_function(
-            ctx.target_type,
-            current_func,
-            caller_mutability=caller_mutability,
-        )
-        compatible_builtins = self.function_registry.get_compatible_builtins(
-            ctx.target_type,
-            caller_mutability=caller_mutability,
-        )
-        if compatible_builtins:
-            compatible_builtins = [
-                (name, builtin)
-                for name, builtin in compatible_builtins
-                if name != "convert"
-            ]
+        compatible_builtins = self._get_compatible_builtins(ctx.target_type, ctx.context)
 
         # Decide path: prefer user function, but sometimes pick builtin
         use_builtin = False
         if compatible_builtins:
-            if not compatible_func:
+            if not compatible_funcs:
                 use_builtin = True
             else:
                 use_builtin = (
@@ -1456,76 +1716,38 @@ class ExprGenerator(BaseGenerator):
                 name, builtin, ctx.target_type, ctx.context, ctx.depth
             )
 
-        # Fall back to user function (existing or create new)
-        if (
-            not compatible_func
-            or ctx.gen.rng.random() < self.cfg.create_new_function_prob
+        func_t: Optional[ContractFunctionT] = None
+        if compatible_funcs and (
+            ctx.gen.rng.random() >= self.cfg.create_new_function_prob
         ):
-            # Create a new function (returns ast.FunctionDef or None)
-            func_def = self.function_registry.create_new_function(
+            func_t = ctx.gen.rng.choice(compatible_funcs)
+        else:
+            func_t = self._create_callable_function(
                 return_type=ctx.target_type,
-                type_generator=self.type_generator,
-                max_args=2,
-                caller_mutability=caller_mutability,
-                allow_nonreentrant=not caller_nonreentrant_ctx,
+                context=ctx.context,
             )
-            if func_def is None:
-                # Can't create more functions; try builtin if available
-                if compatible_builtins:
-                    name, builtin = ctx.gen.rng.choice(compatible_builtins)
-                    return self._generate_builtin_call(
-                        name, builtin, ctx.target_type, ctx.context, ctx.depth
-                    )
-                return None
-            func_t = func_def._metadata["func_type"]
-        else:
-            func_t = compatible_func
+            if func_t is None and compatible_funcs:
+                func_t = ctx.gen.rng.choice(compatible_funcs)
 
-        func_name = func_t.name
+        if func_t is None:
+            if compatible_builtins:
+                name, builtin = ctx.gen.rng.choice(compatible_builtins)
+                return self._generate_builtin_call(
+                    name, builtin, ctx.target_type, ctx.context, ctx.depth
+                )
+            return None
 
-        # Generate arguments
-        arg_depth = self.child_depth(ctx.depth)
-        args = []
-        for pos_arg in func_t.positional_args:
-            if pos_arg.typ:
-                arg_expr = self.generate(pos_arg.typ, ctx.context, arg_depth)
-                args.append(arg_expr)
-
-        if func_t.is_external:
-            # External functions must be called through an interface
-            if not self.interface_registry:
-                return None
-            # External calls use `self` as address, which is not allowed in @pure
-            # TODO: support literal addresses for pure function calls
-            if ctx.context.current_function_mutability == StateMutability.PURE:
-                return None
-            result_node = self._generate_external_call(func_t, args)
-        else:
-            assert func_t.is_internal, (
-                f"Expected internal or external function, got {func_t}"
-            )
-            func_node = ast.Attribute(value=ast.Name(id="self"), attr=func_name)
-            func_node._metadata = {"type": func_t}
-            result_node = self._finalize_call(func_node, args, func_t.return_type)
-
-        # Record the call in the call graph
-        if self.function_registry.current_function:
-            self.function_registry.add_call(
-                self.function_registry.current_function,
-                func_name,
-                internal=func_t.is_internal,
-            )
-
-        return result_node
+        return self._generate_call_to_function(func_t, ctx.context, ctx.depth)
 
     def _generate_external_call(
-        self, func: ContractFunctionT, args: list
+        self,
+        func: ContractFunctionT,
+        args: list,
     ) -> Union[ast.StaticCall, ast.ExtCall]:
         """Build AST for an external call through an interface."""
         _, iface_type = self.interface_registry.create_interface(func)
 
-        # Address is always `self` for now
-        # TODO support random addresses
+        # Address is always `self` for now.
         address_node = ast.Name(id="self")
         address_node._metadata = {"type": AddressT()}
 
@@ -1599,6 +1821,222 @@ class ExprGenerator(BaseGenerator):
         if src_expr is None:
             return None
         return self.maybe_convert_expr(src_expr, target_type, context)
+
+    def _random_abi_encode_arg_type(self, payload_budget: int) -> VyperType:
+        static_choices = [
+            BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
+            IntegerT(False, 256), IntegerT(True, 128), AddressT(),
+        ]
+        can_use_dynamic = payload_budget >= 64 and self.rng.random() < 0.35
+        if not can_use_dynamic:
+            return self.rng.choice(static_choices)
+
+        max_dynamic_len = min(64, max(1, payload_budget - 32))
+        if self.rng.random() < 0.5:
+            return BytesT(self.rng.randint(1, max_dynamic_len))
+        return StringT(self.rng.randint(1, max_dynamic_len))
+
+    def _abi_encode_maxlen(
+        self, arg_types: list[VyperType], *, ensure_tuple: bool, has_method_id: bool
+    ) -> Optional[int]:
+        if not arg_types:
+            return None
+
+        try:
+            abi_types = [arg_t.abi_type for arg_t in arg_types]
+            encoded_shape = (
+                abi_types[0] if len(abi_types) == 1 and not ensure_tuple else ABI_Tuple(abi_types)
+            )
+            maxlen = encoded_shape.size_bound()
+        except Exception:
+            return None
+
+        if has_method_id:
+            maxlen += 4
+        return maxlen
+
+    def _generate_abi_encode_arg_expr(
+        self,
+        arg_t: VyperType,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.VyperNode:
+        scope_matches = context.find_matching_vars(arg_t)
+        if scope_matches and self.rng.random() < 0.65:
+            return self._generate_variable_ref(self.rng.choice(scope_matches), context)
+        return self.generate(arg_t, context, depth)
+
+    def _generate_abi_encode_method_id(self) -> ast.VyperNode:
+        value = bytes(self.rng.getrandbits(8) for _ in range(4))
+        if self.rng.random() < 0.5:
+            return ast_builder.literal(value, BytesM_T(4))
+        return ast_builder.literal(value, BytesT(4))
+
+    def _pick_abi_encode_arg_types(
+        self,
+        context: GenerationContext,
+        arity: int,
+        ensure_tuple: bool,
+        has_method_id: bool,
+        target_length: int,
+    ) -> Optional[list[VyperType]]:
+        existing = self._existing_reachable_types(
+            context, skip={HashMapT}
+        )
+        self.rng.shuffle(existing)
+
+        arg_types: list[VyperType] = []
+        for t in existing:
+            if len(arg_types) >= arity:
+                break
+            candidate = arg_types + [t]
+            maxlen = self._abi_encode_maxlen(
+                candidate, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+            )
+            if maxlen is not None and maxlen <= target_length:
+                arg_types.append(t)
+
+        # Greedily fill remaining slots; arity is a soft max
+        while len(arg_types) < arity:
+            if arg_types:
+                used = self._abi_encode_maxlen(
+                    arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+                ) or 0
+            else:
+                used = 4 if has_method_id else 0
+
+            budget = target_length - used
+
+            candidates: list[VyperType] = []
+            if budget >= 32:
+                candidates.extend([
+                    BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
+                    IntegerT(False, 256), IntegerT(True, 128), AddressT(),
+                ])
+            # Dynamic types: offset(32) + length(32) + ceil(n/32)*32 data
+            if budget >= 96:
+                max_dyn_len = max(1, (budget - 64) // 32 * 32)
+                candidates.append(BytesT(self.rng.randint(1, max_dyn_len)))
+                candidates.append(StringT(self.rng.randint(1, max_dyn_len)))
+
+            if not candidates:
+                break
+
+            self.rng.shuffle(candidates)
+            for t in candidates:
+                trial = arg_types + [t]
+                maxlen = self._abi_encode_maxlen(
+                    trial, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+                )
+                if maxlen is not None and maxlen <= target_length:
+                    arg_types.append(t)
+                    break
+            else:
+                break
+
+        return arg_types if arg_types else None
+
+    def _maybe_hoist_abi_encode_arg(
+        self, expr: ast.VyperNode, context: GenerationContext
+    ) -> ast.VyperNode:
+        # Literal lists must be hoisted to get a type annotation
+        if isinstance(expr, ast.List):
+            return self.hoist_to_tmp_var(expr)
+
+        # Tuple literals: hoist any list-literal elements within
+        if isinstance(expr, ast.Tuple):
+            for i, elt in enumerate(expr.elements):
+                if isinstance(elt, ast.List):
+                    expr.elements[i] = self.hoist_to_tmp_var(elt)
+            return expr
+
+        # Expressions that constant-fold to an integer are ambiguous
+        # (could be uint8, int256, uint256, etc.) — but variable references
+        # (Name, Attribute) have declared types so are not ambiguous.
+        if not isinstance(expr, (ast.Name, ast.Attribute)):
+            status, folded = fold_constant_expression_status(
+                expr, context.constants
+            )
+            if status == "value" and isinstance(folded, ast.Int):
+                return self.hoist_to_tmp_var(expr)
+
+        # 0x 20-byte hex literals are ambiguous between address and bytes20
+        if isinstance(expr, ast.Hex):
+            hex_val = expr.value
+            if hex_val.startswith(("0x", "0X")) and len(hex_val) == 42:
+                return self.hoist_to_tmp_var(expr)
+
+        return expr
+
+    def _builtin_abi_encode(
+        self,
+        *,
+        func_node: ast.Name,
+        target_type: VyperType,
+        context: GenerationContext,
+        depth: int,
+        **_,
+    ) -> Optional[Union[ast.Call, ast.StaticCall, ast.ExtCall]]:
+        if not isinstance(target_type, BytesT):
+            return None
+        if target_type.length < 32:
+            return None
+
+        has_method_id = target_type.length >= 36 and self.rng.random() < 0.35
+        max_arity = max(1, min(5, target_type.length // 32))
+        weights = [0.5 ** i for i in range(max_arity)]
+        arity = self.rng.choices(range(1, max_arity + 1), weights=weights, k=1)[0]
+
+        ensure_tuple = self.rng.choice([True, False]) if arity == 1 else True
+
+        arg_types = self._pick_abi_encode_arg_types(
+            context=context,
+            arity=arity,
+            ensure_tuple=ensure_tuple,
+            has_method_id=has_method_id,
+            target_length=target_type.length,
+        )
+        if arg_types is None:
+            return None
+
+        maxlen = self._abi_encode_maxlen(
+            arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+        )
+        if maxlen is None or maxlen > target_type.length:
+            return None
+
+        arg_depth = self.child_depth(depth)
+        args = [
+            self._maybe_hoist_abi_encode_arg(
+                self._generate_abi_encode_arg_expr(arg_t, context, arg_depth),
+                context,
+            )
+            for arg_t in arg_types
+        ]
+
+        keywords = []
+        if not ensure_tuple:
+            keywords.append(
+                ast.keyword(
+                    arg="ensure_tuple",
+                    value=ast_builder.literal(False, BoolT()),
+                )
+            )
+        elif self.rng.random() < 0.5:
+            keywords.append(
+                ast.keyword(
+                    arg="ensure_tuple",
+                    value=ast_builder.literal(True, BoolT()),
+                )
+            )
+        if has_method_id:
+            keywords.append(
+                ast.keyword(arg="method_id", value=self._generate_abi_encode_method_id())
+            )
+
+        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
+        call_node._metadata = {"type": BytesT(maxlen)}
+        return call_node
 
     def _builtin_min_max(
         self,

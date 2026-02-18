@@ -18,13 +18,14 @@ from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
-from fuzzer.mutator.ast_utils import body_is_terminated
+from fuzzer.mutator.ast_utils import body_is_terminated, hoist_prelude_decls
 from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
 from fuzzer.mutator.mutations import register_all as register_all_mutations
 from fuzzer.mutator.mutations.base import MutationCtx
 from fuzzer.mutator.config import MutatorConfig
+from fuzzer.mutator.name_generator import FreshNameGenerator
 from unparser.unparser import unparse
 from fuzzer.type_generator import TypeGenerator
 from fuzzer.xfail import XFailExpectation
@@ -91,19 +92,6 @@ class VyperNodeTransformer:
         return node
 
 
-class FreshNameGenerator:
-    """Generates unique variable names with a consistent prefix."""
-
-    def __init__(self, prefix: str = "ivy_internal"):
-        self.prefix = prefix
-        self.counter = 0
-
-    def generate(self) -> str:
-        name = f"{self.prefix}{self.counter}"
-        self.counter += 1
-        return name
-
-
 class AstMutator(VyperNodeTransformer):
     def __init__(
         self,
@@ -119,7 +107,7 @@ class AstMutator(VyperNodeTransformer):
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
         self.context = GenerationContext()
-        self.name_generator = FreshNameGenerator()
+        self.name_generator = FreshNameGenerator(prefix="gen_var")
         self.literal_generator = LiteralGenerator(rng)
         self.value_mutator = ValueMutator(rng)
         # Type generator for random types
@@ -139,6 +127,7 @@ class AstMutator(VyperNodeTransformer):
             self.type_generator,
             cfg=self.cfg.expr,
             depth_cfg=self.cfg.expr_depth,
+            name_generator=self.name_generator,
         )
         # Statement generator
         self.stmt_generator = StatementGenerator(
@@ -147,6 +136,7 @@ class AstMutator(VyperNodeTransformer):
             self.rng,
             cfg=self.cfg.stmt,
             depth_cfg=self.cfg.stmt_depth,
+            name_generator=self.name_generator,
         )
 
         # Mutation engine
@@ -186,6 +176,7 @@ class AstMutator(VyperNodeTransformer):
             self._maybe_create_init(new_root)
             self._dispatch_pending_functions(new_root)
             self._add_interface_definitions(new_root)
+            hoist_prelude_decls(new_root)
             return new_root
         else:
             # Deep copy the root to avoid modifying the original
@@ -200,6 +191,7 @@ class AstMutator(VyperNodeTransformer):
         new_root = self.visit(new_root)
         assert isinstance(new_root, ast.Module)
 
+        hoist_prelude_decls(new_root)
         return new_root
 
     def _generate_module(self) -> ast.Module:
@@ -253,10 +245,10 @@ class AstMutator(VyperNodeTransformer):
         self._mutation_targets = set()
         self.context = GenerationContext()
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
-        self.name_generator.counter = 0
+        self.name_generator.reset()
         self.type_generator.struct_counter = 0
         self.type_generator.source_fragments = []
-        self.stmt_generator.name_generator.counter = 0
+        self.expr_generator.reset_state()
         self.function_registry.reset()
         self.interface_registry.reset()
 

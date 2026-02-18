@@ -14,24 +14,26 @@ from vyper.semantics.types import (
 )
 from vyper.semantics.analysis.base import DataLocation, Modifiability, VarInfo
 
-from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
-from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
-from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator import ast_builder
 from fuzzer.mutator.ast_utils import ast_equivalent, body_is_terminated
-from fuzzer.mutator.constant_folding import evaluate_constant_expression
-from fuzzer.mutator.type_utils import is_dereferenceable
-from fuzzer.mutator.dereference_utils import (
-    pick_dereference_target_type,
-    collect_dereference_types,
-)
 from fuzzer.mutator.augassign_utils import (
     augassign_ops_for_type,
     is_augassignable_type,
     augassign_rhs_type,
     can_reach_augassignable,
 )
+from fuzzer.mutator.base_generator import BaseGenerator
+from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
+from fuzzer.mutator.constant_folding import evaluate_constant_expression
+from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
+from fuzzer.mutator.name_generator import FreshNameGenerator
 from fuzzer.mutator.strategy import strategy
+from fuzzer.mutator.type_utils import (
+    is_dereferenceable,
+    pick_dereference_target_type,
+    collect_dereference_types,
+)
 
 
 @dataclass
@@ -43,17 +45,6 @@ class StmtGenCtx:
     gen: StatementGenerator
 
 
-class FreshNameGenerator:
-    def __init__(self, prefix: str = "gen_var"):
-        self.prefix = prefix
-        self.counter = 0
-
-    def generate(self) -> str:
-        name = f"{self.prefix}{self.counter}"
-        self.counter += 1
-        return name
-
-
 class StatementGenerator(BaseGenerator):
     def __init__(
         self,
@@ -62,11 +53,12 @@ class StatementGenerator(BaseGenerator):
         rng: random.Random,
         cfg: Optional[StmtGeneratorConfig] = None,
         depth_cfg: Optional[DepthConfig] = None,
+        name_generator: Optional[FreshNameGenerator] = None,
     ):
         self.expr_generator = expr_generator
         self.type_generator = type_generator
         self.cfg = cfg or StmtGeneratorConfig()
-        self.name_generator = FreshNameGenerator()
+        self.name_generator = name_generator or FreshNameGenerator()
 
         super().__init__(rng, depth_cfg)
 
@@ -152,16 +144,15 @@ class StatementGenerator(BaseGenerator):
         """Generate a type, biasing towards existing types and preferred fuzzing types."""
         skip = skip or set()
 
-        # Bias towards existing variable types to enable compatible expressions
-        if self.rng.random() < self.cfg.existing_type_bias_prob and context.all_vars:
-            valid_vars = []
-            for var_info in context.all_vars.values():
-                if type(var_info.typ) not in skip:
-                    valid_vars.append(var_info)
-
-            if valid_vars:
-                var_info = self.rng.choice(valid_vars)
-                return var_info.typ
+        if self.rng.random() < self.cfg.existing_type_bias_prob:
+            all_types = collect_existing_reachable_types(
+                context=context,
+                deref_max_steps=self.cfg.deref_chain_max_steps,
+                function_registry=self.expr_generator.function_registry,
+                skip=skip,
+            )
+            if all_types:
+                return self.rng.choice(all_types)
 
         # Struct fragments are stored in type_generator.source_fragments
         return self.type_generator.generate_biased_type(
@@ -258,7 +249,8 @@ class StatementGenerator(BaseGenerator):
             max_stmts = min_stmts
 
         num_vars = self.rng.randint(min_stmts, max_stmts)
-        for i in range(num_vars):
+        num_decls = 0
+        for _ in range(num_vars):
             ctx = StmtGenCtx(
                 context=context,
                 parent=parent,
@@ -267,9 +259,10 @@ class StatementGenerator(BaseGenerator):
                 gen=self,
             )
             var_decl = self.create_vardecl_and_register(ctx=ctx)
-            body.insert(i, var_decl)
+            body.insert(num_decls, var_decl)
+            num_decls += 1
 
-        return num_vars
+        return num_decls
 
     def inject_random_statements(
         self,
@@ -318,6 +311,7 @@ class StatementGenerator(BaseGenerator):
         num_other_stmts = self.rng.randint(min_count, max_count)
         for _ in range(num_other_stmts):
             stmt = self.generate(context, parent, depth)
+
             if isinstance(stmt, ast.AnnAssign):
                 body.insert(num_vars, stmt)
                 num_vars += 1
@@ -412,12 +406,13 @@ class StatementGenerator(BaseGenerator):
             context={"ctx": ctx},
         )
 
-        return self._strategy_executor.execute_with_retry(
+        stmt = self._strategy_executor.execute_with_retry(
             strategies,
             policy="weighted_random",
             fallback=lambda: ast.Pass(),
             context={"ctx": ctx},
         )
+        return stmt
 
     @strategy(
         name="stmt.if",
@@ -696,8 +691,8 @@ class StatementGenerator(BaseGenerator):
         self,
         context: GenerationContext,
         immutables: list[tuple[str, VarInfo]],
-    ) -> list[ast.Assign]:
-        assignments = []
+    ) -> list[ast.VyperNode]:
+        stmts: list[ast.VyperNode] = []
         for name, var_info in immutables:
             target = ast_builder.var_ref(name, var_info)
             target._metadata = {"type": var_info.typ, "varinfo": var_info}
@@ -707,9 +702,9 @@ class StatementGenerator(BaseGenerator):
                 depth=self.expr_generator.root_depth(),
                 allow_tuple_literal=False,
             )
-            assignments.append(ast.Assign(targets=[target], value=value_expr))
+            stmts.append(ast.Assign(targets=[target], value=value_expr))
             context.mark_immutable_assigned(name)
-        return assignments
+        return stmts
 
     @strategy(
         name="stmt.vardecl",
@@ -796,6 +791,7 @@ class StatementGenerator(BaseGenerator):
                         context,
                         depth=self.expr_generator.root_depth(),
                         allow_tuple_literal=allow_tuple_literal,
+                        allow_empty_list=not isinstance(var_info.typ, DArrayT),
                     )
             else:
                 init_val = self.expr_generator.generate(
@@ -875,11 +871,12 @@ class StatementGenerator(BaseGenerator):
         # Generate 1-5 elements
         num_elements = ctx.gen.rng.randint(1, 5)
         elements = []
-        for _ in range(num_elements):
-            elem = self.expr_generator.generate(
-                element_type, ctx.context, depth=self.expr_generator.root_depth()
-            )
-            elements.append(elem)
+        with ctx.context.iterable_expr():
+            for _ in range(num_elements):
+                elem = self.expr_generator.generate(
+                    element_type, ctx.context, depth=self.expr_generator.root_depth()
+                )
+                elements.append(elem)
 
         iter_node = ast.List(elements=elements)
         return iter_node, element_type, None, None

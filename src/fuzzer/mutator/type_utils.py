@@ -4,22 +4,46 @@ Pure functions for analyzing and traversing Vyper type structures,
 particularly for subscriptable types (HashMaps, arrays, tuples).
 """
 
-from typing import Generator
+import random
+from dataclasses import dataclass
+from typing import Callable, Generator, Iterable, Optional, TypeVar
 
+from vyper.semantics.analysis.base import VarInfo
 from vyper.semantics.types import (
-    VyperType,
+    DArrayT,
     HashMapT,
     SArrayT,
-    DArrayT,
-    TupleT,
     StructT,
+    TupleT,
+    VyperType,
 )
-from vyper.semantics.analysis.base import VarInfo
+
+TSource = TypeVar("TSource")
+SUBSCRIPTABLE_TYPES = (HashMapT, SArrayT, DArrayT, TupleT)
+
+
+@dataclass(frozen=True)
+class DerefCandidate:
+    kind: str
+    child_type: VyperType
+    attr_name: Optional[str] = None
+    tuple_index: Optional[int] = None
 
 
 def is_subscriptable(t: VyperType) -> bool:
     """Check if type supports subscript access."""
-    return isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT))
+    return isinstance(t, SUBSCRIPTABLE_TYPES)
+
+
+def subscript_child_types(
+    t: VyperType,
+) -> Generator[tuple[VyperType, Optional[int]], None, None]:
+    """Yield child types and optional tuple index for subscriptable types."""
+    if isinstance(t, (HashMapT, SArrayT, DArrayT)):
+        yield t.value_type, None
+    elif isinstance(t, TupleT):
+        for i, member_t in enumerate(getattr(t, "member_types", [])):
+            yield member_t, i
 
 
 def is_dereferenceable(
@@ -29,7 +53,7 @@ def is_dereferenceable(
     allow_subscript: bool = True,
 ) -> bool:
     """Check if type supports attribute or subscript dereferencing."""
-    if allow_subscript and isinstance(t, (HashMapT, SArrayT, DArrayT, TupleT)):
+    if allow_subscript and is_subscriptable(t):
         return True
     if allow_attribute and isinstance(t, StructT):
         return True
@@ -38,12 +62,8 @@ def is_dereferenceable(
 
 def child_types(t: VyperType) -> Generator[VyperType, None, None]:
     """Yield element/value types accessible via subscript."""
-    if isinstance(t, HashMapT):
-        yield t.value_type
-    elif isinstance(t, (SArrayT, DArrayT)):
-        yield t.value_type
-    elif isinstance(t, TupleT):
-        yield from getattr(t, "member_types", [])
+    for child_t, _ in subscript_child_types(t):
+        yield child_t
 
 
 def dereference_child_types(
@@ -57,22 +77,6 @@ def dereference_child_types(
         yield from child_types(t)
     if allow_attribute and isinstance(t, StructT):
         yield from t.members.values()
-
-
-def can_reach_type(base_t: VyperType, target_t: VyperType, max_depth: int) -> bool:
-    """Check if target_t is reachable from base_t via subscripting.
-
-    Recursively explores nested subscriptable types up to max_depth levels.
-    """
-    if max_depth <= 0:
-        return False
-
-    for ct in child_types(base_t):
-        if target_t.compare_type(ct):
-            return True
-        if is_subscriptable(ct) and can_reach_type(ct, target_t, max_depth - 1):
-            return True
-    return False
 
 
 def can_reach_type_via_deref(
@@ -107,80 +111,7 @@ def can_reach_type_via_deref(
     return False
 
 
-def find_subscript_bases(
-    target_type: VyperType,
-    vars_dict: dict[str, VarInfo],
-) -> list[tuple[str, VyperType]]:
-    """Find variables that can be subscripted to yield target_type.
-
-    Supports HashMapT[key_type, value_type] and sequences (SArrayT, DArrayT, TupleT).
-    For TupleT, any element matching target_type is acceptable.
-
-    Args:
-        target_type: The type we want to produce via subscripting
-        vars_dict: Mapping of variable names to VarInfo
-
-    Returns:
-        List of (var_name, var_type) tuples for variables whose subscript yields target_type
-    """
-    candidates: list[tuple[str, VyperType]] = []
-
-    for name, var_info in vars_dict.items():
-        var_t = var_info.typ
-
-        # HashMap[key->value]
-        if isinstance(var_t, HashMapT):
-            if target_type.compare_type(var_t.value_type):
-                candidates.append((name, var_t))
-            continue
-
-        # Static/Dynamic arrays
-        if isinstance(var_t, (SArrayT, DArrayT)):
-            if target_type.compare_type(var_t.value_type):
-                candidates.append((name, var_t))
-            continue
-
-        # Tuples: allow if any member matches target_type
-        if isinstance(var_t, TupleT):
-            for mt in getattr(var_t, "member_types", []):
-                if target_type.compare_type(mt):
-                    candidates.append((name, var_t))
-                    break
-
-    return candidates
-
-
-def find_nested_subscript_bases(
-    target_type: VyperType,
-    vars_dict: dict[str, VarInfo],
-    max_steps: int,
-) -> list[tuple[str, VyperType]]:
-    """Find variables that can reach target_type via nested subscripting.
-
-    Unlike find_subscript_bases, this searches through multiple levels
-    of subscripting (e.g., hashmap[key1][key2]).
-
-    Args:
-        target_type: The type we want to produce via subscripting
-        vars_dict: Mapping of variable names to VarInfo
-        max_steps: Maximum depth of subscript chain to explore
-
-    Returns:
-        List of (var_name, var_type) tuples for variables that can reach target_type
-    """
-    result: list[tuple[str, VyperType]] = []
-
-    for name, var_info in vars_dict.items():
-        t = var_info.typ
-        if not is_subscriptable(t):
-            continue
-        if can_reach_type(t, target_type, max_steps):
-            result.append((name, t))
-
-    return result
-
-
-def find_dereference_bases(
+def find_dereferenceable_vars(
     target_type: VyperType,
     vars_dict: dict[str, VarInfo],
     max_steps: int,
@@ -189,21 +120,181 @@ def find_dereference_bases(
     allow_subscript: bool = True,
 ) -> list[tuple[str, VyperType]]:
     """Find variables that can reach target_type via dereferencing."""
-    result: list[tuple[str, VyperType]] = []
+    return find_dereference_sources(
+        target_type,
+        ((name, var_info.typ) for name, var_info in vars_dict.items()),
+        max_steps,
+        allow_attribute=allow_attribute,
+        allow_subscript=allow_subscript,
+    )
 
-    for name, var_info in vars_dict.items():
-        t = var_info.typ
+
+def find_dereference_sources(
+    target_type: VyperType,
+    sources: Iterable[tuple[TSource, VyperType]],
+    max_steps: int,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> list[tuple[TSource, VyperType]]:
+    """Find typed sources that can reach target_type via dereferencing."""
+    result: list[tuple[TSource, VyperType]] = []
+
+    for source, source_t in sources:
         if not is_dereferenceable(
-            t, allow_attribute=allow_attribute, allow_subscript=allow_subscript
+            source_t,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
         ):
             continue
         if can_reach_type_via_deref(
-            t,
+            source_t,
             target_type,
             max_steps,
             allow_attribute=allow_attribute,
             allow_subscript=allow_subscript,
         ):
-            result.append((name, t))
+            result.append((source, source_t))
 
     return result
+
+
+def allow_deref_candidate(
+    child_t: VyperType,
+    *,
+    target_type: Optional[VyperType],
+    max_steps_remaining: int,
+    allow_attribute: bool,
+    allow_subscript: bool,
+) -> bool:
+    if target_type is None:
+        return True
+    if target_type.compare_type(child_t):
+        return True
+    if max_steps_remaining <= 0:
+        return False
+    if not is_dereferenceable(
+        child_t,
+        allow_attribute=allow_attribute,
+        allow_subscript=allow_subscript,
+    ):
+        return False
+    return can_reach_type_via_deref(
+        child_t,
+        target_type,
+        max_steps_remaining,
+        allow_attribute=allow_attribute,
+        allow_subscript=allow_subscript,
+    )
+
+
+def dereference_candidates(
+    cur_t: VyperType,
+    *,
+    target_type: Optional[VyperType],
+    max_steps_remaining: int,
+    allow_attribute: bool,
+    allow_subscript: bool,
+) -> list[DerefCandidate]:
+    candidates: list[DerefCandidate] = []
+
+    if allow_attribute and isinstance(cur_t, StructT):
+        for field_name, field_type in cur_t.members.items():
+            if not allow_deref_candidate(
+                field_type,
+                target_type=target_type,
+                max_steps_remaining=max_steps_remaining,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            ):
+                continue
+            candidates.append(
+                DerefCandidate(
+                    kind="attribute",
+                    child_type=field_type,
+                    attr_name=field_name,
+                )
+            )
+
+    if allow_subscript:
+        for child_t, tuple_index in subscript_child_types(cur_t):
+            if not allow_deref_candidate(
+                child_t,
+                target_type=target_type,
+                max_steps_remaining=max_steps_remaining,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            ):
+                continue
+            candidates.append(
+                DerefCandidate(
+                    kind="subscript",
+                    child_type=child_t,
+                    tuple_index=tuple_index,
+                )
+            )
+
+    return candidates
+
+
+def collect_dereference_types(
+    base_type: VyperType,
+    max_steps: int,
+    *,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> list[tuple[VyperType, int]]:
+    types: list[tuple[VyperType, int]] = []
+
+    def walk(cur_t: VyperType, steps_left: int, depth: int) -> None:
+        if steps_left <= 0:
+            return
+        for child_t in dereference_child_types(
+            cur_t,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        ):
+            types.append((child_t, depth))
+            if is_dereferenceable(
+                child_t,
+                allow_attribute=allow_attribute,
+                allow_subscript=allow_subscript,
+            ):
+                walk(child_t, steps_left - 1, depth + 1)
+
+    walk(base_type, max_steps, 1)
+    return types
+
+
+def pick_dereference_target_type(
+    base_type: VyperType,
+    *,
+    max_steps: int,
+    predicate: Callable[[VyperType], bool],
+    rng: random.Random,
+    continue_prob: float,
+    allow_attribute: bool = True,
+    allow_subscript: bool = True,
+) -> Optional[VyperType]:
+    all_candidates = [
+        (t, depth)
+        for t, depth in collect_dereference_types(
+            base_type,
+            max_steps,
+            allow_attribute=allow_attribute,
+            allow_subscript=allow_subscript,
+        )
+        if predicate(t)
+    ]
+    if not all_candidates:
+        return None
+
+    desired_depth = 1
+    while desired_depth < max_steps and rng.random() < continue_prob:
+        desired_depth += 1
+
+    depth_candidates = [t for t, depth in all_candidates if depth == desired_depth]
+    if depth_candidates:
+        return rng.choice(depth_candidates)
+
+    return rng.choice([t for t, _ in all_candidates])

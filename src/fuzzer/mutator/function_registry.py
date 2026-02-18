@@ -96,6 +96,7 @@ class FunctionRegistry:
             "slice",
             "keccak256",
             "convert",
+            "abi_encode",
         ]
 
         for name, builtin in DISPATCH_TABLE.items():
@@ -154,6 +155,13 @@ class FunctionRegistry:
 
             if name == "convert":
                 if convert_target_supported(return_type):
+                    compat.append((name, b))
+                continue
+
+            if name == "abi_encode":
+                # `abi_encode` returns Bytes[maxlen] where maxlen depends on args.
+                # We can only prefilter by target family and minimum feasible size.
+                if isinstance(return_type, BytesT) and return_type.length >= 32:
                     compat.append((name, b))
                 continue
 
@@ -313,19 +321,25 @@ class FunctionRegistry:
 
     def get_callable_functions(
         self,
-        return_type: VyperType,
+        return_type: Optional[VyperType] = None,
         from_function: Optional[str] = None,
         caller_mutability: Optional[StateMutability] = None,
     ) -> List[ContractFunctionT]:
-        """Get functions that can be called without creating cycles."""
-        type_key = type(return_type)
-        if type_key not in self.functions_by_return_type:
-            return []
+        """Get functions that can be called without creating cycles.
 
-        matching_names = self.functions_by_return_type[type_key]
+        If return_type is None, all functions passing the other filters are returned.
+        """
+        if return_type is not None:
+            type_key = type(return_type)
+            if type_key not in self.functions_by_return_type:
+                return []
+            candidate_names = self.functions_by_return_type[type_key]
+        else:
+            candidate_names = self.functions.keys()
+
         callable_funcs = []
 
-        for name in matching_names:
+        for name in candidate_names:
             # Skip builtins in this method (handled separately)
             if name.startswith("__builtin__"):
                 continue
@@ -334,9 +348,15 @@ class FunctionRegistry:
                 continue
 
             func = self.functions[name]
-            # Check type compatibility
-            if not return_type.compare_type(func.return_type):
+
+            if caller_mutability is StateMutability.PURE and func.is_external:
+                # TODO: we can't generate the `self` address in pure functions.
                 continue
+
+            # Check type compatibility when a target type is specified
+            if return_type is not None:
+                if func.return_type is None or not return_type.compare_type(func.return_type):
+                    continue
 
             # Check for cycles if we have a caller context
             if from_function:
@@ -417,12 +437,15 @@ class FunctionRegistry:
 
         # Choose function properties
         if visibility is None:
-            visibility = self.rng.choice(
-                [
-                    FunctionVisibility.INTERNAL,
-                    FunctionVisibility.EXTERNAL,
-                ]
-            )
+            visibility_choices = [FunctionVisibility.INTERNAL, FunctionVisibility.EXTERNAL]
+            if caller_mutability is StateMutability.PURE:
+                visibility_choices = [FunctionVisibility.INTERNAL]
+            visibility = self.rng.choice(visibility_choices)
+        elif (
+            caller_mutability is StateMutability.PURE
+            and visibility is FunctionVisibility.EXTERNAL
+        ):
+            return None
 
         # Choose state mutability
         mutability_options = [
