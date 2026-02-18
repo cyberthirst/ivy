@@ -13,7 +13,7 @@ from vyper.compiler.phases import CompilerData
 from fuzzer.mutator.literal_generator import LiteralGenerator
 from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.candidate_selector import CandidateSelector
-from fuzzer.mutator.function_registry import FunctionRegistry
+from fuzzer.mutator.function_registry import FunctionRegistry, KWARG_PLACEHOLDER_TAG
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.context import GenerationContext, ScopeType, state_to_expr_mutability
 from fuzzer.mutator.expr_generator import ExprGenerator
@@ -221,6 +221,7 @@ class AstMutator(VyperNodeTransformer):
             max_args=6,
             initial=True,
             visibility=FunctionVisibility.EXTERNAL,
+            max_kwargs=3,
         )
         if func_def is not None:
             functions_added += 1
@@ -234,6 +235,7 @@ class AstMutator(VyperNodeTransformer):
                 type_generator=self.type_generator,
                 max_args=6,
                 initial=True,
+                max_kwargs=3,
             )
             if func_def is not None:
                 functions_added += 1
@@ -403,6 +405,22 @@ class AstMutator(VyperNodeTransformer):
 
         return node
 
+    def _fill_kwarg_defaults(
+        self, node: ast.FunctionDef, func_type: ContractFunctionT
+    ) -> None:
+        if not func_type.keyword_args:
+            return
+        for i, kw_arg in enumerate(func_type.keyword_args):
+            if not getattr(kw_arg.default_value, "_metadata", {}).get(
+                KWARG_PLACEHOLDER_TAG
+            ):
+                continue
+            default_expr = self.expr_generator.generate_kwarg_default(
+                kw_arg.typ, self.context
+            )
+            kw_arg.default_value = default_expr
+            node.args.defaults[i] = default_expr
+
     def visit_FunctionDef(self, node: ast.FunctionDef):
         # Interface functions are just signatures so we skip them
         parent = node.get_ancestor()
@@ -443,6 +461,8 @@ class AstMutator(VyperNodeTransformer):
                         else None,
                     )
                     self.add_variable(arg.name, var_info)
+
+                self._fill_kwarg_defaults(node, func_type)
 
                 # Generated functions with empty bodies need statements
                 if not node.body:

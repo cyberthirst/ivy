@@ -8,18 +8,22 @@ from vyper.semantics.types import (
     TYPE_T,
     StringT,
     BytesT,
+    InterfaceT,
 )
 from vyper.semantics.types.function import (
     ContractFunctionT,
     FunctionVisibility,
     StateMutability,
     PositionalArg,
+    KeywordArg,
 )
 from vyper.builtins.functions import DISPATCH_TABLE
 from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.ast import nodes as ast
 
 from fuzzer.mutator.convert_utils import convert_target_supported
+
+KWARG_PLACEHOLDER_TAG = "kwarg_placeholder"
 
 
 class FreshFunctionNameGenerator:
@@ -411,6 +415,7 @@ class FunctionRegistry:
         initial: bool = False,
         visibility: Optional[FunctionVisibility] = None,
         allow_nonreentrant: bool = True,
+        max_kwargs: int = 0,
     ) -> Optional[ast.FunctionDef]:
         """Create a new function with empty body and ContractFunctionT in metadata.
         The body is created later, once we have more information. That allows
@@ -421,6 +426,7 @@ class FunctionRegistry:
                      If False, counts against dynamic_functions budget.
             visibility: Force a specific visibility when provided.
             allow_nonreentrant: If False, never mark the new function @nonreentrant.
+            max_kwargs: Maximum number of keyword arguments to generate.
         """
         # Check the appropriate budget
         if initial:
@@ -434,6 +440,11 @@ class FunctionRegistry:
 
         name = self.name_generator.generate()
         positional_args = self._generate_positional_args(type_generator, max_args)
+        keyword_args: List[KeywordArg] = []
+        if max_kwargs > 0:
+            keyword_args = self._generate_keyword_args(
+                type_generator, max_kwargs, start_index=len(positional_args)
+            )
 
         # Choose function properties
         if visibility is None:
@@ -491,6 +502,7 @@ class FunctionRegistry:
             nonreentrant=nonreentrant,
             emit_nonreentrant=emit_nonreentrant,
             reentrant=reentrant,
+            keyword_args=keyword_args,
         )
 
     def create_init(
@@ -538,6 +550,26 @@ class FunctionRegistry:
             positional_args.append(PositionalArg(arg_name, arg_type))
         return positional_args
 
+    def _generate_keyword_args(
+        self, type_generator, max_kwargs: int, start_index: int
+    ) -> List[KeywordArg]:
+        num_kwargs = self.rng.randint(0, max_kwargs)
+        keyword_args: List[KeywordArg] = []
+        for i in range(num_kwargs):
+            arg_type = type_generator.generate_biased_type(
+                skip={HashMapT, InterfaceT}, nesting=1
+            )
+            placeholder = ast.Int(value=0)
+            placeholder._metadata[KWARG_PLACEHOLDER_TAG] = True
+            keyword_args.append(
+                KeywordArg(
+                    f"arg{start_index + i}",
+                    arg_type,
+                    default_value=placeholder,
+                )
+            )
+        return keyword_args
+
     def _create_function_def(
         self,
         *,
@@ -549,7 +581,10 @@ class FunctionRegistry:
         nonreentrant: bool = False,
         emit_nonreentrant: bool = True,
         reentrant: bool = False,
+        keyword_args: Optional[List[KeywordArg]] = None,
     ) -> ast.FunctionDef:
+        if keyword_args is None:
+            keyword_args = []
         assert not (nonreentrant and reentrant)
         decorator_list = []
         if visibility == FunctionVisibility.EXTERNAL:
@@ -568,11 +603,18 @@ class FunctionRegistry:
         if reentrant:
             decorator_list.append(ast.Name(id="reentrant"))
 
-        args = ast.arguments(args=[], defaults=[], default=None)
+        defaults = [kw.default_value for kw in keyword_args]
+        args = ast.arguments(args=[], defaults=defaults, default=None)
         for pos_arg in positional_args:
             arg = ast.arg(
                 arg=pos_arg.name,
                 annotation=ast.Name(id=str(pos_arg.typ)) if pos_arg.typ else None,
+            )
+            args.args.append(arg)
+        for kw_arg in keyword_args:
+            arg = ast.arg(
+                arg=kw_arg.name,
+                annotation=ast.Name(id=str(kw_arg.typ)) if kw_arg.typ else None,
             )
             args.args.append(arg)
 
@@ -587,7 +629,7 @@ class FunctionRegistry:
         func_t = ContractFunctionT(
             name=name,
             positional_args=positional_args,
-            keyword_args=[],
+            keyword_args=keyword_args,
             return_type=return_type,
             function_visibility=visibility,
             state_mutability=state_mutability,

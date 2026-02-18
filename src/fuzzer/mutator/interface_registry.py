@@ -36,8 +36,9 @@ class InterfaceRegistry:
         # Deep copy the function definition
         func_def: ast.FunctionDef = copy.deepcopy(func.ast_def)
 
-        # Clear decorators (interface functions don't have them)
+        # Clear decorators and defaults (interface functions don't have them)
         func_def.decorator_list = []
+        func_def.args.defaults = []
 
         # Replace body with just mutability indicator
         mut_name = self._mutability_name(func.mutability)
