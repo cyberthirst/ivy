@@ -729,7 +729,7 @@ class ExprGenerator(BaseGenerator):
                 max_outsize = self.rng.randint(1, target_typ_len)
             else:
                 # "bool" — pick an arbitrary outsize
-                max_outsize = self.rng.randint(0, 256)
+                max_outsize = self.rng.randint(1, 256)
         else:
             revert_on_failure = target_kind in {"void", "bytes"}
 
