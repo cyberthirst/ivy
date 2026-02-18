@@ -163,7 +163,10 @@ class ExprGenerator(BaseGenerator):
                 value=expr,
             )
 
-        context.add_variable(name, var_info)
+        # Don't add to context: hoisted temps are internal to the expression
+        # being built. Adding them makes them visible to find_matching_vars(),
+        # which lets later statement generation emit assignments to the name
+        # before hoist_prelude_decls inserts the declaration.
         ref = ast_builder.var_ref(name, var_info)
         ref._metadata = {"type": expr_type, "varinfo": var_info}
         ref._metadata["hoisted_prelude"] = decl
