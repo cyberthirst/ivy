@@ -281,14 +281,16 @@ class ExprGenerator(BaseGenerator):
             return []
 
         candidates: list[tuple[Optional[str], str, VyperType]] = []
+        is_default_arg = ctx.context.current_mutability == ExprMutability.DEFAULT_ARG
         if ctx.target_type.compare_type(AddressT()):
             candidates.extend(
                 [
                     ("msg", "sender", AddressT()),
                     ("tx", "origin", AddressT()),
-                    (None, "self", AddressT()),
                 ]
             )
+            if not is_default_arg:
+                candidates.append((None, "self", AddressT()))
         else:
             uint256_t = IntegerT(False, 256)
             if not ctx.target_type.compare_type(uint256_t):
@@ -947,7 +949,7 @@ class ExprGenerator(BaseGenerator):
         allow_self = (
             not ctx.context.is_module_scope
             and ctx.context.current_mutability
-            not in (ExprMutability.CONST, ExprMutability.PURE)
+            not in (ExprMutability.CONST, ExprMutability.DEFAULT_ARG, ExprMutability.PURE)
         )
         if allow_self and self.rng.random() < 0.25:
             address_node = ast.Name(id="self")
