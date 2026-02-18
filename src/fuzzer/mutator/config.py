@@ -71,6 +71,7 @@ class ExprGeneratorConfig:
     raw_call_target_self_prob: float = (
         0.7  # probability of targeting self with abi-encoded data
     )
+    raw_call_revert_on_failure_false_prob: float = 0.9
 
     # Builtin: slice
     slice_use_bytes32_source_prob: float = 0.25

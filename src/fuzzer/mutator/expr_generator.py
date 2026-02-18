@@ -693,7 +693,7 @@ class ExprGenerator(BaseGenerator):
         depth: int,
         *,
         target_type: Optional[VyperType],
-    ) -> Optional[ast.Call]:
+    ) -> Optional[Union[ast.Call, ast.Subscript]]:
         if not self.can_generate_raw_call(context, target_type):
             return None
 
@@ -714,18 +714,34 @@ class ExprGenerator(BaseGenerator):
                 self.rng.random() < self.cfg.raw_call_set_is_static_call_prob
             )
 
-        revert_on_failure = target_kind in {"void", "bytes"}
-
-        max_outsize = 0
-        max_outsize_optional = target_kind in {"void", "bool"}
-        set_max_outsize = (
-            not max_outsize_optional
-            or self.rng.random() < self.cfg.raw_call_set_max_outsize_prob
+        # Bias towards revert_on_failure=False using tuple subscript.
+        # For "bool"/"bytes" targets, generate the full tuple form and subscript.
+        use_tuple_subscript = target_kind in {"bool", "bytes"} and (
+            self.rng.random() < self.cfg.raw_call_revert_on_failure_false_prob
         )
-        if set_max_outsize:
-            max_outsize = self.rng.randint(0, target_typ_len)
-            if target_kind in {"bytes", "tuple"} and max_outsize == 0:
+
+        if use_tuple_subscript:
+            revert_on_failure = False
+            # Must have max_outsize for tuple return
+            set_max_outsize = True
+            if target_kind == "bytes":
                 max_outsize = self.rng.randint(1, target_typ_len)
+            else:
+                # "bool" — pick an arbitrary outsize
+                max_outsize = self.rng.randint(0, 256)
+        else:
+            revert_on_failure = target_kind in {"void", "bytes"}
+
+            max_outsize = 0
+            max_outsize_optional = target_kind in {"void", "bool"}
+            set_max_outsize = (
+                not max_outsize_optional
+                or self.rng.random() < self.cfg.raw_call_set_max_outsize_prob
+            )
+            if set_max_outsize:
+                max_outsize = self.rng.randint(0, target_typ_len)
+                if target_kind in {"bytes", "tuple"} and max_outsize == 0:
+                    max_outsize = self.rng.randint(1, target_typ_len)
 
         external_funcs = self._get_external_functions()
         use_self = (
@@ -784,6 +800,15 @@ class ExprGenerator(BaseGenerator):
         call_node = ast.Call(
             func=func_node, args=[to_expr, data_expr], keywords=keywords
         )
+
+        if use_tuple_subscript:
+            tuple_type = TupleT((BoolT(), BytesT(max_outsize)))
+            call_node._metadata = {"type": tuple_type}
+            subscript_idx = 0 if target_kind == "bool" else 1
+            idx_expr = ast_builder.literal(subscript_idx, IntegerT(False, 256))
+            sub_node = ast.Subscript(value=call_node, slice=idx_expr)
+            sub_node._metadata = {"type": tuple_type.member_types[subscript_idx]}
+            return sub_node
 
         if target_kind == "void":
             ret_type = None
@@ -1746,7 +1771,7 @@ class ExprGenerator(BaseGenerator):
         is_applicable="_is_raw_call_expr_applicable",
         weight="_weight_raw_call",
     )
-    def _generate_raw_call_expr(self, *, ctx: ExprGenCtx, **_) -> Optional[ast.Call]:
+    def _generate_raw_call_expr(self, *, ctx: ExprGenCtx, **_):
         return self.generate_raw_call_call(
             ctx.context,
             ctx.depth,
