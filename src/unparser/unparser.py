@@ -338,6 +338,9 @@ class Unparser(VyperNodeVisitorBase):
     def visit_Name(self, node):
         return node.id
 
+    def visit_Ellipsis(self, node):
+        return "..."
+
     def visit_Int(self, node):
         return str(node.value)
 

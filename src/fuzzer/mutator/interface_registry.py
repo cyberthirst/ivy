@@ -39,6 +39,11 @@ class InterfaceRegistry:
         # Clear decorators (interface functions don't have them)
         func_def.decorator_list = []
 
+        # Replace kwarg defaults with Ellipsis (interface convention)
+        func_def.args.defaults = [
+            ast.Ellipsis(value=...) for _ in func_def.args.defaults
+        ]
+
         # Replace body with just mutability indicator
         mut_name = self._mutability_name(func.mutability)
         func_def.body = [ast.Expr(value=ast.Name(id=mut_name))]

@@ -559,7 +559,7 @@ class FunctionRegistry:
             arg_type = type_generator.generate_biased_type(
                 skip={HashMapT, InterfaceT}, nesting=1
             )
-            placeholder = ast.Int(value=0)
+            placeholder = ast.Ellipsis(value=...)
             placeholder._metadata[KWARG_PLACEHOLDER_TAG] = True
             keyword_args.append(
                 KeywordArg(
