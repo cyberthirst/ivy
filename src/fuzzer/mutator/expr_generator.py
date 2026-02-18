@@ -297,7 +297,6 @@ class ExprGenerator(BaseGenerator):
             candidates.append(("block", "timestamp", uint256_t))
             if ctx.context.current_function_mutability == StateMutability.PAYABLE:
                 candidates.append(("msg", "value", uint256_t))
-            # TODO: support msg.data
 
         return candidates
 
@@ -321,7 +320,10 @@ class ExprGenerator(BaseGenerator):
     def _is_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
-        if ctx.context.current_mutability == ExprMutability.CONST:
+        if ctx.context.current_mutability in (
+            ExprMutability.CONST,
+            ExprMutability.DEFAULT_ARG,
+        ):
             return False
         return not ctx.context.is_module_scope
 
@@ -353,7 +355,11 @@ class ExprGenerator(BaseGenerator):
     ) -> bool:
         if context.is_module_scope:
             return False
-        if context.current_mutability in (ExprMutability.CONST, ExprMutability.PURE):
+        if context.current_mutability in (
+            ExprMutability.CONST,
+            ExprMutability.DEFAULT_ARG,
+            ExprMutability.PURE,
+        ):
             return False
         if context.current_function_mutability == StateMutability.PURE:
             return False
@@ -480,8 +486,10 @@ class ExprGenerator(BaseGenerator):
         )
 
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
-        # Disallow if-expressions in constant contexts due to compiler limitation
-        if ctx.context.current_mutability == ExprMutability.CONST:
+        if ctx.context.current_mutability in (
+            ExprMutability.CONST,
+            ExprMutability.DEFAULT_ARG,
+        ):
             return False
         # TODO: enable once https://github.com/vyperlang/vyper/issues/3480
         # or https://github.com/vyperlang/vyper/issues/4825 is fixed
@@ -490,7 +498,10 @@ class ExprGenerator(BaseGenerator):
         return True
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
-        if ctx.context.current_mutability == ExprMutability.CONST:
+        if ctx.context.current_mutability in (
+            ExprMutability.CONST,
+            ExprMutability.DEFAULT_ARG,
+        ):
             return False
         return convert_target_supported(ctx.target_type)
 
