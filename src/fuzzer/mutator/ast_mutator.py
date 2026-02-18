@@ -415,7 +415,7 @@ class AstMutator(VyperNodeTransformer):
                 KWARG_PLACEHOLDER_TAG
             ):
                 continue
-            with self.context.mutability(ExprMutability.DEFAULT_ARG):
+            with self.context.mutability(ExprMutability.CONST):
                 default_expr = self.expr_generator.generate(
                     kw_arg.typ,
                     self.context,

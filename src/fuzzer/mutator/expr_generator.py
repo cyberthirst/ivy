@@ -281,7 +281,6 @@ class ExprGenerator(BaseGenerator):
             return []
 
         candidates: list[tuple[Optional[str], str, VyperType]] = []
-        is_default_arg = ctx.context.current_mutability == ExprMutability.DEFAULT_ARG
         if ctx.target_type.compare_type(AddressT()):
             candidates.extend(
                 [
@@ -289,8 +288,7 @@ class ExprGenerator(BaseGenerator):
                     ("tx", "origin", AddressT()),
                 ]
             )
-            if not is_default_arg:
-                candidates.append((None, "self", AddressT()))
+            candidates.append((None, "self", AddressT()))
         else:
             uint256_t = IntegerT(False, 256)
             if not ctx.target_type.compare_type(uint256_t):
@@ -322,10 +320,7 @@ class ExprGenerator(BaseGenerator):
     def _is_func_call_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
         # TODO do we allow constant folding of some builtins?
         # if yes, we'd want to drop this restriction
-        if ctx.context.current_mutability in (
-            ExprMutability.CONST,
-            ExprMutability.DEFAULT_ARG,
-        ):
+        if ctx.context.current_mutability == ExprMutability.CONST:
             return False
         return not ctx.context.is_module_scope
 
@@ -359,7 +354,6 @@ class ExprGenerator(BaseGenerator):
             return False
         if context.current_mutability in (
             ExprMutability.CONST,
-            ExprMutability.DEFAULT_ARG,
             ExprMutability.PURE,
         ):
             return False
@@ -488,10 +482,7 @@ class ExprGenerator(BaseGenerator):
         )
 
     def _is_ifexp_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
-        if ctx.context.current_mutability in (
-            ExprMutability.CONST,
-            ExprMutability.DEFAULT_ARG,
-        ):
+        if ctx.context.current_mutability == ExprMutability.CONST:
             return False
         # TODO: enable once https://github.com/vyperlang/vyper/issues/3480
         # or https://github.com/vyperlang/vyper/issues/4825 is fixed
@@ -500,10 +491,7 @@ class ExprGenerator(BaseGenerator):
         return True
 
     def _is_convert_applicable(self, *, ctx: ExprGenCtx, **_) -> bool:
-        if ctx.context.current_mutability in (
-            ExprMutability.CONST,
-            ExprMutability.DEFAULT_ARG,
-        ):
+        if ctx.context.current_mutability == ExprMutability.CONST:
             return False
         return convert_target_supported(ctx.target_type)
 
@@ -949,7 +937,7 @@ class ExprGenerator(BaseGenerator):
         allow_self = (
             not ctx.context.is_module_scope
             and ctx.context.current_mutability
-            not in (ExprMutability.CONST, ExprMutability.DEFAULT_ARG, ExprMutability.PURE)
+            not in (ExprMutability.CONST, ExprMutability.PURE)
         )
         if allow_self and self.rng.random() < 0.25:
             address_node = ast.Name(id="self")

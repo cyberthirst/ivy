@@ -24,7 +24,6 @@ class AccessMode(Enum):
 
 class ExprMutability(Enum):
     CONST = auto()  # compile-time constants only (const exprs)
-    DEFAULT_ARG = auto()  # function default args: constants, immutables, env vars
     PURE = auto()  # no state reads/writes
     VIEW = auto()  # can read state, cannot write
     STATEFUL = auto()  # full access
@@ -166,12 +165,6 @@ class GenerationContext:
     def _is_var_accessible(self, name: str, var_info: VarInfo) -> bool:
         if self.current_mutability == ExprMutability.CONST:
             if var_info.modifiability != Modifiability.CONSTANT:
-                return False
-        elif self.current_mutability == ExprMutability.DEFAULT_ARG:
-            if var_info.modifiability not in (
-                Modifiability.CONSTANT,
-                Modifiability.RUNTIME_CONSTANT,
-            ):
                 return False
         elif self.current_mutability == ExprMutability.PURE:
             if var_info.is_state_variable():
