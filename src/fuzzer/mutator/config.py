@@ -49,13 +49,14 @@ class ExprGeneratorConfig:
     subscript_hashmap_chain_max_steps: int = 1
 
     # Index generation for sequences
-    index_guard_prob: float = 0.60  # Use len()-guarded index; remainder uses random expr
+    index_guard_prob: float = (
+        0.60  # Use len()-guarded index; remainder uses random expr
+    )
 
     # DynArray index biases
     dynarray_small_literal_in_guard_prob: float = 0.75
     dynarray_last_index_in_guard_prob: float = 0.2
     dynarray_small_literal_in_random_prob: float = 0.6
-
 
     # Function call generation
     use_builtin_when_both_available_prob: float = 0.4
@@ -67,6 +68,9 @@ class ExprGeneratorConfig:
     raw_call_set_max_outsize_prob: float = 0.5
     raw_call_set_value_prob: float = 0.2
     raw_call_set_is_static_call_prob: float = 0.1
+    raw_call_target_self_prob: float = (
+        0.7  # probability of targeting self with abi-encoded data
+    )
 
     # Builtin: slice
     slice_use_bytes32_source_prob: float = 0.25
@@ -133,9 +137,7 @@ class StmtGeneratorConfig:
 class MutatorConfig:
     """Top-level configuration bundling all mutator settings."""
 
-    expr_depth: DepthConfig = field(
-        default_factory=lambda: DepthConfig(root_depth=2)
-    )
+    expr_depth: DepthConfig = field(default_factory=lambda: DepthConfig(root_depth=2))
     stmt_depth: DepthConfig = field(default_factory=DepthConfig)
     expr: ExprGeneratorConfig = field(default_factory=ExprGeneratorConfig)
     stmt: StmtGeneratorConfig = field(default_factory=StmtGeneratorConfig)

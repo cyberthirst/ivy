@@ -274,7 +274,10 @@ class ExprGenerator(BaseGenerator):
     ) -> list[tuple[Optional[str], str, VyperType]]:
         if ctx.context.is_module_scope:
             return []
-        if ctx.context.current_mutability in (ExprMutability.CONST, ExprMutability.PURE):
+        if ctx.context.current_mutability in (
+            ExprMutability.CONST,
+            ExprMutability.PURE,
+        ):
             return []
 
         candidates: list[tuple[Optional[str], str, VyperType]] = []
@@ -632,6 +635,58 @@ class ExprGenerator(BaseGenerator):
 
         return None
 
+    def _get_external_functions(self) -> list[ContractFunctionT]:
+        return [
+            f
+            for f in self.function_registry.functions.values()
+            if f.is_external and f.name not in ("__init__", "__default__")
+        ]
+
+    def _build_abi_encoded_calldata(
+        self,
+        func: ContractFunctionT,
+        context: GenerationContext,
+        depth: int,
+    ) -> ast.VyperNode:
+        selector_int = next(iter(func.method_ids.values()))
+        selector_bytes = selector_int.to_bytes(4, "big")
+        method_id_node = ast_builder.literal(selector_bytes, BytesM_T(4))
+
+        arg_types = [arg.typ for arg in func.positional_args]
+        if not arg_types:
+            method_id_node._metadata = {"type": BytesM_T(4)}
+            return method_id_node
+
+        args = [
+            self._maybe_hoist_abi_encode_arg(
+                self._generate_abi_encode_arg_expr(arg_t, context, depth),
+                context,
+            )
+            for arg_t in arg_types
+        ]
+
+        keywords = [
+            ast.keyword(arg="method_id", value=method_id_node),
+            ast.keyword(
+                arg="ensure_tuple",
+                value=ast_builder.literal(True, BoolT()),
+            ),
+        ]
+
+        func_node = ast.Name(id="abi_encode")
+        func_node._metadata = {}
+        if "abi_encode" in self.function_registry.builtins:
+            func_node._metadata["type"] = self.function_registry.builtins["abi_encode"]
+
+        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
+        maxlen = self._abi_encode_maxlen(
+            arg_types, ensure_tuple=True, has_method_id=True
+        )
+        if maxlen is None:
+            maxlen = 4 + 32 * len(arg_types)
+        call_node._metadata = {"type": BytesT(maxlen)}
+        return call_node
+
     def generate_raw_call_call(
         self,
         context: GenerationContext,
@@ -651,9 +706,7 @@ class ExprGenerator(BaseGenerator):
         bool_t = BoolT()
         arg_depth = self.child_depth(depth)
 
-        force_static_call = (
-            context.current_function_mutability == StateMutability.VIEW
-        )
+        force_static_call = context.current_function_mutability == StateMutability.VIEW
         if force_static_call:
             is_static_call = True
         else:
@@ -674,8 +727,21 @@ class ExprGenerator(BaseGenerator):
             if target_kind in {"bytes", "tuple"} and max_outsize == 0:
                 max_outsize = self.rng.randint(1, target_typ_len)
 
-        to_expr = self.generate(AddressT(), context, arg_depth)
-        data_expr = self.generate(BytesT(self.rng.randint(0, 256)), context, arg_depth)
+        external_funcs = self._get_external_functions()
+        use_self = (
+            external_funcs and self.rng.random() < self.cfg.raw_call_target_self_prob
+        )
+
+        if use_self:
+            func = self.rng.choice(external_funcs)
+            to_expr = ast.Name(id="self")
+            to_expr._metadata = {"type": AddressT()}
+            data_expr = self._build_abi_encoded_calldata(func, context, arg_depth)
+        else:
+            to_expr = self.generate(AddressT(), context, arg_depth)
+            data_expr = self.generate(
+                BytesT(self.rng.randint(0, 256)), context, arg_depth
+            )
 
         func_node = ast.Name(id="raw_call")
         func_node._metadata = {}
@@ -694,10 +760,7 @@ class ExprGenerator(BaseGenerator):
                 )
             )
 
-        if (
-            not is_static_call
-            and self.rng.random() < self.cfg.raw_call_set_value_prob
-        ):
+        if not is_static_call and self.rng.random() < self.cfg.raw_call_set_value_prob:
             randexpr = self.generate(uint256_t, context, arg_depth)
             wei_scale = ast_builder.uint256_literal(10**18)
             value_expr = ast.BinOp(left=randexpr, op=ast.Mod(), right=wei_scale)
@@ -706,7 +769,9 @@ class ExprGenerator(BaseGenerator):
 
         if is_static_call:
             keywords.append(
-                ast.keyword(arg="is_static_call", value=ast_builder.literal(True, bool_t))
+                ast.keyword(
+                    arg="is_static_call", value=ast_builder.literal(True, bool_t)
+                )
             )
 
         keywords.append(
@@ -716,7 +781,9 @@ class ExprGenerator(BaseGenerator):
             )
         )
 
-        call_node = ast.Call(func=func_node, args=[to_expr, data_expr], keywords=keywords)
+        call_node = ast.Call(
+            func=func_node, args=[to_expr, data_expr], keywords=keywords
+        )
 
         if target_kind == "void":
             ret_type = None
@@ -1111,9 +1178,7 @@ class ExprGenerator(BaseGenerator):
         else:
             return self._generate_random_index(seq_t, context, depth)
 
-    def _build_len_call_maybe_hoisted(
-        self, base_node: ast.VyperNode
-    ) -> ast.VyperNode:
+    def _build_len_call_maybe_hoisted(self, base_node: ast.VyperNode) -> ast.VyperNode:
         # Hoist len() to avoid duplicating calls in the same
         # expression, which triggers a Vyper ICE (overlapping memory).
         len_call = build_len_call(base_node)
@@ -1190,8 +1255,11 @@ class ExprGenerator(BaseGenerator):
         depth: int,
     ) -> ast.VyperNode:
         """Generate a random (unconstrained) index expression."""
+
         def reject_oob(idx_expr: ast.VyperNode, length: int) -> bool:
-            return self._static_index_is_constant_oob(idx_expr, length, context.constants)
+            return self._static_index_is_constant_oob(
+                idx_expr, length, context.constants
+            )
 
         if isinstance(seq_t, SArrayT):
             return self._retry_index_expr(
@@ -1574,13 +1642,11 @@ class ExprGenerator(BaseGenerator):
     def _generate_struct(self, *, ctx: ExprGenCtx, **_) -> ast.Call:
         return self._generate_struct_literal(ctx)
 
-    def _effective_call_mutability(
-        self, context: GenerationContext
-    ) -> StateMutability:
+    def _effective_call_mutability(self, context: GenerationContext) -> StateMutability:
         caller_mutability = context.current_function_mutability
-        if (
-            context.in_iterable_expr
-            and caller_mutability not in (StateMutability.PURE, StateMutability.VIEW)
+        if context.in_iterable_expr and caller_mutability not in (
+            StateMutability.PURE,
+            StateMutability.VIEW,
         ):
             return StateMutability.VIEW
         return caller_mutability
@@ -1698,7 +1764,9 @@ class ExprGenerator(BaseGenerator):
         compatible_funcs = self._get_callable_functions(
             ctx.context, return_type=ctx.target_type
         )
-        compatible_builtins = self._get_compatible_builtins(ctx.target_type, ctx.context)
+        compatible_builtins = self._get_compatible_builtins(
+            ctx.target_type, ctx.context
+        )
 
         # Decide path: prefer user function, but sometimes pick builtin
         use_builtin = False
@@ -1824,8 +1892,13 @@ class ExprGenerator(BaseGenerator):
 
     def _random_abi_encode_arg_type(self, payload_budget: int) -> VyperType:
         static_choices = [
-            BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
-            IntegerT(False, 256), IntegerT(True, 128), AddressT(),
+            BoolT(),
+            DecimalT(),
+            BytesM_T(4),
+            BytesM_T(32),
+            IntegerT(False, 256),
+            IntegerT(True, 128),
+            AddressT(),
         ]
         can_use_dynamic = payload_budget >= 64 and self.rng.random() < 0.35
         if not can_use_dynamic:
@@ -1845,7 +1918,9 @@ class ExprGenerator(BaseGenerator):
         try:
             abi_types = [arg_t.abi_type for arg_t in arg_types]
             encoded_shape = (
-                abi_types[0] if len(abi_types) == 1 and not ensure_tuple else ABI_Tuple(abi_types)
+                abi_types[0]
+                if len(abi_types) == 1 and not ensure_tuple
+                else ABI_Tuple(abi_types)
             )
             maxlen = encoded_shape.size_bound()
         except Exception:
@@ -1880,9 +1955,7 @@ class ExprGenerator(BaseGenerator):
         has_method_id: bool,
         target_length: int,
     ) -> Optional[list[VyperType]]:
-        existing = self._existing_reachable_types(
-            context, skip={HashMapT}
-        )
+        existing = self._existing_reachable_types(context, skip={HashMapT})
         self.rng.shuffle(existing)
 
         arg_types: list[VyperType] = []
@@ -1899,9 +1972,14 @@ class ExprGenerator(BaseGenerator):
         # Greedily fill remaining slots; arity is a soft max
         while len(arg_types) < arity:
             if arg_types:
-                used = self._abi_encode_maxlen(
-                    arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
-                ) or 0
+                used = (
+                    self._abi_encode_maxlen(
+                        arg_types,
+                        ensure_tuple=ensure_tuple,
+                        has_method_id=has_method_id,
+                    )
+                    or 0
+                )
             else:
                 used = 4 if has_method_id else 0
 
@@ -1909,10 +1987,17 @@ class ExprGenerator(BaseGenerator):
 
             candidates: list[VyperType] = []
             if budget >= 32:
-                candidates.extend([
-                    BoolT(), DecimalT(), BytesM_T(4), BytesM_T(32),
-                    IntegerT(False, 256), IntegerT(True, 128), AddressT(),
-                ])
+                candidates.extend(
+                    [
+                        BoolT(),
+                        DecimalT(),
+                        BytesM_T(4),
+                        BytesM_T(32),
+                        IntegerT(False, 256),
+                        IntegerT(True, 128),
+                        AddressT(),
+                    ]
+                )
             # Dynamic types: offset(32) + length(32) + ceil(n/32)*32 data
             if budget >= 96:
                 max_dyn_len = max(1, (budget - 64) // 32 * 32)
@@ -1954,9 +2039,7 @@ class ExprGenerator(BaseGenerator):
         # (could be uint8, int256, uint256, etc.) — but variable references
         # (Name, Attribute) have declared types so are not ambiguous.
         if not isinstance(expr, (ast.Name, ast.Attribute)):
-            status, folded = fold_constant_expression_status(
-                expr, context.constants
-            )
+            status, folded = fold_constant_expression_status(expr, context.constants)
             if status == "value" and isinstance(folded, ast.Int):
                 return self.hoist_to_tmp_var(expr)
 
@@ -1984,7 +2067,7 @@ class ExprGenerator(BaseGenerator):
 
         has_method_id = target_type.length >= 36 and self.rng.random() < 0.35
         max_arity = max(1, min(5, target_type.length // 32))
-        weights = [0.5 ** i for i in range(max_arity)]
+        weights = [0.5**i for i in range(max_arity)]
         arity = self.rng.choices(range(1, max_arity + 1), weights=weights, k=1)[0]
 
         ensure_tuple = self.rng.choice([True, False]) if arity == 1 else True
@@ -2031,7 +2114,9 @@ class ExprGenerator(BaseGenerator):
             )
         if has_method_id:
             keywords.append(
-                ast.keyword(arg="method_id", value=self._generate_abi_encode_method_id())
+                ast.keyword(
+                    arg="method_id", value=self._generate_abi_encode_method_id()
+                )
             )
 
         call_node = ast.Call(func=func_node, args=args, keywords=keywords)
@@ -2347,7 +2432,9 @@ class ExprGenerator(BaseGenerator):
             constexpr = _generate_constexpr_len(start_const=start_value, retries=5)
             length_expr, length_value = constexpr
             ret_t = _slice_ret_type(length_value)
-            return self._finalize_call(func_node, [arg0, start_expr, length_expr], ret_t)
+            return self._finalize_call(
+                func_node, [arg0, start_expr, length_expr], ret_t
+            )
 
         length_expr = self.generate(uint256_t, context, arg_depth)
         len_status, len_value = _folded_uint256(length_expr)
