@@ -62,7 +62,7 @@ class ExprGeneratorConfig:
     create_new_function_prob: float = 0.1  # When compatible function exists
 
     # raw_call generation
-    raw_call_weight: float = 0.005
+    raw_call_weight: float = 0.03
     raw_call_set_max_outsize_prob: float = 0.5
     raw_call_set_value_prob: float = 0.2
     raw_call_set_is_static_call_prob: float = 0.1
