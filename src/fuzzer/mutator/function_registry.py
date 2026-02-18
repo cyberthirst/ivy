@@ -309,15 +309,9 @@ class FunctionRegistry:
 
         return False
 
-    def _allow_external_cycle(
-        self, *, caller: str, callee: ContractFunctionT
-    ) -> bool:
+    def _allow_external_cycle(self, *, caller: str, callee: ContractFunctionT) -> bool:
         caller_func = self.functions.get(caller)
-        if (
-            caller_func is not None
-            and caller_func.nonreentrant
-            and callee.nonreentrant
-        ):
+        if caller_func is not None and caller_func.nonreentrant and callee.nonreentrant:
             return True
         # Probabilistic allowance can still yield external recursion
         # and may cause EVM stack overflows.
@@ -348,6 +342,10 @@ class FunctionRegistry:
             if name.startswith("__builtin__"):
                 continue
 
+            # __init__ and __default__ cannot be called directly
+            if name in ("__init__", "__default__"):
+                continue
+
             if name not in self.functions:
                 continue
 
@@ -359,7 +357,9 @@ class FunctionRegistry:
 
             # Check type compatibility when a target type is specified
             if return_type is not None:
-                if func.return_type is None or not return_type.compare_type(func.return_type):
+                if func.return_type is None or not return_type.compare_type(
+                    func.return_type
+                ):
                     continue
 
             # Check for cycles if we have a caller context
@@ -448,7 +448,10 @@ class FunctionRegistry:
 
         # Choose function properties
         if visibility is None:
-            visibility_choices = [FunctionVisibility.INTERNAL, FunctionVisibility.EXTERNAL]
+            visibility_choices = [
+                FunctionVisibility.INTERNAL,
+                FunctionVisibility.EXTERNAL,
+            ]
             if caller_mutability is StateMutability.PURE:
                 visibility_choices = [FunctionVisibility.INTERNAL]
             visibility = self.rng.choice(visibility_choices)
@@ -524,9 +527,7 @@ class FunctionRegistry:
             )
         else:
             state_mutability = (
-                StateMutability.PAYABLE
-                if payable
-                else StateMutability.NONPAYABLE
+                StateMutability.PAYABLE if payable else StateMutability.NONPAYABLE
             )
 
         positional_args = self._generate_positional_args(type_generator, max_args)
@@ -537,6 +538,44 @@ class FunctionRegistry:
             return_type=None,
             visibility=FunctionVisibility.DEPLOY,
             state_mutability=state_mutability,
+        )
+
+    def create_default(self) -> Optional[ast.FunctionDef]:
+        assert "__default__" not in self.functions
+
+        if self.rng.random() < 0.8:
+            state_mutability = StateMutability.PAYABLE
+        else:
+            state_mutability = self.rng.choice(
+                [
+                    StateMutability.NONPAYABLE,
+                    StateMutability.VIEW,
+                    StateMutability.PURE,
+                ]
+            )
+
+        # Handle nonreentrant following external function rules
+        nonreentrant = (
+            self.nonreentrancy_by_default and state_mutability != StateMutability.PURE
+        )
+        emit_nonreentrant = False
+        reentrant = False
+
+        if not nonreentrant and state_mutability != StateMutability.PURE:
+            prob = self.nonreentrant_external_prob
+            if prob > 0 and self.rng.random() < prob:
+                nonreentrant = True
+                emit_nonreentrant = True
+
+        return self._create_function_def(
+            name="__default__",
+            positional_args=[],
+            return_type=None,
+            visibility=FunctionVisibility.EXTERNAL,
+            state_mutability=state_mutability,
+            nonreentrant=nonreentrant,
+            emit_nonreentrant=emit_nonreentrant,
+            reentrant=reentrant,
         )
 
     def _generate_positional_args(

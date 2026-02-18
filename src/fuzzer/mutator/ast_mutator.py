@@ -15,7 +15,12 @@ from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.candidate_selector import CandidateSelector
 from fuzzer.mutator.function_registry import FunctionRegistry, KWARG_PLACEHOLDER_TAG
 from fuzzer.mutator.interface_registry import InterfaceRegistry
-from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, state_to_expr_mutability
+from fuzzer.mutator.context import (
+    GenerationContext,
+    ScopeType,
+    ExprMutability,
+    state_to_expr_mutability,
+)
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
 from fuzzer.mutator.ast_utils import body_is_terminated, hoist_prelude_decls
@@ -174,6 +179,7 @@ class AstMutator(VyperNodeTransformer):
         if self.generate:
             new_root = self._generate_module()
             self._maybe_create_init(new_root)
+            self._maybe_create_default()
             self._dispatch_pending_functions(new_root)
             self._add_interface_definitions(new_root)
             hoist_prelude_decls(new_root)
@@ -227,9 +233,7 @@ class AstMutator(VyperNodeTransformer):
             functions_added += 1
 
         for _ in range(num_funcs - functions_added):
-            return_type = self.type_generator.generate_type(
-                nesting=2, skip={HashMapT}
-            )
+            return_type = self.type_generator.generate_type(nesting=2, skip={HashMapT})
             func_def = self.function_registry.create_new_function(
                 return_type=return_type,
                 type_generator=self.type_generator,
@@ -333,6 +337,13 @@ class AstMutator(VyperNodeTransformer):
             max_args=6,
             payable=False,
         )
+
+    def _maybe_create_default(self) -> None:
+        if "__default__" in self.function_registry.functions:
+            return
+        if self.rng.random() >= 0.5:
+            return
+        self.function_registry.create_default()
 
     def _preprocess_module(self, node: ast.Module):
         """Register all existing functions and module-level variables."""
