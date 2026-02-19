@@ -38,6 +38,10 @@ class EVMCore:
         # This ensures the set is transaction-scoped, not persisted across transactions
         self._state.created_accounts.clear()
         self._pending_accounts_to_delete.clear()
+        # Clear transient storage at the start of each new transaction (EIP-1153).
+        # This must happen here (not in finalize_transaction) so that transient
+        # writes during deployment are visible to storage dumps taken after deploy.
+        self.state.clear_transient_storage()
 
     def execute_tx(
         self,
@@ -539,4 +543,4 @@ class EVMCore:
                 del self.state[address]
 
         self._pending_accounts_to_delete.clear()
-        self.state.clear_transient_storage()
+        self.state.end_transaction()

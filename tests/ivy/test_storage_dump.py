@@ -1,6 +1,43 @@
 from decimal import Decimal
 
 
+def test_transient_storage_dump_survives_deployment(get_contract):
+    """Transient writes in __init__ must be visible in the post-deploy dump."""
+    src = """
+t: transient(uint256)
+
+@deploy
+def __init__():
+    self.t = 42
+
+@external
+def get_t() -> uint256:
+    return self.t
+    """
+    c = get_contract(src)
+    dump = c.transient_storage_dump()
+    assert dump == {"t": 42}
+
+
+def test_transient_storage_dump_hashmap_survives_deployment(get_contract):
+    """Transient HashMap writes in __init__ must be visible in the post-deploy dump."""
+    src = """
+m: transient(HashMap[address, uint256])
+
+@deploy
+def __init__():
+    self.m[self] = 99
+
+@external
+def get_m() -> uint256:
+    return self.m[self]
+    """
+    c = get_contract(src)
+    dump = c.transient_storage_dump()
+    assert str(c.address) in [str(k) for k in dump["m"].keys()]
+    assert list(dump["m"].values()) == [99]
+
+
 def test_storage_dump_empty_contract(get_contract):
     src = """
 @external

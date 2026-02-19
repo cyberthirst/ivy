@@ -133,11 +133,14 @@ class EVMState:
     def clear_transient_storage(self):
         # global_vars reference the storage, it's necessary to clear instead of assigning a new dict
         # NOTE: it might be better to refactor GlobalVariable to receive a function to retrieve storage
-        # instaed of receiving the storage directly
-        for account in self.accessed_accounts:
-            account.transient.clear()
+        # instead of receiving the storage directly
+        for account in self.state.values():
+            if account.transient:
+                account.transient.clear()
+
+    def end_transaction(self):
         self.accessed_accounts.clear()
-        self.created_accounts.clear()  # Clear at transaction end
+        self.created_accounts.clear()
 
     def get_account(self, address: Address) -> Account:
         account = self.state[address]
@@ -248,6 +251,9 @@ class StateAccessor(StateAccess):
 
     def clear_transient_storage(self) -> None:
         self._state.clear_transient_storage()
+
+    def end_transaction(self) -> None:
+        self._state.end_transaction()
 
     @property
     def current_context(self) -> ExecutionContext:
