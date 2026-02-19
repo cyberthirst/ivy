@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-    "titanoboa @ git+https://github.com/cyberthirst/titanoboa.git@fuzzing",
+    "titanoboa @ git+https://github.com/cyberthirst/titanoboa.git@b474d27018fb6e37dcadc071f579e7806ecaae21",
     "ruff>=0.6.4",
     "pyright>=1.1.0",
     "pre-commit>=3.8.0",
