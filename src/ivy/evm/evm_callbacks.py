@@ -21,3 +21,7 @@ class EVMCallbacks(ABC):
     @abstractmethod
     def on_state_committed(self) -> None:
         pass
+
+    def check_call_timeout(self) -> None:
+        """Check if the call timeout has been exceeded. No-op by default."""
+        pass

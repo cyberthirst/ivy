@@ -284,9 +284,14 @@ class EVMCore:
         is_static: bool = False,
         is_delegate: bool = False,
     ) -> ExecutionOutput:
+        # Check call timeout before any work to prevent exponential blowup
+        # from raw_call(revert_on_failure=False) loops
+        self.callbacks.check_call_timeout()
+
         # Check call depth limit before creating child message
         # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
         new_depth = self.state.current_context.msg.depth + 1
+
         if new_depth > STACK_DEPTH_LIMIT:
             output = ExecutionOutput()
             output.error = EVMException("Stack depth limit exceeded")
@@ -345,10 +350,15 @@ class EVMCore:
         salt: Optional[bytes] = None,
         is_runtime_copy: Optional[bool] = False,
     ) -> tuple[ExecutionOutput, Address]:
+        # Check call timeout before any work to prevent exponential blowup
+        # from raw_call(revert_on_failure=False) loops
+        self.callbacks.check_call_timeout()
+
         # Check call depth limit before creating child message
         # Per EVM spec: if depth + 1 > STACK_DEPTH_LIMIT, return failure gracefully
         # Note: nonce is NOT incremented if depth limit is exceeded
         new_depth = self.state.current_context.msg.depth + 1
+
         if new_depth > STACK_DEPTH_LIMIT:
             output = ExecutionOutput()
             output.error = EVMException("Stack depth limit exceeded")

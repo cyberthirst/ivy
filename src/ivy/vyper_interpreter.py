@@ -121,6 +121,9 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         if time.perf_counter_ns() >= deadline_ns:
             raise CallTimeout("Call exceeded time budget")
 
+    def check_call_timeout(self) -> None:
+        self._check_call_timeout()
+
     def on_state_committed(self) -> None:
         for tracer in self.tracers:
             tracer.on_state_modified()
