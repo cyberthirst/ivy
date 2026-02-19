@@ -46,7 +46,6 @@ class FunctionRegistry:
         nonreentrant_external_prob: float = 0.04,
         nonreentrant_internal_prob: float = 0.01,
         nonreentrancy_by_default: bool = False,
-        external_cycle_allow_prob: float = 1 / 500,
     ):
         self.rng = rng
         self.functions: Dict[str, ContractFunctionT] = {}
@@ -67,7 +66,6 @@ class FunctionRegistry:
         self.nonreentrant_external_prob = nonreentrant_external_prob
         self.nonreentrant_internal_prob = nonreentrant_internal_prob
         self.nonreentrancy_by_default = nonreentrancy_by_default
-        self.external_cycle_allow_prob = external_cycle_allow_prob
         self.initial_count = 0
         self.dynamic_count = 0
         self._reachable_from_nonreentrant: Set[str] = set()
@@ -312,10 +310,8 @@ class FunctionRegistry:
     def _allow_external_cycle(self, *, caller: str, callee: ContractFunctionT) -> bool:
         caller_func = self.functions.get(caller)
         if caller_func is not None and caller_func.nonreentrant and callee.nonreentrant:
-            return True
-        # Probabilistic allowance can still yield external recursion
-        # and may cause EVM stack overflows.
-        return self.rng.random() < self.external_cycle_allow_prob
+            return self.rng.random() < 0.1
+        return False
 
     def get_callable_functions(
         self,
