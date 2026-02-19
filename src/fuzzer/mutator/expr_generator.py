@@ -751,16 +751,24 @@ class ExprGenerator(BaseGenerator):
                 if target_kind in {"bytes", "tuple"} and max_outsize == 0:
                     max_outsize = self.rng.randint(1, target_typ_len)
 
-        external_funcs = self._get_external_functions()
+        callable_external = [
+            f for f in self._get_callable_functions(context) if f.is_external
+        ]
         use_self = (
-            external_funcs and self.rng.random() < self.cfg.raw_call_target_self_prob
+            callable_external and self.rng.random() < self.cfg.raw_call_target_self_prob
         )
 
         if use_self:
-            func = self.rng.choice(external_funcs)
+            func = self.rng.choice(callable_external)
             to_expr = ast.Name(id="self")
             to_expr._metadata = {"type": AddressT()}
             data_expr = self._build_abi_encoded_calldata(func, context, arg_depth)
+            if self.function_registry.current_function:
+                self.function_registry.add_call(
+                    self.function_registry.current_function,
+                    func.name,
+                    internal=False,
+                )
         else:
             to_expr = self.generate(AddressT(), context, arg_depth)
             data_expr = self.generate(
