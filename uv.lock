@@ -733,6 +733,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "coincurve" },
+    { name = "coverage" },
     { name = "eth-utils" },
     { name = "rlp" },
     { name = "vyper" },
@@ -754,6 +755,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "coincurve", specifier = ">=20.0.0" },
+    { name = "coverage", specifier = ">=7.13.1" },
     { name = "eth-utils", specifier = ">=5.3.1" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = "==6.104.2" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.8.0" },
@@ -765,7 +767,7 @@ requires-dist = [
     { name = "rlp", specifier = ">=4.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
     { name = "titanoboa", marker = "extra == 'dev'", git = "https://github.com/cyberthirst/titanoboa.git?rev=fuzzing" },
-    { name = "vyper", git = "https://github.com/vyperlang/vyper.git?rev=6a77d89f2eb68a57b9b43e4e1f1df8e956e35286" },
+    { name = "vyper", git = "https://github.com/vyperlang/vyper.git?rev=54cb28e1790f50487df1b6dfe75027d6bd9c16a0" },
 ]
 provides-extras = ["dev"]
 
@@ -1667,7 +1669,7 @@ wheels = [
 [[package]]
 name = "vyper"
 version = "0.4.4"
-source = { git = "https://github.com/vyperlang/vyper.git?rev=6a77d89f2eb68a57b9b43e4e1f1df8e956e35286#6a77d89f2eb68a57b9b43e4e1f1df8e956e35286" }
+source = { git = "https://github.com/vyperlang/vyper.git?rev=54cb28e1790f50487df1b6dfe75027d6bd9c16a0#54cb28e1790f50487df1b6dfe75027d6bd9c16a0" }
 dependencies = [
     { name = "cbor2" },
     { name = "immutables" },
