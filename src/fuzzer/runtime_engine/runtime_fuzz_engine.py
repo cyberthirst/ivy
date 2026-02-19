@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import random
+import time
 from array import array
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
@@ -65,6 +67,9 @@ class HarnessConfig:
     # Corpus settings
     max_seeds_per_func: int = 16
     max_seeds_total: int = 512
+
+    # Scenario wall-clock time limit
+    max_scenario_time_s: float = 30.0
 
     # Reporting toggles
     enable_interval_metrics: bool = True
@@ -212,6 +217,13 @@ class RuntimeFuzzEngine:
         self.edge_map = RuntimeEdgeMap(self.config.map_size)
         self.call_generator = CallGenerator(self.rng)
         self.sender_pool = BOUNDARY_ADDRESSES
+        self._deadline: float = float("inf")
+
+    def _is_expired(self) -> bool:
+        if time.perf_counter() >= self._deadline:
+            logging.info("Scenario wall-clock time limit reached, stopping early")
+            return True
+        return False
 
     def run(self, scenario: Scenario) -> HarnessResult:
         with self.runner.env.anchor():
@@ -288,6 +300,7 @@ class RuntimeFuzzEngine:
 
             # Track total calls across all phases
             total_calls = [0]  # Use list for mutable reference in closures
+            self._deadline = time.perf_counter() + self.config.max_scenario_time_s
 
             def calls_remaining() -> int:
                 return self.config.max_total_calls - total_calls[0]
@@ -536,6 +549,8 @@ class RuntimeFuzzEngine:
                 break
             if total_calls[0] >= self.config.max_total_calls:
                 break
+            if self._is_expired():
+                break
 
             sender = self.rng.choice(self.sender_pool)
             generated = self.call_generator.generate_call_for_function(
@@ -602,6 +617,8 @@ class RuntimeFuzzEngine:
         # Replay from the beginning (prefix replay for state prerequisites)
         for i, trace in enumerate(call_traces[:max_replay]):
             if total_calls[0] >= self.config.max_total_calls:
+                break
+            if self._is_expired():
                 break
 
             # NO deepcopy - traces are not mutated during execution
@@ -682,6 +699,8 @@ class RuntimeFuzzEngine:
             stats.fuzz_calls < self.config.max_fuzz_calls
             and total_calls[0] < self.config.max_total_calls
         ):
+            if self._is_expired():
+                break
             fuzz_step += 1
             available_funcs = get_available_functions()
             if not available_funcs:
