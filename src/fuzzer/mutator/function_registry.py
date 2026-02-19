@@ -550,18 +550,12 @@ class FunctionRegistry:
                 ]
             )
 
-        # Handle nonreentrant following external function rules
-        nonreentrant = (
-            self.nonreentrancy_by_default and state_mutability != StateMutability.PURE
-        )
-        emit_nonreentrant = False
+        # Always make __default__ nonreentrant (when not @pure) to prevent
+        # exponential call trees: raw_call(self, ...) with unmatched calldata
+        # re-enters __default__, and multiple such calls create 2^n branching.
+        nonreentrant = state_mutability != StateMutability.PURE
+        emit_nonreentrant = not self.nonreentrancy_by_default and nonreentrant
         reentrant = False
-
-        if not nonreentrant and state_mutability != StateMutability.PURE:
-            prob = self.nonreentrant_external_prob
-            if prob > 0 and self.rng.random() < prob:
-                nonreentrant = True
-                emit_nonreentrant = True
 
         return self._create_function_def(
             name="__default__",
