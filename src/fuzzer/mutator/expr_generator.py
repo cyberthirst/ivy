@@ -4,7 +4,6 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
-from vyper.abi_types import ABI_Tuple
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -27,23 +26,33 @@ from vyper.semantics.analysis.base import DataLocation, VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.ast_utils import contains_call
+from fuzzer.mutator.ast_utils import contains_call, expr_type
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.convert_utils import (
+    convert_literal_length_ok,
+    convert_literal_ok,
+    convert_type_literal,
     convert_is_valid,
     convert_target_supported,
+    literal_len,
     pick_convert_source_type,
 )
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
 from fuzzer.mutator.constant_folding import (
-    ConstEvalError,
-    ConstEvalNonConstant,
     constant_folds_to_zero,
     evaluate_constant_expression,
     fold_constant_expression_status,
 )
-from fuzzer.mutator.context import GenerationContext, ExprMutability
+from fuzzer.mutator.context import (
+    GenerationContext,
+    ExprMutability,
+    effective_call_mutability,
+)
 from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
+from fuzzer.mutator.expr_helpers import (
+    abi_encode_maxlen,
+    raw_call_target_spec,
+)
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.indexing import (
     small_literal_index,
@@ -53,6 +62,8 @@ from fuzzer.mutator.indexing import (
     build_guarded_index,
     build_dyn_last_index,
     INDEX_TYPE,
+    static_index_is_constant_oob,
+    static_index_is_invalid_constant,
 )
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.literal_generator import LiteralGenerator
@@ -66,7 +77,6 @@ from fuzzer.mutator.type_utils import (
     is_dereferenceable,
 )
 from fuzzer.type_generator import TypeGenerator
-from ivy.builtins.builtins import builtin_convert
 
 
 @dataclass
@@ -327,23 +337,7 @@ class ExprGenerator(BaseGenerator):
     def _raw_call_target_spec(
         self, target_type: Optional[VyperType]
     ) -> Optional[tuple[str, int]]:
-        if target_type is None:
-            return "void", 0
-        if isinstance(target_type, BoolT):
-            return "bool", 0
-        if isinstance(target_type, BytesT):
-            if target_type.length < 1:
-                return None
-            return "bytes", target_type.length
-        if isinstance(target_type, TupleT) and len(target_type.member_types) == 2:
-            first_t, second_t = target_type.member_types
-            if (
-                first_t.compare_type(BoolT())
-                and isinstance(second_t, BytesT)
-                and second_t.length > 0
-            ):
-                return "tuple", second_t.length
-        return None
+        return raw_call_target_spec(target_type)
 
     def can_generate_raw_call(
         self,
@@ -532,24 +526,15 @@ class ExprGenerator(BaseGenerator):
         return self.cfg.dereference_func_call_weight
 
     def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
-        return getattr(node, "_metadata", {}).get("type")
+        return expr_type(node)
 
     def _literal_len(self, node: ast.VyperNode) -> Optional[int]:
-        if isinstance(node, ast.Bytes):
-            return len(node.value)
-        if isinstance(node, ast.Str):
-            return len(node.value)
-        return None
+        return literal_len(node)
 
     def _convert_literal_length_ok(
         self, src_expr: ast.VyperNode, dst_type: VyperType
     ) -> bool:
-        if not isinstance(dst_type, (BytesT, StringT)):
-            return True
-        lit_len = self._literal_len(src_expr)
-        if lit_len is None:
-            return True
-        return lit_len <= dst_type.length
+        return convert_literal_length_ok(src_expr, dst_type)
 
     def _convert_literal_ok(
         self,
@@ -557,33 +542,10 @@ class ExprGenerator(BaseGenerator):
         dst_type: VyperType,
         context: GenerationContext,
     ) -> bool:
-        status, folded = fold_constant_expression_status(src_expr, context.constants)
-        if status == "invalid_constant":
-            return False
-
-        lit_node = folded if status == "value" and folded is not None else src_expr
-        if not self._convert_literal_length_ok(lit_node, dst_type):
-            return False
-
-        if status != "value":
-            return True
-        if not isinstance(dst_type, (IntegerT, AddressT)):
-            return True
-
-        try:
-            value = evaluate_constant_expression(src_expr, context.constants)
-        except ConstEvalNonConstant:
-            return True
-        except ConstEvalError:
-            return False
-        try:
-            builtin_convert(value, dst_type)
-            return True
-        except Exception:
-            return False
+        return convert_literal_ok(src_expr, dst_type, context.constants)
 
     def _convert_type_literal(self, target_type: VyperType) -> ast.Name:
-        return ast.Name(id=str(target_type))
+        return convert_type_literal(target_type)
 
     def maybe_convert_expr(
         self,
@@ -605,9 +567,12 @@ class ExprGenerator(BaseGenerator):
             func_node._metadata["type"] = self.function_registry.builtins["convert"]
         type_node = self._convert_type_literal(target_type)
 
-        call_node = ast.Call(func=func_node, args=[src_expr, type_node], keywords=[])
-        call_node._metadata = {"type": target_type}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            [src_expr, type_node],
+            [],
+            target_type,
+        )
 
     def _pick_convert_source_expr(
         self, target_type: VyperType, context: GenerationContext, depth: int
@@ -686,14 +651,17 @@ class ExprGenerator(BaseGenerator):
         if "abi_encode" in self.function_registry.builtins:
             func_node._metadata["type"] = self.function_registry.builtins["abi_encode"]
 
-        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
         maxlen = self._abi_encode_maxlen(
             arg_types, ensure_tuple=True, has_method_id=True
         )
         if maxlen is None:
             maxlen = 4 + 32 * len(arg_types)
-        call_node._metadata = {"type": BytesT(maxlen)}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            args,
+            keywords,
+            BytesT(maxlen),
+        )
 
     def generate_raw_call_call(
         self,
@@ -813,8 +781,11 @@ class ExprGenerator(BaseGenerator):
             )
         )
 
-        call_node = ast.Call(
-            func=func_node, args=[to_expr, data_expr], keywords=keywords
+        call_node = ast_builder.typed_call(
+            func_node,
+            [to_expr, data_expr],
+            keywords,
+            None,
         )
 
         if use_tuple_subscript:
@@ -837,7 +808,7 @@ class ExprGenerator(BaseGenerator):
         else:
             return None
 
-        call_node._metadata = {"type": ret_type}
+        call_node._metadata["type"] = ret_type
         return call_node
 
     # Strategy methods
@@ -928,7 +899,12 @@ class ExprGenerator(BaseGenerator):
         target_type = ctx.target_type
         assert isinstance(target_type, StructT)
 
-        call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
+        call_node = ast_builder.typed_call(
+            ast.Name(id=target_type._id),
+            [],
+            [],
+            target_type,
+        )
         next_depth = self.child_depth(ctx.depth)
 
         for field_name, field_type in target_type.members.items():
@@ -941,7 +917,6 @@ class ExprGenerator(BaseGenerator):
             keyword = ast.keyword(arg=field_name, value=field_expr)
             call_node.keywords.append(keyword)
 
-        call_node._metadata = {"type": target_type}
         return call_node
 
     def _generate_interface_literal(self, ctx: ExprGenCtx) -> ast.Call:
@@ -982,10 +957,7 @@ class ExprGenerator(BaseGenerator):
         return node
 
     def _build_empty(self, target_type: VyperType) -> ast.Call:
-        type_node = ast.Name(id=str(target_type))
-        call_node = ast.Call(func=ast.Name(id="empty"), args=[type_node], keywords=[])
-        call_node._metadata["type"] = target_type
-        return call_node
+        return ast_builder.empty_call(target_type)
 
     def random_var_ref(
         self, target_type: VyperType, context: GenerationContext
@@ -1340,18 +1312,12 @@ class ExprGenerator(BaseGenerator):
     def _static_index_is_invalid_constant(
         self, idx_expr: ast.VyperNode, _seq_length: int
     ) -> bool:
-        status, _ = fold_constant_expression_status(idx_expr, {})
-        return status == "invalid_constant"
+        return static_index_is_invalid_constant(idx_expr, _seq_length)
 
     def _static_index_is_constant_oob(
         self, idx_expr: ast.VyperNode, seq_length: int, constants: dict[str, object]
     ) -> bool:
-        status, folded = fold_constant_expression_status(idx_expr, constants)
-        if status == "invalid_constant":
-            return True
-        if status != "value" or not isinstance(folded, ast.Int):
-            return False
-        return folded.value < 0 or folded.value >= seq_length
+        return static_index_is_constant_oob(idx_expr, seq_length, constants)
 
     def _apply_dereference_step(
         self,
@@ -1684,13 +1650,7 @@ class ExprGenerator(BaseGenerator):
         return self._generate_struct_literal(ctx)
 
     def _effective_call_mutability(self, context: GenerationContext) -> StateMutability:
-        caller_mutability = context.current_function_mutability
-        if context.in_iterable_expr and caller_mutability not in (
-            StateMutability.PURE,
-            StateMutability.VIEW,
-        ):
-            return StateMutability.VIEW
-        return caller_mutability
+        return effective_call_mutability(context)
 
     def _get_callable_functions(
         self,
@@ -1881,9 +1841,7 @@ class ExprGenerator(BaseGenerator):
         self, func_node, args, return_type, func_t=None
     ) -> Union[ast.Call, ast.StaticCall, ast.ExtCall]:
         """Create ast.Call and annotate; wrap external calls if func_t provided."""
-        call_node = ast.Call(func=func_node, args=args, keywords=[])
-        call_node._metadata = getattr(call_node, "_metadata", {})
-        call_node._metadata["type"] = return_type
+        call_node = ast_builder.typed_call(func_node, args, [], return_type)
 
         if func_t is None:
             return call_node
@@ -1959,23 +1917,9 @@ class ExprGenerator(BaseGenerator):
     def _abi_encode_maxlen(
         self, arg_types: list[VyperType], *, ensure_tuple: bool, has_method_id: bool
     ) -> Optional[int]:
-        if not arg_types:
-            return None
-
-        try:
-            abi_types = [arg_t.abi_type for arg_t in arg_types]
-            encoded_shape = (
-                abi_types[0]
-                if len(abi_types) == 1 and not ensure_tuple
-                else ABI_Tuple(abi_types)
-            )
-            maxlen = encoded_shape.size_bound()
-        except Exception:
-            return None
-
-        if has_method_id:
-            maxlen += 4
-        return maxlen
+        return abi_encode_maxlen(
+            arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+        )
 
     def _generate_abi_encode_arg_expr(
         self,
@@ -2166,9 +2110,12 @@ class ExprGenerator(BaseGenerator):
                 )
             )
 
-        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
-        call_node._metadata = {"type": BytesT(maxlen)}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            args,
+            keywords,
+            BytesT(maxlen),
+        )
 
     def _builtin_min_max(
         self,
@@ -2185,9 +2132,12 @@ class ExprGenerator(BaseGenerator):
         arg_depth = self.child_depth(depth)
         a0 = self.generate(arg_t, context, arg_depth)
         a1 = self.generate(arg_t, context, arg_depth)
-        call_node = ast.Call(func=func_node, args=[a0, a1], keywords=[])
-        call_node._metadata = {"type": arg_t}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            [a0, a1],
+            [],
+            arg_t,
+        )
 
     def _builtin_abs(
         self,

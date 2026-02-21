@@ -37,6 +37,16 @@ def state_to_expr_mutability(state_mutability: StateMutability) -> ExprMutabilit
     return ExprMutability.STATEFUL
 
 
+def effective_call_mutability(context: "GenerationContext") -> StateMutability:
+    caller_mutability = context.current_function_mutability
+    if context.in_iterable_expr and caller_mutability not in (
+        StateMutability.PURE,
+        StateMutability.VIEW,
+    ):
+        return StateMutability.VIEW
+    return caller_mutability
+
+
 @dataclass
 class Scope:
     scope_type: ScopeType

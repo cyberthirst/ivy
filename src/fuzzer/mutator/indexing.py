@@ -12,10 +12,12 @@ from vyper.ast import nodes as ast
 from vyper.semantics.types import IntegerT
 
 from fuzzer.mutator import ast_builder
+from fuzzer.mutator.constant_folding import fold_constant_expression_status
 
 
 # Standard index type for array access
 INDEX_TYPE = IntegerT(False, 256)
+
 
 def random_index_type(rng: random.Random) -> IntegerT:
     return rng.choice(
@@ -85,3 +87,19 @@ def build_dyn_last_index(len_call: ast.VyperNode) -> ast.BinOp:
     max_len = ast.Call(func=ast.Name(id="max"), args=[len_call, one], keywords=[])
     max_len._metadata = {"type": INDEX_TYPE}
     return ast_builder.uint256_binop(max_len, ast.Sub(), one)
+
+
+def static_index_is_invalid_constant(idx_expr: ast.VyperNode, _seq_length: int) -> bool:
+    status, _ = fold_constant_expression_status(idx_expr, {})
+    return status == "invalid_constant"
+
+
+def static_index_is_constant_oob(
+    idx_expr: ast.VyperNode, seq_length: int, constants: dict[str, object]
+) -> bool:
+    status, folded = fold_constant_expression_status(idx_expr, constants)
+    if status == "invalid_constant":
+        return True
+    if status != "value" or not isinstance(folded, ast.Int):
+        return False
+    return folded.value < 0 or folded.value >= seq_length
