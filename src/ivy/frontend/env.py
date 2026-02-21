@@ -9,7 +9,7 @@ from ivy.vyper_interpreter import VyperInterpreter
 from ivy.tracer import CoverageTracer
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Account, Environment
+from ivy.evm.evm_structures import Account, ContractData, Environment, Message
 from ivy.context import ExecutionOutput
 
 # make mypy happy
@@ -121,37 +121,6 @@ class Env:
 
         return ret.output
 
-    # compatability alias for vyper env
-    def message_call(
-        self,
-        to_address: _AddressType,
-        data: bytes = b"",
-        sender: Optional[_AddressType] = None,
-        value: int = 0,
-        get_execution_output: bool = False,
-    ) -> Any:
-        # Use execute_message for Vyper test suite compatibility
-        # This doesn't increment nonce or clear transient storage
-        sender = self._get_sender(sender)
-        to = Address(to_address)
-        calldata = self._convert_calldata(data)
-
-        execution_output = self.interpreter.evm.execute_message(
-            sender=sender,
-            to=to,
-            value=value,
-            calldata=calldata,
-            is_static=False,
-        )
-
-        if execution_output.is_error:
-            raise execution_output.error
-
-        if get_execution_output:
-            return execution_output
-
-        return execution_output.output
-
     def get_balance(self, address: _AddressType) -> int:
         return self.state.get_balance(address)
 
@@ -205,14 +174,32 @@ class Env:
         value: int = 0,
     ) -> tuple[Address, ExecutionOutput]:
         sender = self._get_sender(sender)
+        calldata = raw_args or b""
+        contract_address = self.interpreter.evm.generate_create_address(sender)
+        code = ContractData(compiler_data)
 
-        contract_address, execution_output = self.interpreter.execute(
-            sender=sender,
+        self.state.env.caller = sender
+        self.state.env.origin = sender
+
+        message = Message(
+            caller=sender,
             to=b"",
-            compiler_data=compiler_data,
+            create_address=contract_address,
             value=value,
-            calldata=raw_args,
+            data=calldata,
+            code_address=b"",
+            code=code,
+            depth=0,
+            is_static=False,
         )
+
+        execution_output = self.interpreter.evm.process_create_message(message)
+        if execution_output.error is None:
+            self.interpreter.evm._pending_accounts_to_delete.update(
+                execution_output.accounts_to_delete
+            )
+        if self.interpreter.evm.journal.pop_state_committed():
+            self.interpreter.on_state_committed()
 
         return contract_address, execution_output
 
@@ -225,31 +212,45 @@ class Env:
         is_modifying: bool = True,
     ) -> ExecutionOutput:
         sender = self._get_sender(sender)
-
+        calldata = self._convert_calldata(calldata)
         to = Address(to_address)
+        code = self.state.get_code(to)
 
         is_static = not is_modifying
 
-        execution_output = self.interpreter.execute(
-            sender=sender,
+        self.state.env.caller = sender
+        self.state.env.origin = sender
+
+        message = Message(
+            caller=sender,
             to=to,
+            create_address=None,
             value=value,
-            calldata=calldata,
+            data=calldata,
+            code_address=to,
+            code=code,
+            depth=0,
             is_static=is_static,
         )
+
+        execution_output = self.interpreter.evm.process_message(message)
+        if execution_output.error is None:
+            self.interpreter.evm._pending_accounts_to_delete.update(
+                execution_output.accounts_to_delete
+            )
+        if self.interpreter.evm.journal.pop_state_committed():
+            self.interpreter.on_state_committed()
 
         return execution_output
 
     def clear_transient_storage(self):
         self.state.clear_transient_storage()
 
-    def finalize_transaction(self, is_error: bool = False):
-        """Finalize the current transaction's journal.
+    def begin_transaction(self) -> None:
+        self.interpreter.evm.begin_transaction()
 
-        This should be called after all message calls in a Vyper test
-        suite context are complete. It commits or rolls back all state
-        changes made during the transaction.
-        """
+    def finalize_transaction(self, is_error: bool = False):
+        """Finalize an explicit transaction envelope."""
         self.interpreter.evm.finalize_transaction(is_error)
 
     @contextmanager

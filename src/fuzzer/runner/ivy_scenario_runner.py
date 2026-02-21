@@ -170,12 +170,14 @@ class IvyScenarioRunner(BaseScenarioRunner):
     ) -> bytes:
         sender = self._get_sender(sender)
         with self.env.prank(sender):
-            result = self.env.message_call(
+            result = self.env.execute_code(
                 to_address=to_address,
-                data=data,
+                calldata=data,
                 value=value,
             )
-            return result
+            if result.is_error:
+                raise result.error
+            return result.output
 
     def _clear_transient_storage(self) -> None:
         self.env.clear_transient_storage()

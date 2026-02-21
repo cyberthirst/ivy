@@ -1,6 +1,4 @@
-from typing import Optional, Union
-
-from vyper.compiler import CompilerData
+from typing import Optional
 
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_structures import (
@@ -34,137 +32,11 @@ class EVMCore:
         self._pending_accounts_to_delete: set[Address] = set()
 
     def begin_transaction(self) -> None:
-        # EIP-6780: Clear created_accounts at transaction start
-        # This ensures the set is transaction-scoped, not persisted across transactions
+        # EIP-6780: created_accounts is transaction-scoped.
         self._state.created_accounts.clear()
         self._pending_accounts_to_delete.clear()
-        # Clear transient storage at the start of each new transaction (EIP-1153).
-        # This must happen here (not in finalize_transaction) so that transient
-        # writes during deployment are visible to storage dumps taken after deploy.
+        # EIP-1153: clear transient storage at transaction start.
         self.state.clear_transient_storage()
-
-    def execute_tx(
-        self,
-        sender: Address,
-        to: Union[Address, bytes],
-        value: int,
-        calldata: bytes = b"",
-        is_static: bool = False,
-        compiler_data: Optional[CompilerData] = None,
-    ):
-        self.begin_transaction()
-
-        is_deploy = to == b""
-        create_address, code = None, None
-
-        # TODO merge this with do_create_message_call and do_message_call
-        if is_deploy:
-            assert compiler_data is not None
-            # Compute address with current nonce (before incrementing)
-            create_address = self.generate_create_address(sender)
-            code = ContractData(compiler_data)
-        else:
-            assert isinstance(to, Address)
-            code = self.state.get_code(to)
-
-        # TODO should we inc if this is deployment tx?
-        self.state.increment_nonce(sender)
-
-        message = Message(
-            caller=sender,
-            to=b"" if is_deploy else to,
-            create_address=create_address,
-            value=value,
-            data=calldata,
-            code_address=to,
-            code=code,
-            depth=0,
-            is_static=is_static,
-        )
-
-        # Update per-call fields on existing env
-        self.state.env.caller = sender
-        self.state.env.origin = sender
-
-        assert not self.journal.is_active
-
-        output = (
-            self.process_create_message(message)
-            if is_deploy
-            else self.process_message(message)
-        )
-
-        assert not self.journal.is_active
-
-        if output.error is None:
-            self._pending_accounts_to_delete.update(output.accounts_to_delete)
-
-        self.finalize_transaction(is_error=output.is_error)
-
-        if is_deploy:
-            return create_address, output
-
-        return output
-
-    def execute_message(
-        self,
-        sender: Address,
-        to: Address,
-        value: int,
-        calldata: bytes = b"",
-        is_static: bool = False,
-    ) -> ExecutionOutput:
-        """Execute a message call in the current transaction context.
-
-        This is for Vyper test suite compatibility where multiple calls
-        happen within the same transaction context. Unlike execute_tx:
-        - Does not increment sender's nonce
-        - Does not clear transient storage
-        - Reuses existing environment if set
-        - Maintains a single journal context across calls
-        """
-        if to == b"":
-            raise ValueError("Message calls cannot deploy contracts")
-
-        code = self.state.get_code(to)
-
-        # Update per-call fields on existing env
-        self.state.env.caller = sender
-        self.state.env.origin = sender
-
-        self.journal.begin_call(is_static=False)
-
-        message = Message(
-            caller=sender,
-            to=to,
-            create_address=None,
-            value=value,
-            data=calldata,
-            code_address=to,
-            code=code,
-            depth=0,  # Top-level call
-            is_static=is_static,
-        )
-
-        # Process the message without additional journal management
-        output = self.process_message(message, manage_journal=False)
-
-        # Finalize this message call's journal frame
-        # If there was an error, this will rollback all changes
-        self.journal.finalize_call(output.is_error)
-
-        if self.journal.pop_state_committed():
-            self.callbacks.on_state_committed()
-
-        # NOTE: Unlike execute_tx(), we do NOT delete accounts here.
-        # This matches Boa's test environment behavior where account deletion
-        # only happens at real transaction boundaries, not message calls.
-        # The accounts_to_delete set is populated but deletion is deferred
-        # until finalize_transaction().
-        if output.error is None:
-            self._pending_accounts_to_delete.update(output.accounts_to_delete)
-
-        return output
 
     def process_create_message(
         self, message: Message, is_runtime_copy: Optional[bool] = False
@@ -241,11 +113,8 @@ class EVMCore:
         data = message.data
         self.state.current_output.output = PRECOMPILE_REGISTRY[code_address](data)
 
-    def process_message(
-        self, message: Message, manage_journal: bool = True
-    ) -> ExecutionOutput:
-        if manage_journal:
-            self.journal.begin_call(is_static=message.is_static)
+    def process_message(self, message: Message) -> ExecutionOutput:
+        self.journal.begin_call(is_static=message.is_static)
         account = self.state[message.to]
         self.state.add_accessed_account(account)
         exec_ctx = ExecutionContext(account, message)
@@ -276,8 +145,7 @@ class EVMCore:
             self.state.pop_context()
 
         # TODO shouldn't this be in the finally block
-        if manage_journal:
-            self.journal.finalize_call(ret.is_error)
+        self.journal.finalize_call(ret.is_error)
         return ret
 
     def do_message_call(
@@ -401,13 +269,11 @@ class EVMCore:
                     current_address.canonical_address, salt, init_code
                 )
             )
+            # CREATE2 still increments the creator nonce once all checks pass.
+            self.state.increment_nonce(current_address)
         else:
-            # CREATE: address derived from sender + nonce
+            # CREATE: address derived from sender + nonce, with nonce bump as a side effect
             create_address = self.generate_create_address(current_address)
-
-        # Increment nonce (only after all checks pass)
-        # Note: nonce is incremented for both CREATE and CREATE2
-        self.state.increment_nonce(current_address)
 
         if self.account_has_code_or_nonce(
             create_address
@@ -460,6 +326,9 @@ class EVMCore:
         # Make sure we're using the sender as an Address object
         sender_addr = sender if isinstance(sender, Address) else Address(sender)
         nonce = self.state.get_nonce(sender_addr)
+        if nonce >= MAX_NONCE:
+            raise EVMException("Nonce overflow")
+        self.state.increment_nonce(sender_addr)
         return Address(compute_contract_address(sender_addr.canonical_address, nonce))
 
     def account_has_code_or_nonce(self, address: Address) -> bool:
@@ -501,8 +370,8 @@ class EVMCore:
                 beneficiary, beneficiary_balance + originator_balance
             )
 
-        # EIP-6780: Only mark for deletion if created in the same transaction
-        # Actual deletion happens at transaction end (in execute_tx/execute_message)
+        # EIP-6780: Only mark for deletion if created in the same transaction.
+        # Actual deletion happens when finalize_transaction() is called.
         if originator in self._state.created_accounts:
             self.state.current_output.accounts_to_delete.add(originator)
             # If beneficiary == originator, the ether is burnt

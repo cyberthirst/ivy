@@ -2,6 +2,7 @@ import time
 from typing import Optional, Any
 
 import vyper.ast.nodes as ast
+from vyper.compiler import CompilerData
 from vyper.semantics.analysis.base import StateMutability, Modifiability
 from vyper.semantics.types import (
     VyperType,
@@ -58,7 +59,7 @@ from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Log, Environment
+from ivy.evm.evm_structures import ContractData, Log, Environment, Message
 from ivy.exceptions import Revert
 
 
@@ -95,8 +96,61 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
         self._timeout_deadline_ns: Optional[int] = None
         self._timeout_tick: int = 0
 
-    def execute(self, *args, **kwargs):
-        return self.evm.execute_tx(*args, **kwargs)
+    def execute(
+        self,
+        sender: Address,
+        to: Address | bytes,
+        value: int,
+        calldata: bytes = b"",
+        is_static: bool = False,
+        compiler_data: Optional[CompilerData] = None,
+    ):
+        self.state.env.caller = sender
+        self.state.env.origin = sender
+
+        is_deploy = to == b""
+        if is_deploy:
+            if compiler_data is None:
+                raise ValueError("compiler_data is required for deployment")
+            create_address = self.evm.generate_create_address(sender)
+            message = Message(
+                caller=sender,
+                to=b"",
+                create_address=create_address,
+                value=value,
+                data=calldata,
+                code_address=b"",
+                code=ContractData(compiler_data),
+                depth=0,
+                is_static=is_static,
+            )
+            output = self.evm.process_create_message(message)
+            if output.error is None:
+                self.evm._pending_accounts_to_delete.update(output.accounts_to_delete)
+            if self.evm.journal.pop_state_committed():
+                self.on_state_committed()
+            return create_address, output
+
+        if not isinstance(to, Address):
+            raise ValueError("to must be an Address for message calls")
+
+        message = Message(
+            caller=sender,
+            to=to,
+            create_address=None,
+            value=value,
+            data=calldata,
+            code_address=to,
+            code=self.state.get_code(to),
+            depth=0,
+            is_static=is_static,
+        )
+        output = self.evm.process_message(message)
+        if output.error is None:
+            self.evm._pending_accounts_to_delete.update(output.accounts_to_delete)
+        if self.evm.journal.pop_state_committed():
+            self.on_state_committed()
+        return output
 
     def set_call_timeout_seconds(self, timeout_seconds: float) -> None:
         if timeout_seconds <= 0:

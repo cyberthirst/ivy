@@ -1,6 +1,4 @@
-import pytest
 from ivy.frontend.env import Env
-from ivy.frontend.loader import loads
 from ivy.types import Address
 
 
@@ -44,7 +42,7 @@ def get_counter() -> uint256:
 
 
 def test_transaction_nonce_behavior(get_contract):
-    """Test that transactions (transact=True) increment nonce."""
+    """Top-level external calls do not increment account nonce."""
     env = Env.get_singleton()
 
     # Create a test account
@@ -68,22 +66,22 @@ def get_counter() -> uint256:
 
     initial_nonce = env.state.get_nonce(sender)
 
-    # Call contract method multiple times WITH transact flag (transactions)
-    c.increment(transact=True)  # transaction - nonce increments
-    assert env.state.get_nonce(sender) == initial_nonce + 1
+    # Call contract method multiple times; nonce remains unchanged
+    c.increment()
+    assert env.state.get_nonce(sender) == initial_nonce
 
-    c.increment(transact=True)  # transaction - nonce increments
-    assert env.state.get_nonce(sender) == initial_nonce + 2
+    c.increment()
+    assert env.state.get_nonce(sender) == initial_nonce
 
-    c.increment(transact=True)  # transaction - nonce increments
-    assert env.state.get_nonce(sender) == initial_nonce + 3
+    c.increment()
+    assert env.state.get_nonce(sender) == initial_nonce
 
     # Verify contract state is correct
     assert c.get_counter() == 3
 
 
 def test_mixed_calls_and_transactions(get_contract):
-    """Test mixing message calls and transactions."""
+    """Call path is unified: external calls do not change sender nonce."""
     env = Env.get_singleton()
 
     # Create a test account
@@ -113,17 +111,17 @@ def get_last_sender() -> address:
 
     initial_nonce = env.state.get_nonce(sender)
 
-    # Mix message calls and transactions
-    c.increment()  # message call - no nonce increment
+    # All calls use the same execution path and keep nonce unchanged.
+    c.increment()
     assert env.state.get_nonce(sender) == initial_nonce
     assert c.get_counter() == 1
 
-    c.increment(transact=True)  # transaction - nonce increments
-    assert env.state.get_nonce(sender) == initial_nonce + 1
+    c.increment(transact=True)
+    assert env.state.get_nonce(sender) == initial_nonce
     assert c.get_counter() == 2
 
-    c.increment()  # message call - no nonce increment
-    assert env.state.get_nonce(sender) == initial_nonce + 1
+    c.increment()
+    assert env.state.get_nonce(sender) == initial_nonce
     assert c.get_counter() == 3
 
     # Verify last sender is always the EOA
@@ -179,12 +177,11 @@ def transfer(to: address, amount: uint256):
     assert c.balances(alice) == 75
     assert c.balances(bob) == 75
 
-    # All operations happen in the same transaction context
-    # This matches Vyper test suite behavior
+    # Calls are isolated top-level executions by default.
 
 
 def test_transient_storage_with_message_calls(get_contract):
-    """Test that transient storage behaves correctly with message calls."""
+    """Transient storage persists across calls until tx finalization."""
     env = Env.get_singleton()
 
     sender = Address("0xf234567890123456789012345678901234567890")
@@ -213,16 +210,13 @@ def complex_operation() -> uint256:
 
     c = get_contract(src)
 
-    # With message calls, transient storage persists within the same tx context
+    # State persists across message calls in the same transaction envelope.
     c.set_temp(50)
-    assert c.get_temp() == 50  # Should still be 50
+    assert c.get_temp() == 50
 
-    # Another message call in same context
     assert c.complex_operation() == 142
 
-    # Transient storage should still have the value from complex_operation
     assert c.get_temp() == 100
 
-    # Now with a transaction (new context), transient storage should be cleared
     c.set_temp(75, transact=True)
-    assert c.get_temp(transact=True) == 0  # Cleared in new transaction
+    assert c.get_temp(transact=True) == 75

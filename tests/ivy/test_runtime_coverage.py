@@ -79,7 +79,7 @@ def foo(x: uint256) -> uint256:
     unknown = b"\xde\xad\xbe\xef"
     assert unknown != method_id("foo(uint256)")
     with pytest.raises(FunctionNotFound):
-        env.message_call(to_address=addr, data=unknown)
+        env.raw_call(to_address=addr, calldata=unknown)
 
 
 def test_runtime_coverage_boolop_short_circuit_gradient():

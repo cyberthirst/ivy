@@ -24,6 +24,7 @@ def destroy(recipient: address):
     """
     receiver = get_contract(receiver_src)
     destroyer = get_contract(destroyer_src)
+    env.finalize_transaction()
 
     env.set_balance(destroyer.address, 1000)
     initial_receiver_balance = env.get_balance(receiver.address)
@@ -114,6 +115,7 @@ def destroy_to_self():
     selfdestruct(self)
     """
     destroyer = get_contract(destroyer_src)
+    env.finalize_transaction()
 
     initial_balance = 1000
     env.set_balance(destroyer.address, initial_balance)
@@ -348,6 +350,7 @@ def __init__():
 
     # Deploy with value - selfdestructs in constructor
     destroyer = get_contract(destroyer_src, value=1000)
+    env.finalize_transaction()
 
     # Key assertions for EIP-6780 compliance:
     # 1. Account should be deleted - no code
@@ -470,6 +473,7 @@ def __init__():
     env.set_balance(deployer, 5000)
 
     destroyer = get_contract(destroyer_src, value=1000)
+    env.finalize_transaction()
 
     # Account should be deleted (created and destroyed in same tx)
     assert env.state.get_code(destroyer.address) is None
@@ -527,6 +531,7 @@ def deploy_and_destroy(recipient: address) -> address:
     # Deploy child and destroy it in same transaction
     # transact=True ensures proper EVM transaction semantics (account deletion at tx end)
     child_address = factory.deploy_and_destroy(receiver.address, value=1000, transact=True)
+    env.finalize_transaction()
 
     # Child was created and destroyed in same tx, so it should be deleted
     assert env.state.get_code(child_address) is None
@@ -590,6 +595,7 @@ def deploy_and_destroy(recipient: address) -> address:
     child_address = factory.deploy_and_destroy(
         receiver.address, value=1000, transact=True
     )
+    env.finalize_transaction()
 
     assert child_address == predicted
     assert env.state.get_code(child_address) is None
@@ -743,7 +749,7 @@ def deploy_child() -> address:
     initial_receiver_balance = env.get_balance(receiver.address)
 
     calldata = child_template.destroy.prepare_calldata(receiver.address)
-    env.message_call(to_address=child_address, data=calldata)
+    env.raw_call(to_address=child_address, calldata=calldata)
     env.finalize_transaction()
 
     assert env.get_balance(receiver.address) == initial_receiver_balance + 123

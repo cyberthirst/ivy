@@ -174,14 +174,16 @@ class VyperContract:
         return ret
 
     def message_call(self, data: bytes, value: int = 0, sender=None):
-        ret = self.env.message_call(
+        ret = self.env.execute_code(
             to_address=self.address,
-            data=data,
+            calldata=data,
             sender=sender,
             value=value,
-            get_execution_output=True,
+            is_modifying=True,
         )
         self._execution_output = ret
+        if ret.is_error:
+            self.handle_error(ret)
         return ret.output
 
     def _dump_data_location(self, data_location: DataLocation) -> dict[str, Any]:
@@ -334,28 +336,16 @@ class VyperFunction:
 
         return method_id + encoded_args
 
-    def __call__(self, *args, value=0, sender=None, transact=False, **kwargs):
+    def __call__(self, *args, value=0, sender=None, **kwargs):
+        kwargs.pop("transact", None)
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
-
-        if transact:
-            # Use execute_code which creates a new transaction context
-            res = self.env.execute_code(
-                to_address=self.contract._address,
-                sender=sender,
-                calldata=calldata_bytes,
-                value=value,
-                is_modifying=self.func_t.is_mutable,
-            )
-        else:
-            # Use message_call for Vyper test suite compatibility
-            # This keeps the same transaction context across multiple calls
-            res = self.env.message_call(
-                to_address=self.contract._address,
-                data=calldata_bytes,
-                value=value,
-                get_execution_output=True,
-                sender=sender,
-            )
+        res = self.env.execute_code(
+            to_address=self.contract._address,
+            sender=sender,
+            calldata=calldata_bytes,
+            value=value,
+            is_modifying=self.func_t.is_mutable,
+        )
 
         typ = self.func_t.return_type
         return self.contract.marshal_to_python(res, typ)
