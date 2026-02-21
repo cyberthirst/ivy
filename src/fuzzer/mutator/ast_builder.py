@@ -94,11 +94,16 @@ def _tuple_to_ast(value: tuple, typ: TupleT) -> ast.Tuple:
     return node
 
 
-def _struct_to_ast(value: dict, typ: StructT) -> ast.Call:
-    """Generate struct constructor call from dict value."""
+def _struct_to_ast(value, typ: StructT) -> ast.Call:
+    """Generate struct constructor call from dict or tuple value."""
     call_node = ast.Call(func=ast.Name(id=typ._id), args=[], keywords=[])
 
-    for field_name, field_value in value.items():
+    if isinstance(value, dict):
+        items = value.items()
+    else:
+        items = zip(typ.members.keys(), value)
+
+    for field_name, field_value in items:
         field_type = typ.members[field_name]
         field_expr = literal(field_value, field_type)
         keyword = ast.keyword(arg=field_name, value=field_expr)

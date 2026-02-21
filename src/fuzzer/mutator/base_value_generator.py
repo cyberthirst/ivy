@@ -62,11 +62,11 @@ class BaseValueGenerator(ABC):
     def _generate_tuple(self, vyper_type: TupleT) -> tuple:
         return tuple(self.generate(t) for t in vyper_type.member_types)
 
-    def _generate_struct(self, vyper_type: StructT) -> dict:
-        return {
-            name: self.generate(field_type)
-            for name, field_type in vyper_type.members.items()
-        }
+    def _generate_struct(self, vyper_type: StructT) -> tuple:
+        return tuple(
+            self.generate(field_type)
+            for field_type in vyper_type.members.values()
+        )
 
     def _generate_sarray(self, vyper_type: SArrayT) -> list:
         return [self.generate(vyper_type.value_type) for _ in range(vyper_type.length)]
