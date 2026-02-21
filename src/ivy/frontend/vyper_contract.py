@@ -337,7 +337,6 @@ class VyperFunction:
         return method_id + encoded_args
 
     def __call__(self, *args, value=0, sender=None, **kwargs):
-        kwargs.pop("transact", None)
         calldata_bytes = self.prepare_calldata(*args, **kwargs)
         res = self.env.execute_code(
             to_address=self.contract._address,

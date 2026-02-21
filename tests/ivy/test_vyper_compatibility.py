@@ -116,7 +116,7 @@ def get_last_sender() -> address:
     assert env.state.get_nonce(sender) == initial_nonce
     assert c.get_counter() == 1
 
-    c.increment(transact=True)
+    c.increment()
     assert env.state.get_nonce(sender) == initial_nonce
     assert c.get_counter() == 2
 
@@ -218,5 +218,5 @@ def complex_operation() -> uint256:
 
     assert c.get_temp() == 100
 
-    c.set_temp(75, transact=True)
-    assert c.get_temp(transact=True) == 75
+    c.set_temp(75)
+    assert c.get_temp() == 75

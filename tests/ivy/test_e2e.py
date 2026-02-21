@@ -292,7 +292,7 @@ def bar() -> uint256:
     c = loads(src)
     for i in range(3):
         c.env.begin_transaction()
-        assert c.foo(transact=True) == 2
+        assert c.foo() == 2
         c.env.finalize_transaction()
 
 
@@ -1161,15 +1161,15 @@ def bar() -> uint256:
 
     c = loads(src)
     c.env.begin_transaction()
-    assert c.foo(transact=True) == 42
+    assert c.foo() == 42
     c.env.finalize_transaction()
 
     c.env.begin_transaction()
-    assert c.bar(transact=True) == 0
+    assert c.bar() == 0
     c.env.finalize_transaction()
 
     c.env.begin_transaction()
-    assert c.foo(transact=True) == 42
+    assert c.foo() == 42
     c.env.finalize_transaction()
 
 
@@ -1206,15 +1206,15 @@ def bar():
 
     c = loads(src)
     c.env.begin_transaction()
-    c.foo(transact=True)
+    c.foo()
     c.env.finalize_transaction()
 
     c.env.begin_transaction()
-    c.bar(transact=True)
+    c.bar()
     c.env.finalize_transaction()
 
     c.env.begin_transaction()
-    c.foo(transact=True)
+    c.foo()
     c.env.finalize_transaction()
 
 

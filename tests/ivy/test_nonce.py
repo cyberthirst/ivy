@@ -136,12 +136,12 @@ def get_sender() -> address:
     assert env.state.get_nonce(bob) == 0  # Bob hasn't done anything yet
 
     # Alice calls the contract - nonce should not change on external calls
-    assert c.get_sender(transact=True) == alice
+    assert c.get_sender() == alice
     assert env.state.get_nonce(alice) == 1
 
     # Bob calls the contract - nonce should not change on external calls
     env.eoa = bob
-    assert c.get_sender(transact=True) == bob
+    assert c.get_sender() == bob
     assert env.state.get_nonce(bob) == 0
     assert env.state.get_nonce(alice) == 1  # Alice's nonce unchanged
 
