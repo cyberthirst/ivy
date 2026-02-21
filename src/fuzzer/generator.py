@@ -26,16 +26,34 @@ def generate_scenario(seed: Optional[int] = None) -> Optional[Scenario]:
     except Exception:
         return None
 
-    solc_json = {"sources": {"<generated>": {"content": source}}}
+    # Generate constructor arguments if __init__ was created
+    python_args = None
+    init_func = ast_mutator.function_registry.functions.get("__init__")
+    if init_func is not None and init_func.arguments:
+        args = [
+            ast_mutator.value_mutator.generate(arg.typ)
+            for arg in init_func.arguments
+        ]
+        python_args = {"args": args, "kwargs": {}}
+
+    value = 0
+    if init_func is not None and init_func.is_payable:
+        value = rng.choice([0, 1, 10**18])
+
+    solc_json = {
+        "sources": {"<generated>": {"content": source}},
+        "settings": {"outputSelection": {"<generated>": ["abi"]}},
+    }
     trace = DeploymentTrace(
         deployment_type="source",
         calldata=None,
-        value=0,
+        value=value,
         solc_json=solc_json,
         blueprint_initcode_prefix=None,
         deployed_address="0x0000000000000000000000000000000000001234",
         deployment_succeeded=True,
         env=Env(tx=Tx(origin=rng.choice(SENDER_ADDRESSES))),
+        python_args=python_args,
         compiler_settings={"enable_decimals": True},
         compilation_xfails=list(ast_mutator.context.compilation_xfails),
         runtime_xfails=list(ast_mutator.context.runtime_xfails),
