@@ -567,9 +567,12 @@ class ExprGenerator(BaseGenerator):
             func_node._metadata["type"] = self.function_registry.builtins["convert"]
         type_node = self._convert_type_literal(target_type)
 
-        call_node = ast.Call(func=func_node, args=[src_expr, type_node], keywords=[])
-        call_node._metadata = {"type": target_type}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            [src_expr, type_node],
+            [],
+            target_type,
+        )
 
     def _pick_convert_source_expr(
         self, target_type: VyperType, context: GenerationContext, depth: int
@@ -648,14 +651,17 @@ class ExprGenerator(BaseGenerator):
         if "abi_encode" in self.function_registry.builtins:
             func_node._metadata["type"] = self.function_registry.builtins["abi_encode"]
 
-        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
         maxlen = self._abi_encode_maxlen(
             arg_types, ensure_tuple=True, has_method_id=True
         )
         if maxlen is None:
             maxlen = 4 + 32 * len(arg_types)
-        call_node._metadata = {"type": BytesT(maxlen)}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            args,
+            keywords,
+            BytesT(maxlen),
+        )
 
     def generate_raw_call_call(
         self,
@@ -775,8 +781,11 @@ class ExprGenerator(BaseGenerator):
             )
         )
 
-        call_node = ast.Call(
-            func=func_node, args=[to_expr, data_expr], keywords=keywords
+        call_node = ast_builder.typed_call(
+            func_node,
+            [to_expr, data_expr],
+            keywords,
+            None,
         )
 
         if use_tuple_subscript:
@@ -799,7 +808,7 @@ class ExprGenerator(BaseGenerator):
         else:
             return None
 
-        call_node._metadata = {"type": ret_type}
+        call_node._metadata["type"] = ret_type
         return call_node
 
     # Strategy methods
@@ -890,7 +899,12 @@ class ExprGenerator(BaseGenerator):
         target_type = ctx.target_type
         assert isinstance(target_type, StructT)
 
-        call_node = ast.Call(func=ast.Name(id=target_type._id), args=[], keywords=[])
+        call_node = ast_builder.typed_call(
+            ast.Name(id=target_type._id),
+            [],
+            [],
+            target_type,
+        )
         next_depth = self.child_depth(ctx.depth)
 
         for field_name, field_type in target_type.members.items():
@@ -903,7 +917,6 @@ class ExprGenerator(BaseGenerator):
             keyword = ast.keyword(arg=field_name, value=field_expr)
             call_node.keywords.append(keyword)
 
-        call_node._metadata = {"type": target_type}
         return call_node
 
     def _generate_interface_literal(self, ctx: ExprGenCtx) -> ast.Call:
@@ -1828,9 +1841,7 @@ class ExprGenerator(BaseGenerator):
         self, func_node, args, return_type, func_t=None
     ) -> Union[ast.Call, ast.StaticCall, ast.ExtCall]:
         """Create ast.Call and annotate; wrap external calls if func_t provided."""
-        call_node = ast.Call(func=func_node, args=args, keywords=[])
-        call_node._metadata = getattr(call_node, "_metadata", {})
-        call_node._metadata["type"] = return_type
+        call_node = ast_builder.typed_call(func_node, args, [], return_type)
 
         if func_t is None:
             return call_node
@@ -2099,9 +2110,12 @@ class ExprGenerator(BaseGenerator):
                 )
             )
 
-        call_node = ast.Call(func=func_node, args=args, keywords=keywords)
-        call_node._metadata = {"type": BytesT(maxlen)}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            args,
+            keywords,
+            BytesT(maxlen),
+        )
 
     def _builtin_min_max(
         self,
@@ -2118,9 +2132,12 @@ class ExprGenerator(BaseGenerator):
         arg_depth = self.child_depth(depth)
         a0 = self.generate(arg_t, context, arg_depth)
         a1 = self.generate(arg_t, context, arg_depth)
-        call_node = ast.Call(func=func_node, args=[a0, a1], keywords=[])
-        call_node._metadata = {"type": arg_t}
-        return call_node
+        return ast_builder.typed_call(
+            func_node,
+            [a0, a1],
+            [],
+            arg_t,
+        )
 
     def _builtin_abs(
         self,

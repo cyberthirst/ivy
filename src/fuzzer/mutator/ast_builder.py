@@ -195,6 +195,19 @@ def empty_call(typ: VyperType) -> ast.Call:
     return call_node
 
 
+def typed_call(
+    func: ast.VyperNode,
+    args: list,
+    keywords: list[ast.keyword],
+    ret_type: Optional[VyperType],
+) -> ast.Call:
+    """Build an ast.Call with return-type metadata."""
+    call_node = ast.Call(func=func, args=args, keywords=keywords)
+    call_node._metadata = getattr(call_node, "_metadata", {})
+    call_node._metadata["type"] = ret_type
+    return call_node
+
+
 # -----------------------------------------------------------------------------
 # Composite AST node builders
 # -----------------------------------------------------------------------------

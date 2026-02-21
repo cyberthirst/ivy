@@ -4,6 +4,8 @@ from typing import Type
 from vyper.ast import nodes as ast
 from vyper.semantics.types import TupleT
 
+from fuzzer.mutator.ast_utils import expr_type
+
 
 class CandidateSelector:
     """
@@ -96,7 +98,7 @@ class CandidateSelector:
 
     def _type_of(self, node: ast.VyperNode):
         """Safely extract the inferred type from AST metadata."""
-        return getattr(node, "_metadata", {}).get("type")
+        return expr_type(node)
 
     def _walk(self, node: ast.VyperNode):
         """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""

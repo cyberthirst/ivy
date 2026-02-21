@@ -23,7 +23,7 @@ from fuzzer.mutator.context import (
 )
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
-from fuzzer.mutator.ast_utils import body_is_terminated, hoist_prelude_decls
+from fuzzer.mutator.ast_utils import body_is_terminated, expr_type, hoist_prelude_decls
 from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
@@ -271,7 +271,7 @@ class AstMutator(VyperNodeTransformer):
 
     def _type_of(self, node: ast.VyperNode):
         """Safely extract the inferred type from AST metadata."""
-        return getattr(node, "_metadata", {}).get("type")
+        return expr_type(node)
 
     def generate_random_expr(self, target_type: VyperType) -> ast.VyperNode:
         return self.expr_generator.generate(
