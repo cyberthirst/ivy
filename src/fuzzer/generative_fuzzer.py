@@ -1,28 +1,28 @@
 """
-Generative fuzzer for Vyper using corpus evolution.
+Generative fuzzer for Vyper.
 
-Starts with test exports as seeds, then continuously mutates
-and evolves the corpus based on successful compilations.
+Each iteration does a coin flip between generating a fresh contract
+from scratch and mutating a random seed (8 AST mutations).
 """
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from fuzzer.base_fuzzer import BaseFuzzer
-from fuzzer.corpus import FuzzCorpus
 from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
+from fuzzer.generator import generate_scenario
 from fuzzer.issue_filter import IssueFilter, default_issue_filter
 from fuzzer.runtime_engine import HarnessConfig
-from fuzzer.runner.scenario import create_scenario_from_item
+from fuzzer.runner.scenario import Scenario, create_scenario_from_item
 
 
 class GenerativeFuzzer(BaseFuzzer):
     """
-    Queue-based fuzzer with corpus evolution.
+    Simplified generative fuzzer.
 
-    Seeds: original test exports (never removed)
-    Evolved: successfully mutated scenarios (bounded, O(1) replacement)
+    Each iteration: coin flip between generating a fresh contract
+    and mutating a random seed with 8 AST mutations.
     """
 
     def __init__(
@@ -30,8 +30,7 @@ class GenerativeFuzzer(BaseFuzzer):
         exports_dir: Path = Path("tests/vyper-exports"),
         seed: Optional[int] = None,
         debug_mode: bool = False,
-        seed_selection_prob: float = 0.3,
-        generate_prob: float = 1e-4,
+        generate_prob: float = 0.5,
         harness_config: HarnessConfig = HarnessConfig(),
         issue_filter: Optional[IssueFilter] = None,
     ):
@@ -43,16 +42,12 @@ class GenerativeFuzzer(BaseFuzzer):
             harness_config=harness_config,
         )
 
-        self.corpus: FuzzCorpus = FuzzCorpus(
-            rng=self.rng,
-            seed_selection_prob=seed_selection_prob,
-        )
-
+        self.seeds: List[Scenario] = []
         self.generate_prob = generate_prob
         self._iteration = 0
 
     def load_tests_as_seeds(self, test_filter: Optional[TestFilter] = None) -> int:
-        """Load test exports as seed corpus. Returns number of seeds loaded."""
+        """Load test exports as seeds. Returns number of seeds loaded."""
         exports = self.load_filtered_exports(test_filter)
 
         count = 0
@@ -64,49 +59,10 @@ class GenerativeFuzzer(BaseFuzzer):
                 scenario = create_scenario_from_item(
                     item, use_python_args=True, include_compiler_settings=False
                 )
-                self.corpus.add_seed(scenario)
+                self.seeds.append(scenario)
                 count += 1
 
-        logging.info(f"Loaded {count} seed scenarios into corpus")
-        return count
-
-    def bootstrap_corpus(self) -> int:
-        """Generate aggressive mutations of each seed to bootstrap the corpus."""
-        count = 0
-
-        for i, seed_scenario in enumerate(self.corpus.seeds):
-            scenario_seed = self.derive_scenario_seed("bootstrap", i)
-
-            mutated = self.mutate_scenario(
-                seed_scenario,
-                scenario_seed=scenario_seed,
-                n_mutations=8,
-            )
-
-            self.reporter.set_context(
-                f"bootstrap_{i}",
-                i,
-                self.seed,
-                scenario_seed,
-            )
-
-            artifacts = self.run_scenario_with_artifacts(mutated, seed=scenario_seed)
-            self.reporter.ingest_run(
-                artifacts.analysis,
-                artifacts,
-                debug_mode=self.debug_mode,
-            )
-
-            if (
-                not artifacts.analysis.compile_failures
-                and not artifacts.analysis.crashes
-            ):
-                self.corpus.add_evolved(mutated)
-                count += 1
-
-        logging.info(
-            f"Bootstrap: added {count} evolved scenarios from {len(self.corpus.seeds)} seeds"
-        )
+        logging.info(f"Loaded {count} seed scenarios")
         return count
 
     def fuzz_loop(
@@ -115,15 +71,6 @@ class GenerativeFuzzer(BaseFuzzer):
         max_iterations: Optional[int] = None,
         log_interval: int = 100,
     ):
-        """
-        Main fuzzing loop.
-
-        Infinite loop (or until max_iterations) that:
-        1. Picks a scenario from corpus
-        2. Mutates it
-        3. Runs differential comparison
-        4. Adds successful mutations back to corpus
-        """
         seed_count = self.load_tests_as_seeds(test_filter)
         if seed_count == 0:
             logging.error("No seeds loaded, cannot fuzz")
@@ -133,30 +80,20 @@ class GenerativeFuzzer(BaseFuzzer):
         self.reporter.start_metrics_stream(self.harness_config.enable_interval_metrics)
 
         try:
-            self.bootstrap_corpus()
-
-            # Set max_evolved to 2x the initial corpus size (seeds + bootstrapped)
-            self.corpus.max_evolved = 2 * seed_count
-
             while max_iterations is None or self._iteration < max_iterations:
                 self._iteration += 1
 
-                base_scenario = self.corpus.pick()
-                if base_scenario is None:
-                    logging.error("Corpus empty, stopping")
-                    break
-
                 scenario_seed = self.derive_scenario_seed("gen", self._iteration)
 
-                # Rarely use 8 mutations to help escape local optima
                 if self.rng.random() < self.generate_prob:
-                    n_mutations = 8
+                    scenario = generate_scenario(seed=scenario_seed)
+                    if scenario is None:
+                        continue
                 else:
-                    n_mutations = 1
-
-                mutated_scenario = self.mutate_scenario(
-                    base_scenario, scenario_seed=scenario_seed, n_mutations=n_mutations
-                )
+                    base = self.rng.choice(self.seeds)
+                    scenario = self.mutate_scenario(
+                        base, scenario_seed=scenario_seed, n_mutations=8
+                    )
 
                 self.reporter.set_context(
                     f"gen_{self._iteration}",
@@ -166,31 +103,25 @@ class GenerativeFuzzer(BaseFuzzer):
                 )
 
                 artifacts = self.run_scenario_with_artifacts(
-                    mutated_scenario, seed=scenario_seed
+                    scenario, seed=scenario_seed
                 )
-                analysis = artifacts.analysis
                 self.reporter.ingest_run(
-                    analysis,
+                    artifacts.analysis,
                     artifacts,
                     debug_mode=self.debug_mode,
                 )
 
-                # Add to evolved corpus if no compilation failures
-                # (divergences are fine - we want to keep exploring that space)
-                if not analysis.compile_failures and not analysis.crashes:
-                    self.corpus.add_evolved(mutated_scenario)
-
                 if self._iteration % log_interval == 0:
                     snapshot = self.reporter.record_interval_metrics(
                         iteration=self._iteration,
-                        corpus_seed_count=self.corpus.seed_count,
-                        corpus_evolved_count=self.corpus.evolved_count,
-                        corpus_max_evolved=self.corpus.max_evolved,
+                        corpus_seed_count=seed_count,
+                        corpus_evolved_count=0,
+                        corpus_max_evolved=0,
                     )
                     self.reporter.log_generative_progress(
                         iteration=self._iteration,
-                        corpus_seed_count=self.corpus.seed_count,
-                        corpus_evolved_count=self.corpus.evolved_count,
+                        corpus_seed_count=seed_count,
+                        corpus_evolved_count=0,
                         snapshot=snapshot,
                     )
 
@@ -199,14 +130,14 @@ class GenerativeFuzzer(BaseFuzzer):
 
         final_snapshot = self.reporter.record_interval_metrics(
             iteration=self._iteration,
-            corpus_seed_count=self.corpus.seed_count,
-            corpus_evolved_count=self.corpus.evolved_count,
-            corpus_max_evolved=self.corpus.max_evolved,
+            corpus_seed_count=seed_count,
+            corpus_evolved_count=0,
+            corpus_max_evolved=0,
         )
         self.reporter.log_generative_progress(
             iteration=self._iteration,
-            corpus_seed_count=self.corpus.seed_count,
-            corpus_evolved_count=self.corpus.evolved_count,
+            corpus_seed_count=seed_count,
+            corpus_evolved_count=0,
             snapshot=final_snapshot,
         )
         self.finalize()
@@ -233,7 +164,7 @@ def main():
     issue_filter = default_issue_filter()
 
     fuzzer = GenerativeFuzzer(
-        seed_selection_prob=0.3,
+        generate_prob=0.5,
         issue_filter=issue_filter,
         harness_config=HarnessConfig(),
     )
