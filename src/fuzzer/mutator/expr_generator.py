@@ -4,7 +4,6 @@ import random
 from dataclasses import dataclass
 from typing import Callable, Optional, Union
 
-from vyper.abi_types import ABI_Tuple
 from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
@@ -44,6 +43,12 @@ from fuzzer.mutator.constant_folding import (
 )
 from fuzzer.mutator.context import GenerationContext, ExprMutability
 from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
+from fuzzer.mutator.expr_helpers import (
+    abi_encode_maxlen,
+    convert_literal_length_ok,
+    literal_len,
+    raw_call_target_spec,
+)
 from fuzzer.mutator.function_registry import FunctionRegistry
 from fuzzer.mutator.indexing import (
     small_literal_index,
@@ -327,23 +332,7 @@ class ExprGenerator(BaseGenerator):
     def _raw_call_target_spec(
         self, target_type: Optional[VyperType]
     ) -> Optional[tuple[str, int]]:
-        if target_type is None:
-            return "void", 0
-        if isinstance(target_type, BoolT):
-            return "bool", 0
-        if isinstance(target_type, BytesT):
-            if target_type.length < 1:
-                return None
-            return "bytes", target_type.length
-        if isinstance(target_type, TupleT) and len(target_type.member_types) == 2:
-            first_t, second_t = target_type.member_types
-            if (
-                first_t.compare_type(BoolT())
-                and isinstance(second_t, BytesT)
-                and second_t.length > 0
-            ):
-                return "tuple", second_t.length
-        return None
+        return raw_call_target_spec(target_type)
 
     def can_generate_raw_call(
         self,
@@ -535,21 +524,12 @@ class ExprGenerator(BaseGenerator):
         return getattr(node, "_metadata", {}).get("type")
 
     def _literal_len(self, node: ast.VyperNode) -> Optional[int]:
-        if isinstance(node, ast.Bytes):
-            return len(node.value)
-        if isinstance(node, ast.Str):
-            return len(node.value)
-        return None
+        return literal_len(node)
 
     def _convert_literal_length_ok(
         self, src_expr: ast.VyperNode, dst_type: VyperType
     ) -> bool:
-        if not isinstance(dst_type, (BytesT, StringT)):
-            return True
-        lit_len = self._literal_len(src_expr)
-        if lit_len is None:
-            return True
-        return lit_len <= dst_type.length
+        return convert_literal_length_ok(src_expr, dst_type)
 
     def _convert_literal_ok(
         self,
@@ -1959,23 +1939,9 @@ class ExprGenerator(BaseGenerator):
     def _abi_encode_maxlen(
         self, arg_types: list[VyperType], *, ensure_tuple: bool, has_method_id: bool
     ) -> Optional[int]:
-        if not arg_types:
-            return None
-
-        try:
-            abi_types = [arg_t.abi_type for arg_t in arg_types]
-            encoded_shape = (
-                abi_types[0]
-                if len(abi_types) == 1 and not ensure_tuple
-                else ABI_Tuple(abi_types)
-            )
-            maxlen = encoded_shape.size_bound()
-        except Exception:
-            return None
-
-        if has_method_id:
-            maxlen += 4
-        return maxlen
+        return abi_encode_maxlen(
+            arg_types, ensure_tuple=ensure_tuple, has_method_id=has_method_id
+        )
 
     def _generate_abi_encode_arg_expr(
         self,
