@@ -2,6 +2,7 @@ import random
 from typing import Optional
 
 from fuzzer.mutator.ast_mutator import AstMutator
+from fuzzer.mutator.value_mutator import SENDER_ADDRESSES
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import DeploymentTrace, Env, Tx
 from unparser.unparser import unparse
@@ -34,7 +35,7 @@ def generate_scenario(seed: Optional[int] = None) -> Optional[Scenario]:
         blueprint_initcode_prefix=None,
         deployed_address="0x0000000000000000000000000000000000001234",
         deployment_succeeded=True,
-        env=Env(tx=Tx(origin="0xC28B8a66397691f40C92271a9EBC04Cabc1ACcA1")),
+        env=Env(tx=Tx(origin=rng.choice(SENDER_ADDRESSES))),
         compiler_settings={"enable_decimals": True},
         compilation_xfails=list(ast_mutator.context.compilation_xfails),
         runtime_xfails=list(ast_mutator.context.runtime_xfails),
