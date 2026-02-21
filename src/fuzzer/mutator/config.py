@@ -143,6 +143,8 @@ class MutatorConfig:
     expr: ExprGeneratorConfig = field(default_factory=ExprGeneratorConfig)
     stmt: StmtGeneratorConfig = field(default_factory=StmtGeneratorConfig)
 
+    simple_init_prob: float = 0.9
+
 
 # Default configuration instance
 DEFAULT_CONFIG = MutatorConfig()

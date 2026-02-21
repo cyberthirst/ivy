@@ -481,7 +481,8 @@ class AstMutator(VyperNodeTransformer):
                     self.add_variable(arg.name, var_info)
 
                 # Generated functions with empty bodies need statements
-                if not node.body:
+                simple_init = is_init and self.rng.random() < self.cfg.simple_init_prob
+                if not node.body and not simple_init:
                     self.stmt_generator.inject_statements(
                         node.body,
                         self.context,
@@ -498,6 +499,8 @@ class AstMutator(VyperNodeTransformer):
                 node = super().generic_visit(node)
                 if is_init:
                     self._inject_missing_immutable_assignments(node)
+                    if not node.body:
+                        node.body.append(ast.Pass())
 
         self.function_registry.set_current_function(None)
 
