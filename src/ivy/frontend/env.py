@@ -9,7 +9,7 @@ from ivy.vyper_interpreter import VyperInterpreter
 from ivy.tracer import CoverageTracer
 from ivy.types import Address
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Account, ContractData, Environment, Message
+from ivy.evm.evm_structures import Account, Environment
 from ivy.context import ExecutionOutput
 
 # make mypy happy
@@ -175,33 +175,7 @@ class Env:
     ) -> tuple[Address, ExecutionOutput]:
         sender = self._get_sender(sender)
         calldata = raw_args or b""
-        contract_address = self.interpreter.evm.generate_create_address(sender)
-        code = ContractData(compiler_data)
-
-        self.state.env.caller = sender
-        self.state.env.origin = sender
-
-        message = Message(
-            caller=sender,
-            to=b"",
-            create_address=contract_address,
-            value=value,
-            data=calldata,
-            code_address=b"",
-            code=code,
-            depth=0,
-            is_static=False,
-        )
-
-        execution_output = self.interpreter.evm.process_create_message(message)
-        if execution_output.error is None:
-            self.interpreter.evm._pending_accounts_to_delete.update(
-                execution_output.accounts_to_delete
-            )
-        if self.interpreter.evm.journal.pop_state_committed():
-            self.interpreter.on_state_committed()
-
-        return contract_address, execution_output
+        return self.interpreter.deploy(sender, compiler_data, value, calldata)
 
     def execute_code(
         self,
@@ -214,34 +188,8 @@ class Env:
         sender = self._get_sender(sender)
         calldata = self._convert_calldata(calldata)
         to = Address(to_address)
-        code = self.state.get_code(to)
-
         is_static = not is_modifying
-
-        self.state.env.caller = sender
-        self.state.env.origin = sender
-
-        message = Message(
-            caller=sender,
-            to=to,
-            create_address=None,
-            value=value,
-            data=calldata,
-            code_address=to,
-            code=code,
-            depth=0,
-            is_static=is_static,
-        )
-
-        execution_output = self.interpreter.evm.process_message(message)
-        if execution_output.error is None:
-            self.interpreter.evm._pending_accounts_to_delete.update(
-                execution_output.accounts_to_delete
-            )
-        if self.interpreter.evm.journal.pop_state_committed():
-            self.interpreter.on_state_committed()
-
-        return execution_output
+        return self.interpreter.execute_code(to, sender, value, calldata, is_static)
 
     def clear_transient_storage(self):
         self.state.clear_transient_storage()

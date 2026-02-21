@@ -58,7 +58,7 @@ from ivy.allocator import Allocator
 from ivy.evm.evm_callbacks import EVMCallbacks
 from ivy.evm.evm_core import EVMCore
 from ivy.evm.evm_state import StateAccess
-from ivy.evm.evm_structures import Log, Environment
+from ivy.evm.evm_structures import ContractData, Log, Message, Environment
 from ivy.exceptions import Revert
 
 
@@ -124,6 +124,59 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
     def on_state_committed(self) -> None:
         for tracer in self.tracers:
             tracer.on_state_modified()
+
+    def _commit_top_level_call(self, execution_output):
+        if execution_output.error is None:
+            self.evm._pending_accounts_to_delete.update(
+                execution_output.accounts_to_delete
+            )
+        if self.evm.journal.pop_state_committed():
+            self.on_state_committed()
+
+    def deploy(self, sender, compiler_data, value, calldata):
+        contract_address = self.evm.generate_create_address(sender)
+        code = ContractData(compiler_data)
+
+        self.state.env.caller = sender
+        self.state.env.origin = sender
+
+        message = Message(
+            caller=sender,
+            to=b"",
+            create_address=contract_address,
+            value=value,
+            data=calldata,
+            code_address=b"",
+            code=code,
+            depth=0,
+            is_static=False,
+        )
+
+        execution_output = self.evm.process_create_message(message)
+        self._commit_top_level_call(execution_output)
+        return contract_address, execution_output
+
+    def execute_code(self, to, sender, value, calldata, is_static):
+        code = self.state.get_code(to)
+
+        self.state.env.caller = sender
+        self.state.env.origin = sender
+
+        message = Message(
+            caller=sender,
+            to=to,
+            create_address=None,
+            value=value,
+            data=calldata,
+            code_address=to,
+            code=code,
+            depth=0,
+            is_static=is_static,
+        )
+
+        execution_output = self.evm.process_message(message)
+        self._commit_top_level_call(execution_output)
+        return execution_output
 
     @property
     def deployer(self):
