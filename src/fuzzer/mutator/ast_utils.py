@@ -36,7 +36,7 @@ def ast_equivalent(left: Any, right: Any) -> bool:
     if isinstance(left, (list, tuple)):
         if len(left) != len(right):
             return False
-        return all(ast_equivalent(l, r) for l, r in zip(left, right))
+        return all(ast_equivalent(lhs, rhs) for lhs, rhs in zip(left, right))
 
     if isinstance(left, dict):
         if left.keys() != right.keys():
@@ -119,3 +119,7 @@ def body_is_terminated(body: list[ast.VyperNode]) -> bool:
         return False
     last_stmt = body[-1]
     return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise))
+
+
+def expr_type(node: ast.VyperNode):
+    return getattr(node, "_metadata", {}).get("type")

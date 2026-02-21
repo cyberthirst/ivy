@@ -4,6 +4,7 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Type
 
+from vyper.ast import nodes as ast
 from vyper.semantics.types import (
     VyperType,
     IntegerT,
@@ -13,6 +14,14 @@ from vyper.semantics.types import (
     BytesT,
     StringT,
 )
+
+from fuzzer.mutator.constant_folding import (
+    ConstEvalError,
+    ConstEvalNonConstant,
+    evaluate_constant_expression,
+    fold_constant_expression_status,
+)
+from ivy.builtins.builtins import builtin_convert
 
 
 @dataclass(frozen=True)
@@ -207,3 +216,55 @@ def pick_convert_source_type(
         if convert_is_valid(src_t, target_type):
             return src_t
     return None
+
+
+def literal_len(node: ast.VyperNode) -> Optional[int]:
+    if isinstance(node, ast.Bytes):
+        return len(node.value)
+    if isinstance(node, ast.Str):
+        return len(node.value)
+    return None
+
+
+def convert_literal_length_ok(src_expr: ast.VyperNode, dst_type: VyperType) -> bool:
+    if not isinstance(dst_type, (BytesT, StringT)):
+        return True
+    lit_len = literal_len(src_expr)
+    if lit_len is None:
+        return True
+    return lit_len <= dst_type.length
+
+
+def convert_literal_ok(
+    src_expr: ast.VyperNode,
+    dst_type: VyperType,
+    constants: dict[str, object],
+) -> bool:
+    status, folded = fold_constant_expression_status(src_expr, constants)
+    if status == "invalid_constant":
+        return False
+
+    lit_node = folded if status == "value" and folded is not None else src_expr
+    if not convert_literal_length_ok(lit_node, dst_type):
+        return False
+
+    if status != "value":
+        return True
+    if not isinstance(dst_type, (IntegerT, AddressT)):
+        return True
+
+    try:
+        value = evaluate_constant_expression(src_expr, constants)
+    except ConstEvalNonConstant:
+        return True
+    except ConstEvalError:
+        return False
+    try:
+        builtin_convert(value, dst_type)
+        return True
+    except Exception:
+        return False
+
+
+def convert_type_literal(target_type: VyperType) -> ast.Name:
+    return ast.Name(id=str(target_type))

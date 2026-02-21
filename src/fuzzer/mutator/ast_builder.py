@@ -165,7 +165,9 @@ _LITERAL_BUILDERS = {
 
 def literal(value, typ: VyperType) -> ast.VyperNode:
     """Convert a Python value to an AST literal node."""
-    assert not isinstance(value, ast.VyperNode), "expected a Python value, not an AST node"
+    assert not isinstance(value, ast.VyperNode), (
+        "expected a Python value, not an AST node"
+    )
     builder = _LITERAL_BUILDERS.get(type(typ))
     if builder:
         return builder(value, typ)
@@ -181,6 +183,15 @@ def interface_cast(iface_type: InterfaceT, address_node: ast.VyperNode) -> ast.C
 
     call_node = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
     call_node._metadata = {"type": iface_type}
+    return call_node
+
+
+def empty_call(typ: VyperType) -> ast.Call:
+    """Build empty(T) call with proper type metadata."""
+    type_node = ast.Name(id=str(typ))
+    call_node = ast.Call(func=ast.Name(id="empty"), args=[type_node], keywords=[])
+    call_node._metadata = getattr(call_node, "_metadata", {})
+    call_node._metadata["type"] = typ
     return call_node
 
 

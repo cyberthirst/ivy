@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Optional
 
 from vyper.abi_types import ABI_Tuple
-from vyper.ast import nodes as ast
-from vyper.semantics.types import BoolT, BytesT, StringT, TupleT, VyperType
+from vyper.semantics.types import BoolT, BytesT, TupleT, VyperType
 
 
 def raw_call_target_spec(target_type: Optional[VyperType]) -> Optional[tuple[str, int]]:
@@ -25,23 +24,6 @@ def raw_call_target_spec(target_type: Optional[VyperType]) -> Optional[tuple[str
         ):
             return "tuple", second_t.length
     return None
-
-
-def literal_len(node: ast.VyperNode) -> Optional[int]:
-    if isinstance(node, ast.Bytes):
-        return len(node.value)
-    if isinstance(node, ast.Str):
-        return len(node.value)
-    return None
-
-
-def convert_literal_length_ok(src_expr: ast.VyperNode, dst_type: VyperType) -> bool:
-    if not isinstance(dst_type, (BytesT, StringT)):
-        return True
-    lit_len = literal_len(src_expr)
-    if lit_len is None:
-        return True
-    return lit_len <= dst_type.length
 
 
 def abi_encode_maxlen(

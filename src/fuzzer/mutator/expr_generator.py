@@ -26,27 +26,31 @@ from vyper.semantics.analysis.base import DataLocation, VarInfo, Modifiability
 from vyper.semantics.types.function import StateMutability, ContractFunctionT
 
 from fuzzer.mutator import ast_builder
-from fuzzer.mutator.ast_utils import contains_call
+from fuzzer.mutator.ast_utils import contains_call, expr_type
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.convert_utils import (
+    convert_literal_length_ok,
+    convert_literal_ok,
+    convert_type_literal,
     convert_is_valid,
     convert_target_supported,
+    literal_len,
     pick_convert_source_type,
 )
 from fuzzer.mutator.config import ExprGeneratorConfig, DepthConfig
 from fuzzer.mutator.constant_folding import (
-    ConstEvalError,
-    ConstEvalNonConstant,
     constant_folds_to_zero,
     evaluate_constant_expression,
     fold_constant_expression_status,
 )
-from fuzzer.mutator.context import GenerationContext, ExprMutability
+from fuzzer.mutator.context import (
+    GenerationContext,
+    ExprMutability,
+    effective_call_mutability,
+)
 from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
 from fuzzer.mutator.expr_helpers import (
     abi_encode_maxlen,
-    convert_literal_length_ok,
-    literal_len,
     raw_call_target_spec,
 )
 from fuzzer.mutator.function_registry import FunctionRegistry
@@ -58,6 +62,8 @@ from fuzzer.mutator.indexing import (
     build_guarded_index,
     build_dyn_last_index,
     INDEX_TYPE,
+    static_index_is_constant_oob,
+    static_index_is_invalid_constant,
 )
 from fuzzer.mutator.interface_registry import InterfaceRegistry
 from fuzzer.mutator.literal_generator import LiteralGenerator
@@ -71,7 +77,6 @@ from fuzzer.mutator.type_utils import (
     is_dereferenceable,
 )
 from fuzzer.type_generator import TypeGenerator
-from ivy.builtins.builtins import builtin_convert
 
 
 @dataclass
@@ -521,7 +526,7 @@ class ExprGenerator(BaseGenerator):
         return self.cfg.dereference_func_call_weight
 
     def _expr_type(self, node: ast.VyperNode) -> Optional[VyperType]:
-        return getattr(node, "_metadata", {}).get("type")
+        return expr_type(node)
 
     def _literal_len(self, node: ast.VyperNode) -> Optional[int]:
         return literal_len(node)
@@ -537,33 +542,10 @@ class ExprGenerator(BaseGenerator):
         dst_type: VyperType,
         context: GenerationContext,
     ) -> bool:
-        status, folded = fold_constant_expression_status(src_expr, context.constants)
-        if status == "invalid_constant":
-            return False
-
-        lit_node = folded if status == "value" and folded is not None else src_expr
-        if not self._convert_literal_length_ok(lit_node, dst_type):
-            return False
-
-        if status != "value":
-            return True
-        if not isinstance(dst_type, (IntegerT, AddressT)):
-            return True
-
-        try:
-            value = evaluate_constant_expression(src_expr, context.constants)
-        except ConstEvalNonConstant:
-            return True
-        except ConstEvalError:
-            return False
-        try:
-            builtin_convert(value, dst_type)
-            return True
-        except Exception:
-            return False
+        return convert_literal_ok(src_expr, dst_type, context.constants)
 
     def _convert_type_literal(self, target_type: VyperType) -> ast.Name:
-        return ast.Name(id=str(target_type))
+        return convert_type_literal(target_type)
 
     def maybe_convert_expr(
         self,
@@ -962,10 +944,7 @@ class ExprGenerator(BaseGenerator):
         return node
 
     def _build_empty(self, target_type: VyperType) -> ast.Call:
-        type_node = ast.Name(id=str(target_type))
-        call_node = ast.Call(func=ast.Name(id="empty"), args=[type_node], keywords=[])
-        call_node._metadata["type"] = target_type
-        return call_node
+        return ast_builder.empty_call(target_type)
 
     def random_var_ref(
         self, target_type: VyperType, context: GenerationContext
@@ -1320,18 +1299,12 @@ class ExprGenerator(BaseGenerator):
     def _static_index_is_invalid_constant(
         self, idx_expr: ast.VyperNode, _seq_length: int
     ) -> bool:
-        status, _ = fold_constant_expression_status(idx_expr, {})
-        return status == "invalid_constant"
+        return static_index_is_invalid_constant(idx_expr, _seq_length)
 
     def _static_index_is_constant_oob(
         self, idx_expr: ast.VyperNode, seq_length: int, constants: dict[str, object]
     ) -> bool:
-        status, folded = fold_constant_expression_status(idx_expr, constants)
-        if status == "invalid_constant":
-            return True
-        if status != "value" or not isinstance(folded, ast.Int):
-            return False
-        return folded.value < 0 or folded.value >= seq_length
+        return static_index_is_constant_oob(idx_expr, seq_length, constants)
 
     def _apply_dereference_step(
         self,
@@ -1664,13 +1637,7 @@ class ExprGenerator(BaseGenerator):
         return self._generate_struct_literal(ctx)
 
     def _effective_call_mutability(self, context: GenerationContext) -> StateMutability:
-        caller_mutability = context.current_function_mutability
-        if context.in_iterable_expr and caller_mutability not in (
-            StateMutability.PURE,
-            StateMutability.VIEW,
-        ):
-            return StateMutability.VIEW
-        return caller_mutability
+        return effective_call_mutability(context)
 
     def _get_callable_functions(
         self,
