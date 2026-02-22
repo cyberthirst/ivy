@@ -2,7 +2,7 @@ import random
 from typing import Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TupleT
+from vyper.semantics.types import TYPE_T, TupleT
 
 from fuzzer.mutator.ast_utils import expr_type
 
@@ -87,6 +87,9 @@ class CandidateSelector:
 
     def filter(self, node: ast.VyperNode) -> bool:
         """Return True if node is a valid mutation candidate."""
+        if isinstance(self._type_of(node), TYPE_T):
+            return False
+
         # Tuple subscript indices - changing index changes result type
         if isinstance(node, ast.Subscript):
             base_type = self._type_of(node.value)
