@@ -4,7 +4,7 @@ from typing import Optional
 from fuzzer.mutator.ast_mutator import AstMutator
 from fuzzer.mutator.value_mutator import SENDER_ADDRESSES
 from fuzzer.runner.scenario import Scenario
-from fuzzer.trace_types import DeploymentTrace, Env, Tx
+from fuzzer.trace_types import Block, DeploymentTrace, Env, Tx
 from unparser.unparser import unparse
 from vyper.ast import nodes as ast
 
@@ -52,7 +52,15 @@ def generate_scenario(seed: Optional[int] = None) -> Optional[Scenario]:
         blueprint_initcode_prefix=None,
         deployed_address="0x0000000000000000000000000000000000001234",
         deployment_succeeded=True,
-        env=Env(tx=Tx(origin=rng.choice(SENDER_ADDRESSES))),
+        env=Env(
+            tx=Tx(origin=rng.choice(SENDER_ADDRESSES)),
+            block=Block(
+                number=rng.randint(0, 100),
+                timestamp=rng.randint(0, 2**32),
+                gas_limit=10_000_000_000,
+                excess_blob_gas=0,
+            ),
+        ),
         python_args=python_args,
         compiler_settings={"enable_decimals": True},
         compilation_xfails=list(ast_mutator.context.compilation_xfails),

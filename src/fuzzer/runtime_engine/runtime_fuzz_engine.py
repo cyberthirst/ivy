@@ -251,6 +251,8 @@ class RuntimeFuzzEngine:
             for trace in scenario.traces:
                 if isinstance(trace, DeploymentTrace):
                     finalized_traces.append(trace)
+                    if trace.env.block is not None:
+                        self.call_generator.block = trace.env.block
                     trace_result = self._execute_deployment_with_retries(
                         trace=trace,
                         trace_index=trace_index,

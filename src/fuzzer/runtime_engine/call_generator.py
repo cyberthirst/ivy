@@ -9,7 +9,7 @@ from vyper.semantics.types.function import ContractFunctionT
 
 from fuzzer.mutator.value_mutator import ValueMutator
 from fuzzer.mutator.argument_mutator import ArgumentMutator
-from fuzzer.trace_types import CallTrace, Env, Tx
+from fuzzer.trace_types import Block, CallTrace, Env, Tx
 
 
 @dataclass
@@ -104,6 +104,7 @@ class CallGenerator:
         self.rng = rng
         self.value_mutator = ValueMutator(rng)
         self.argument_mutator = ArgumentMutator(rng, self.value_mutator)
+        self.block: Optional[Block] = None
 
     def get_external_functions(
         self, contract: Any
@@ -238,7 +239,7 @@ class CallGenerator:
     ) -> CallTrace:
         env = None
         if call.sender is not None:
-            env = Env(tx=Tx(origin=call.sender))
+            env = Env(tx=Tx(origin=call.sender), block=self.block)
         return CallTrace(
             output=None,
             call_args={"to": to_address, "value": call.kwargs.get("value", 0)},
