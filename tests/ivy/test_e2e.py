@@ -4739,3 +4739,96 @@ def foo() -> DynArray[uint256, 5]:
     """
     c = get_contract(code)
     assert c.foo() == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.parametrize("skip_contract_check", [True, False])
+def test_extcall_to_identity_precompile(get_contract, skip_contract_check):
+    scc = str(skip_contract_check)
+    src = f"""
+interface Identity:
+    def identity(input: bytes32) -> bytes32: nonpayable
+
+IDENTITY: constant(address) = 0x0000000000000000000000000000000000000004
+
+@external
+def foo(x: bytes32) -> bytes32:
+    return extcall Identity(IDENTITY).identity(x, skip_contract_check={scc})
+    """
+    c = get_contract(src)
+    c.foo(b"\x01" * 32)
+
+
+@pytest.mark.parametrize("skip_contract_check", [True, False])
+def test_extcall_void_to_empty_address(get_contract, skip_contract_check):
+    scc = str(skip_contract_check)
+    src = f"""
+interface Foo:
+    def bar(): nonpayable
+
+@external
+def go() -> bool:
+    extcall Foo(empty(address)).bar(skip_contract_check={scc})
+    return True
+    """
+    c = get_contract(src)
+    if skip_contract_check:
+        assert c.go() == True
+    else:
+        with pytest.raises(Revert, match="does not have code"):
+            c.go()
+
+
+@pytest.mark.parametrize("skip_contract_check", [True, False])
+def test_extcall_with_return_to_empty_address_reverts(get_contract, skip_contract_check):
+    scc = str(skip_contract_check)
+    src = f"""
+interface Foo:
+    def bar() -> uint256: nonpayable
+
+@external
+def go() -> uint256:
+    return extcall Foo(empty(address)).bar(skip_contract_check={scc})
+    """
+    c = get_contract(src)
+    with pytest.raises(Exception):
+        c.go()
+
+
+def test_extcall_default_return_value_to_empty_address_reverts(get_contract):
+    src = """
+interface Foo:
+    def bar() -> bool: nonpayable
+
+@external
+def go() -> bool:
+    return extcall Foo(empty(address)).bar(default_return_value=True)
+    """
+    c = get_contract(src)
+    with pytest.raises(Revert, match="does not have code"):
+        c.go()
+
+
+def test_extcall_default_return_value_skip_contract_check(get_contract):
+    callee_src = """
+@external
+def bar():
+    pass
+    """
+    callee = get_contract(callee_src)
+
+    caller_src = f"""
+interface Foo:
+    def bar() -> bool: nonpayable
+
+@external
+def call_existing() -> bool:
+    return extcall Foo({callee.address}).bar(default_return_value=True, skip_contract_check=True)
+
+@external
+def call_missing() -> bool:
+    return extcall Foo(empty(address)).bar(default_return_value=True, skip_contract_check=True)
+    """
+    c = get_contract(caller_src)
+
+    assert c.call_existing() == True
+    assert c.call_missing() == True

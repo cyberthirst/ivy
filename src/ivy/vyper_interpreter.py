@@ -798,7 +798,12 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise GasReference()
 
         skip_contract_check = kwargs.get("skip_contract_check", False)
-        if not skip_contract_check:
+
+        # Match Vyper's codegen: only check extcodesize BEFORE the call when
+        # the function returns nothing.  When a return type exists, Vyper
+        # instead relies on a returndatasize check AFTER the call (which also
+        # catches selfdestruct-during-call).
+        if func_t.return_type is None and not skip_contract_check:
             code = self.state.get_code(target)
             if code is None:
                 raise Revert(message=f"Account at {target} does not have code")
@@ -822,6 +827,14 @@ class VyperInterpreter(ExprVisitor, StmtVisitor, EVMCallbacks):
             raise output.error
 
         if len(returndata) == 0 and "default_return_value" in kwargs:
+            # Vyper emits an extcodesize check here: if returndatasize is 0
+            # and we have a default, verify a contract actually exists before
+            # using the fallback (otherwise an EOA / empty address would
+            # silently return the default).
+            if not skip_contract_check:
+                code = self.state.get_code(target)
+                if code is None:
+                    raise Revert(message=f"Account at {target} does not have code")
             to_eval = kwargs["default_return_value"]
             return self.deep_copy_visit(to_eval)
 
