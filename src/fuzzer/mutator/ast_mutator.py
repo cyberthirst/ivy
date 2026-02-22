@@ -574,7 +574,6 @@ class AstMutator(VyperNodeTransformer):
         return self._try_mutate(node)
 
     def visit_For(self, node: ast.For):
-        node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
         # Mutation happens inside scope context so injected statements have access to loop var
