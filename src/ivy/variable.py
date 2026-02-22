@@ -25,10 +25,12 @@ class GlobalVariable:
         self.typ = typ
         self.get_location = get_location
         self.address = address
+        self.varinfo = varinfo
         if initial_value is None:
             initial_value = get_default_value(typ)
-        self.get_location()[self.address] = initial_value
-        self.varinfo = varinfo
+        # Use the value setter so the write is journaled for storage/transient
+        # variables. This ensures failed deployments don't leak storage.
+        self.value = initial_value
 
     @property
     def value(self):
