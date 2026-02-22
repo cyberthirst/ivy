@@ -593,7 +593,7 @@ class AstMutator(VyperNodeTransformer):
                 self.context.add_variable(loop_var_name.id, var_info)
 
             node = self._try_mutate(node)
-            node = super().generic_visit(node)
+            node.body = [self.visit(stmt) for stmt in node.body]
 
         return node
 
