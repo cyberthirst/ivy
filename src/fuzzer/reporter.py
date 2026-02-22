@@ -47,7 +47,7 @@ def _make_json_serializable(obj) -> Any:
                 k = str(k)
             result[k] = _make_json_serializable(v)
         return result
-    if isinstance(obj, list):
+    if isinstance(obj, (list, tuple)):
         return [_make_json_serializable(item) for item in obj]
     if isinstance(obj, bytes):
         return "0x" + obj.hex()
