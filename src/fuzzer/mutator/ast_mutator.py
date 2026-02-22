@@ -398,6 +398,20 @@ class AstMutator(VyperNodeTransformer):
         # and non-constants cannot have one. Constants are out of scope for mutation for now.
         return node
 
+    def visit_StructDef(self, node: ast.StructDef):
+        # Struct member AnnAssign nodes must not be visited — their field names
+        # are not local variables and must not be registered in all_vars.
+        return node
+
+    def visit_EventDef(self, node: ast.EventDef):
+        return node
+
+    def visit_FlagDef(self, node: ast.FlagDef):
+        return node
+
+    def visit_InterfaceDef(self, node: ast.InterfaceDef):
+        return node
+
     def visit_AnnAssign(self, node: ast.AnnAssign):
         """Handle local variable declaration."""
         node.value = self.visit(node.value)

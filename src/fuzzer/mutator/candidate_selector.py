@@ -100,9 +100,15 @@ class CandidateSelector:
         """Safely extract the inferred type from AST metadata."""
         return expr_type(node)
 
+    # Type definition nodes whose subtrees should never be mutated.
+    _SKIP_SUBTREE = (ast.StructDef, ast.EventDef, ast.FlagDef, ast.InterfaceDef)
+
     def _walk(self, node: ast.VyperNode):
         """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""
         if node is None:
+            return
+
+        if isinstance(node, self._SKIP_SUBTREE):
             return
 
         yield node
