@@ -48,7 +48,10 @@ class BaseResult(ABC):
         import traceback
 
         error_type = type(self.error).__name__
-        error_msg = str(self.error)
+        try:
+            error_msg = str(self.error)
+        except Exception:
+            error_msg = repr(self.error)
         # Get last 3 frames of traceback
         tb_lines = traceback.format_exception(
             type(self.error), self.error, self.error.__traceback__

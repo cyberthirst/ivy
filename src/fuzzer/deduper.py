@@ -72,7 +72,10 @@ def fingerprint_error(
         return ("", "", ())
 
     error_type = type(error).__name__
-    msg = str(error).split("\n")[0][:20]  # First line, first 20 chars
+    try:
+        msg = str(error).split("\n")[0][:20]  # First line, first 20 chars
+    except Exception:
+        msg = repr(error).split("\n")[0][:20]
     frames = extract_stack_frames(error, n_frames)
 
     return (error_type, msg, frames)

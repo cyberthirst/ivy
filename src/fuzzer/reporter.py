@@ -54,6 +54,13 @@ def _make_json_serializable(obj) -> Any:
     return obj
 
 
+def _safe_str(obj: object) -> str:
+    try:
+        return str(obj)
+    except Exception:
+        return repr(obj)
+
+
 def _format_traceback(error: Optional[BaseException]) -> Optional[str]:
     if error is None:
         return None
@@ -928,7 +935,7 @@ class FuzzerReporter:
         crash_data = {
             "timestamp": datetime.now().isoformat(),
             "error_type": error_type,
-            "error_message": str(error),
+            "error_message": _safe_str(error),
             "error_traceback": _format_traceback(error),
             "solc_json": solc_json,
             "compiler_settings": compiler_settings,
@@ -969,7 +976,7 @@ class FuzzerReporter:
         failure_data = {
             "timestamp": datetime.now().isoformat(),
             "error_type": error_type,
-            "error_message": str(error),
+            "error_message": _safe_str(error),
             "error_traceback": _format_traceback(error),
             "solc_json": solc_json,
             "compiler_settings": compiler_settings,
