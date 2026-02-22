@@ -6,14 +6,19 @@ import pytest
 
 from fuzzer.compilation import compile_vyper
 from ivy.frontend.loader import loads_from_solc_json
-from fuzzer.export_utils import load_all_exports, filter_exports, TestFilter
-from fuzzer.trace_types import DeploymentTrace
+from fuzzer.export_utils import (
+    load_all_exports,
+    filter_exports,
+    iter_unique_solc_jsons,
+    TestFilter,
+)
 from fuzzer.mutator.ast_mutator import AstMutator
 
 
 def deterministic_seed(s: str) -> int:
     """Generate a deterministic seed from a string using MD5."""
     return int(hashlib.md5(s.encode()).hexdigest(), 16) & 0xFFFFFFFF
+
 
 # Attributes that never affect semantics (from unparser test)
 _IGNORE = {
@@ -54,24 +59,14 @@ def get_mutator_test_cases():
     exports = load_all_exports("tests/vyper-exports")
     exports = filter_exports(exports, test_filter=get_mutator_test_filter())
 
-    cases = []
-    seen_sources = set()
-
-    for path, export in exports.items():
-        for item_name, item in export.items.items():
-            for trace in item.traces:
-                if isinstance(trace, DeploymentTrace):
-                    if trace.deployment_type == "source" and trace.solc_json:
-                        integrity = trace.solc_json.get("integrity")
-                        if not isinstance(integrity, str):
-                            raise ValueError("solc_json missing integrity")
-                        if integrity in seen_sources:
-                            continue
-                        seen_sources.add(integrity)
-
-                        test_id = f"{Path(path).stem}::{item_name}"
-                        cases.append(pytest.param(trace.solc_json, test_id, id=test_id))
-    return cases
+    return [
+        pytest.param(
+            solc_json,
+            f"{Path(path).stem}::{item_name}",
+            id=f"{Path(path).stem}::{item_name}",
+        )
+        for solc_json, path, item_name in iter_unique_solc_jsons(exports)
+    ]
 
 
 def test_preprocess_module_seeds_existing_internal_calls():
@@ -106,7 +101,9 @@ def top() -> uint256:
     assert registry.reachable_from_nonreentrant("_leaf")
 
 
-@pytest.mark.xfail(reason="mutator WIP - many mutations cause compilation failures", strict=False)
+@pytest.mark.xfail(
+    reason="mutator WIP - many mutations cause compilation failures", strict=False
+)
 @pytest.mark.parametrize("solc_json,test_id", get_mutator_test_cases())
 def test_mutator_produces_valid_code(solc_json: dict, test_id: str):
     """Test that the AST mutator produces semantically valid Vyper code.
@@ -136,8 +133,7 @@ def test_mutator_produces_valid_code(solc_json: dict, test_id: str):
 
     # Mutation must not fail
     assert mutation_result is not None, (
-        f"Mutation failed (returned None). "
-        f"seed={seed}, max_mutations={max_mutations}"
+        f"Mutation failed (returned None). seed={seed}, max_mutations={max_mutations}"
     )
 
     mutated_source = next(iter(mutation_result.sources.values()))
@@ -160,9 +156,7 @@ def test_mutator_produces_valid_code(solc_json: dict, test_id: str):
 
         # Something must have changed
         assert result.compiler_data is not None
-        mutated_ast_dict = _strip(
-            result.compiler_data.annotated_vyper_module.to_dict()
-        )
+        mutated_ast_dict = _strip(result.compiler_data.annotated_vyper_module.to_dict())
         assert original_ast_dict != mutated_ast_dict, (
             f"No mutation occurred - AST unchanged. "
             f"seed={seed}, max_mutations={max_mutations}"

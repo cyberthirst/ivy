@@ -469,3 +469,31 @@ def filter_exports(
             filtered[path] = filtered_export
 
     return filtered
+
+
+def iter_unique_solc_jsons(
+    exports: Dict[Path, TestExport],
+) -> List[tuple[Dict[str, Any], Path, str]]:
+    """Yield unique (solc_json, path, item_name) from deployment traces.
+
+    Deduplicates by the solc_json integrity hash.
+    """
+    results: List[tuple[Dict[str, Any], Path, str]] = []
+    seen: set[str] = set()
+
+    for path, export in exports.items():
+        for item_name, item in export.items.items():
+            for trace in item.traces:
+                if not isinstance(trace, DeploymentTrace):
+                    continue
+                if trace.deployment_type != "source" or not trace.solc_json:
+                    continue
+                integrity = trace.solc_json.get("integrity")
+                if not isinstance(integrity, str):
+                    continue
+                if integrity in seen:
+                    continue
+                seen.add(integrity)
+                results.append((trace.solc_json, path, item_name))
+
+    return results
