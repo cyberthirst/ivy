@@ -538,9 +538,13 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Return(self, node: ast.Return):
-        # TODO: mutate return value (e.g. replace with var/generated expr of same type)
         if node.value:
             node.value = self.visit(node.value)
+        cur = self.function_registry.current_function
+        if cur and node.value:
+            func_type = self.function_registry.functions.get(cur)
+            if func_type and func_type.return_type:
+                return self._try_mutate(node, inferred_type=func_type.return_type)
         return node
 
     def visit_Assign(self, node: ast.Assign):

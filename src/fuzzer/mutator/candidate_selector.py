@@ -51,8 +51,7 @@ class CandidateSelector:
         ast.AugAssign: 0.0,
         # TODO
         ast.VariableDecl: 0.0,
-        # TODO
-        ast.Return: 0.0,
+        ast.Return: 0.25,
         # ─────────────────────────────────────────────
         # Access patterns - moderate risk, keep lower
         # ─────────────────────────────────────────────
