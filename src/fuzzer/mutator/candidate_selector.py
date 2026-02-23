@@ -41,6 +41,8 @@ class CandidateSelector:
         # TODO
         ast.IfExp: 0.0,
         ast.For: 0.15,
+        ast.Continue: 0.35,
+        ast.Break: 0.35,
         # TODO
         ast.Assert: 0.0,
         # ─────────────────────────────────────────────

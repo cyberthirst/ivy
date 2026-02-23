@@ -14,6 +14,7 @@ from fuzzer.mutator.mutations import (
     subscript,
     for_loop,
     return_stmt,
+    continue_break,
 )
 
 
@@ -33,5 +34,6 @@ def register_all(registry: StrategyRegistry) -> None:
         subscript,
         for_loop,
         return_stmt,
+        continue_break,
     ):
         register_decorated(registry, mod)

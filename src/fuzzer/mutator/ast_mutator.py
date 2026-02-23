@@ -597,6 +597,12 @@ class AstMutator(VyperNodeTransformer):
 
         return node
 
+    def visit_Continue(self, node: ast.Continue):
+        return self._try_mutate(node)
+
+    def visit_Break(self, node: ast.Break):
+        return self._try_mutate(node)
+
     def visit_Compare(self, node: ast.Compare):
         node.left = self.visit(node.left)
         node.right = self.visit(node.right)
