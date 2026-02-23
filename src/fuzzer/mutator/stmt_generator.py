@@ -25,7 +25,12 @@ from fuzzer.mutator.augassign_utils import (
 from fuzzer.mutator.base_generator import BaseGenerator
 from fuzzer.mutator.config import StmtGeneratorConfig, DepthConfig
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
-from fuzzer.mutator.context import GenerationContext, ScopeType, ExprMutability, AccessMode
+from fuzzer.mutator.context import (
+    GenerationContext,
+    ScopeType,
+    ExprMutability,
+    AccessMode,
+)
 from fuzzer.mutator.existing_type_pool import collect_existing_reachable_types
 from fuzzer.mutator.name_generator import FreshNameGenerator
 from fuzzer.mutator.strategy import strategy
@@ -173,10 +178,26 @@ class StatementGenerator(BaseGenerator):
         if context.is_module_scope:
             # Module-level variables can be storage, transient, immutable, or constant
             location_choices = [
-                (DataLocation.STORAGE, Modifiability.MODIFIABLE, cfg.storage_location_weight),
-                (DataLocation.TRANSIENT, Modifiability.MODIFIABLE, cfg.transient_location_weight),
-                (DataLocation.CODE, Modifiability.RUNTIME_CONSTANT, cfg.immutable_location_weight),
-                (DataLocation.UNSET, Modifiability.CONSTANT, cfg.constant_location_weight),
+                (
+                    DataLocation.STORAGE,
+                    Modifiability.MODIFIABLE,
+                    cfg.storage_location_weight,
+                ),
+                (
+                    DataLocation.TRANSIENT,
+                    Modifiability.MODIFIABLE,
+                    cfg.transient_location_weight,
+                ),
+                (
+                    DataLocation.CODE,
+                    Modifiability.RUNTIME_CONSTANT,
+                    cfg.immutable_location_weight,
+                ),
+                (
+                    DataLocation.UNSET,
+                    Modifiability.CONSTANT,
+                    cfg.constant_location_weight,
+                ),
             ]
 
             # Choose location based on weights
@@ -519,7 +540,9 @@ class StatementGenerator(BaseGenerator):
 
         self._append_loop_terminator(body, rng=rng)
 
-    def get_writable_variables(self, context: GenerationContext) -> list[tuple[str, VarInfo]]:
+    def get_writable_variables(
+        self, context: GenerationContext
+    ) -> list[tuple[str, VarInfo]]:
         with context.access_mode(AccessMode.WRITE):
             return context.find_matching_vars()
 
@@ -593,9 +616,7 @@ class StatementGenerator(BaseGenerator):
         must_deref = isinstance(base_type, HashMapT)
         should_deref = must_deref or (
             is_dereferenceable(base_type)
-            and (
-                not base_ok or ctx.gen.rng.random() < self.cfg.deref_assignment_prob
-            )
+            and (not base_ok or ctx.gen.rng.random() < self.cfg.deref_assignment_prob)
         )
 
         if should_deref:
@@ -819,9 +840,7 @@ class StatementGenerator(BaseGenerator):
 
         return var_decl, var_name, var_info
 
-    def _generate_range_iter(
-        self, ctx: StmtGenCtx
-    ) -> tuple[ast.Call, IntegerT]:
+    def _generate_range_iter(self, ctx: StmtGenCtx) -> tuple[ast.Call, IntegerT]:
         """Generate a range(N) iteration with literal N.
 
         Returns (iter_node, element_type).
@@ -989,21 +1008,27 @@ class StatementGenerator(BaseGenerator):
             return None
 
         op_class = ctx.gen.rng.choice(ops)
-        rhs_type = augassign_rhs_type(op_class, target_type)
-
-        if op_class is ast.Pow:
-            rhs_value = ctx.gen.rng.randint(0, 8)
-            rhs = ast_builder.literal(rhs_value, rhs_type)
-        elif op_class in (ast.FloorDiv, ast.Mod, ast.Div):
-            rhs = self.expr_generator.generate_nonzero_expr(
-                rhs_type, ctx.context, depth=self.expr_generator.root_depth()
-            )
-        else:
-            rhs = self.expr_generator.generate(
-                rhs_type, ctx.context, depth=self.expr_generator.root_depth()
-            )
+        rhs = self.generate_augassign_rhs(op_class, target_type, ctx.context)
 
         return ast.AugAssign(target=target_node, op=op_class(), value=rhs)
+
+    def generate_augassign_rhs(
+        self,
+        op_class: type[ast.VyperNode],
+        target_type: VyperType,
+        context: GenerationContext,
+    ) -> ast.VyperNode:
+        rhs_type = augassign_rhs_type(op_class, target_type)
+        if op_class is ast.Pow:
+            rhs_value = self.rng.randint(0, 8)
+            return ast_builder.literal(rhs_value, rhs_type)
+        if op_class in (ast.FloorDiv, ast.Mod, ast.Div):
+            return self.expr_generator.generate_nonzero_expr(
+                rhs_type, context, depth=self.expr_generator.root_depth()
+            )
+        return self.expr_generator.generate(
+            rhs_type, context, depth=self.expr_generator.root_depth()
+        )
 
     @strategy(
         name="stmt.append",

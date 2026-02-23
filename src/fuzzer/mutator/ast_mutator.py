@@ -555,6 +555,11 @@ class AstMutator(VyperNodeTransformer):
         node.value = self.visit(node.value)
         return self._try_mutate(node, inferred_type=self._type_of(node.value))
 
+    def visit_AugAssign(self, node: ast.AugAssign):
+        node.target = self.visit(node.target)
+        node.value = self.visit(node.value)
+        return self._try_mutate(node)
+
     def visit_UnaryOp(self, node: ast.UnaryOp):
         node.operand = self.visit(node.operand)
         return self._try_mutate(node)

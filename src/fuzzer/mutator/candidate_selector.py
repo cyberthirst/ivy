@@ -49,8 +49,7 @@ class CandidateSelector:
         # Assignments - safe with type-aware RHS swap
         # ─────────────────────────────────────────────
         ast.Assign: 0.25,
-        # TODO
-        ast.AugAssign: 0.0,
+        ast.AugAssign: 0.25,
         # TODO
         ast.VariableDecl: 0.0,
         ast.Return: 0.25,
