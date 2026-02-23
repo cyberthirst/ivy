@@ -106,7 +106,7 @@ class CandidateSelector:
     # Type definition nodes whose subtrees should never be mutated.
     _SKIP_SUBTREE = (ast.StructDef, ast.EventDef, ast.FlagDef, ast.InterfaceDef)
 
-    _SKIP_FUNC = frozenset({"range", "empty"})
+    _SKIP_FUNC = frozenset({"range", "empty", "raw_call"})
 
     def _should_skip_subtree(self, node: ast.VyperNode, field_name: str) -> bool:
         if isinstance(self._type_of(node), TYPE_T):
