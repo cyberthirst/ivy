@@ -105,6 +105,25 @@ class CandidateSelector:
     # Type definition nodes whose subtrees should never be mutated.
     _SKIP_SUBTREE = (ast.StructDef, ast.EventDef, ast.FlagDef, ast.InterfaceDef)
 
+    _SKIP_FUNC = frozenset({"range", "empty"})
+
+    def _should_skip_subtree(self, node: ast.VyperNode, field_name: str) -> bool:
+        if isinstance(self._type_of(node), TYPE_T):
+            return True
+
+        if field_name in ("annotation", "returns"):
+            return True
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in self._SKIP_FUNC
+            and field_name in ("args", "keywords")
+        ):
+            return True
+
+        return False
+
     def _walk(self, node: ast.VyperNode):
         """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""
         if node is None:
@@ -119,27 +138,7 @@ class CandidateSelector:
             if not hasattr(node, field_name):
                 continue
 
-            # Skip type annotation subtrees - never mutate type definitions
-            if field_name in ("annotation", "returns"):
-                continue
-
-            # Skip range() arguments - bounds define loop semantics
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "range"
-                and field_name in ("args", "keywords")
-            ):
-                continue
-
-            # Skip empty() arguments - they contain type definitions where
-            # subscript indices represent type lengths (must be >= 1)
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "empty"
-                and field_name in ("args", "keywords")
-            ):
+            if self._should_skip_subtree(node, field_name):
                 continue
 
             val = getattr(node, field_name)
