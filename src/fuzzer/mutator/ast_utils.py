@@ -118,7 +118,14 @@ def body_is_terminated(body: list[ast.VyperNode]) -> bool:
     if not body:
         return False
     last_stmt = body[-1]
-    return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise))
+    if isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise)):
+        return True
+    if isinstance(last_stmt, ast.If) and last_stmt.orelse:
+        return body_is_terminated(last_stmt.body) and body_is_terminated(
+            last_stmt.orelse
+        )
+    return False
+
 
 
 def expr_type(node: ast.VyperNode):
