@@ -23,7 +23,12 @@ from fuzzer.mutator.context import (
 )
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
-from fuzzer.mutator.ast_utils import body_is_terminated, expr_type, hoist_prelude_decls
+from fuzzer.mutator.ast_utils import (
+    body_is_terminated,
+    expr_type,
+    hoist_prelude_decls,
+    iter_root_var_name,
+)
 from fuzzer.mutator.strategy import StrategyRegistry
 from fuzzer.mutator.constant_folding import evaluate_constant_expression
 from fuzzer.mutator.mutation_engine import MutationEngine
@@ -596,6 +601,21 @@ class AstMutator(VyperNodeTransformer):
                     modifiability=Modifiability.RUNTIME_CONSTANT,
                 )
                 self.context.add_variable(loop_var_name.id, var_info)
+
+            # Shadow the iterated variable as RUNTIME_CONSTANT to prevent
+            # injected statements from writing to it (ImmutableViolation).
+            iter_name = iter_root_var_name(node.iter)
+            if iter_name is not None:
+                existing = self.context.all_vars.get(iter_name)
+                if existing is not None:
+                    self.context.add_variable(
+                        iter_name,
+                        VarInfo(
+                            typ=existing.typ,
+                            location=existing.location,
+                            modifiability=Modifiability.RUNTIME_CONSTANT,
+                        ),
+                    )
 
             node = self._try_mutate(node)
             node.body = [self.visit(stmt) for stmt in node.body]
