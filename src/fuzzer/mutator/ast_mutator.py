@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from contextlib import nullcontext
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
+from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT, SArrayT, DArrayT
 from vyper.semantics.types.function import FunctionVisibility
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
@@ -30,7 +30,10 @@ from fuzzer.mutator.ast_utils import (
     iter_root_var_name,
 )
 from fuzzer.mutator.strategy import StrategyRegistry
-from fuzzer.mutator.constant_folding import evaluate_constant_expression
+from fuzzer.mutator.constant_folding import (
+    evaluate_constant_expression,
+    fold_constant_expression_status,
+)
 from fuzzer.mutator.mutation_engine import MutationEngine
 from fuzzer.mutator.mutations import register_all as register_all_mutations
 from fuzzer.mutator.mutations.base import MutationCtx
@@ -581,7 +584,27 @@ class AstMutator(VyperNodeTransformer):
     def visit_Subscript(self, node: ast.Subscript):
         node.value = self.visit(node.value)
         node.slice = self.visit(node.slice)
-        return self._try_mutate(node)
+        node = self._try_mutate(node)
+        self._fixup_subscript_index(node)
+        return node
+
+    def _fixup_subscript_index(self, node: ast.Subscript) -> None:
+        """If the slice constant-folds to an OOB or negative value, regenerate it."""
+        base_type = self._type_of(node.value)
+        if not isinstance(base_type, (SArrayT, DArrayT)):
+            return
+        status, folded = fold_constant_expression_status(
+            node.slice, self.context.constants
+        )
+        if status != "value" or not isinstance(folded, ast.Int):
+            return
+        if 0 <= folded.value < base_type.length:
+            return
+        self.expr_generator._active_context = self.context
+        node.slice = self.expr_generator._generate_index_for_sequence(
+            node.value, base_type, self.context,
+            depth=self.expr_generator.root_depth(),
+        )
 
     def visit_For(self, node: ast.For):
         node.iter = self.visit(node.iter)
