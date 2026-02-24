@@ -59,6 +59,10 @@ class CandidateSelector:
         ast.Subscript: 0.2,
         # TODO
         ast.Attribute: 0.0,
+        # ─────────────────────────────────────────────
+        # Function calls - mutate arguments
+        # ─────────────────────────────────────────────
+        ast.Call: 0.2,
     }
 
     def __init__(self, rng: random.Random, prob_map: dict[Type, float] | None = None):

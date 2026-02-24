@@ -576,6 +576,10 @@ class AstMutator(VyperNodeTransformer):
         node.values = [self.visit(value) for value in node.values]
         return self._try_mutate(node)
 
+    def visit_Call(self, node: ast.Call):
+        node = super().generic_visit(node)
+        return self._try_mutate(node)
+
     def visit_Attribute(self, node: ast.Attribute):
         node.value = self.visit(node.value)
         # No mutations for attribute access yet
