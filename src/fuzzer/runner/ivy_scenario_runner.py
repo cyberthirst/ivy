@@ -13,6 +13,7 @@ from ivy.frontend.loader import loads_from_solc_json
 from ivy.frontend.vyper_contract import VyperContract
 from ivy.types import Address
 
+from fuzzer.compilation import compilation_timeout
 from fuzzer.runner.base_scenario_runner import (
     BaseScenarioRunner,
     DeploymentResult,
@@ -46,13 +47,14 @@ class IvyScenarioRunner(BaseScenarioRunner):
         solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> CompilerData:
-        compiler_data = cast(
-            CompilerData,
-            loads_from_solc_json(solc_json, get_compiler_data=True),
-        )
+        with compilation_timeout():
+            compiler_data = cast(
+                CompilerData,
+                loads_from_solc_json(solc_json, get_compiler_data=True),
+            )
 
-        # Force initcode compilation to surface compile-time errors here.
-        _ = compiler_data.bytecode
+            # Force initcode compilation to surface compile-time errors here.
+            _ = compiler_data.bytecode
 
         return compiler_data
 
