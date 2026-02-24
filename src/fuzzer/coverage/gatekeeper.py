@@ -66,7 +66,7 @@ class Gatekeeper:
         edge_ids: Optional[Set[int]],
         compile_time_s: Optional[float],
         analysis: AnalysisResult,
-        boa_results: Dict[str, Tuple[object, ScenarioResult]],
+        boa_results: Optional[Dict[str, Tuple[object, ScenarioResult]]] = None,
         improves_representative: bool,
         coverage_fp: Optional[str] = None,
     ) -> GatekeeperDecision:
@@ -100,7 +100,7 @@ class Gatekeeper:
                 selection_weight=selection_weight,
             )
 
-        if all_boa_configs_failed_to_compile(boa_results):
+        if boa_results is not None and all_boa_configs_failed_to_compile(boa_results):
             return GatekeeperDecision(
                 accept=False,
                 reason="all_configs_failed_compile",

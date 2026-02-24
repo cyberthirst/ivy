@@ -1,5 +1,9 @@
 """
-Coverage-guided fuzzing loop for the Vyper compiler (Boa-only coverage).
+Coverage-guided fuzzing loop for the Vyper compiler.
+
+Uses the RuntimeFuzzEngine for scenario execution (deployment retries,
+call generation/mutation) and ArcCoverageCollector for compiler arc
+coverage to guide the scenario-level corpus.
 """
 
 from __future__ import annotations
@@ -12,10 +16,11 @@ from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.coverage.collector import ArcCoverageCollector
 from fuzzer.coverage.corpus import Corpus, CorpusEntry, scenario_source_size
 from fuzzer.coverage.edge_map import EdgeMap
-from fuzzer.coverage.gatekeeper import Gatekeeper, all_boa_configs_failed_to_compile
+from fuzzer.coverage.gatekeeper import Gatekeeper
 from fuzzer.coverage.tracker import GlobalEdgeTracker
-from fuzzer.export_utils import TestFilter
+from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
 from fuzzer.issue_filter import IssueFilter
+from fuzzer.runtime_engine import HarnessConfig
 from fuzzer.runner.scenario import create_scenario_from_item
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -30,17 +35,15 @@ class CoverageGuidedFuzzer(BaseFuzzer):
         debug_mode: bool = False,
         map_size: int = 1 << 20,
         tag_edges_with_config: bool = False,
+        harness_config: HarnessConfig = HarnessConfig(),
         issue_filter: Optional[IssueFilter] = None,
     ):
-        from boa.interpret import disable_cache
-
-        disable_cache()
-
         super().__init__(
             exports_dir=exports_dir,
             seed=seed,
             debug_mode=debug_mode,
             issue_filter=issue_filter,
+            harness_config=harness_config,
         )
 
         self.collector = ArcCoverageCollector()
@@ -48,6 +51,18 @@ class CoverageGuidedFuzzer(BaseFuzzer):
         self.tracker = GlobalEdgeTracker(map_size)
         self.corpus = Corpus(rng=self.rng)
         self.gatekeeper = Gatekeeper(self.tracker)
+
+    def _hash_collected_arcs(self) -> set[int]:
+        if self.edge_map.tag_with_config:
+            return self.edge_map.hash_arcs_by_config(
+                self.collector.get_arcs_by_config()
+            )
+        return self.edge_map.hash_arcs(self.collector.get_scenario_arcs())
+
+    def gatekeeper_decision_fp(self, edge_ids: set[int]) -> str:
+        from fuzzer.coverage.gatekeeper import coverage_fingerprint
+
+        return coverage_fingerprint(edge_ids)
 
     def bootstrap(self, test_filter: Optional[TestFilter] = None) -> int:
         exports = self.load_filtered_exports(test_filter)
@@ -69,28 +84,28 @@ class CoverageGuidedFuzzer(BaseFuzzer):
 
                 processed += 1
                 scenario = create_scenario_from_item(item, use_python_args=True)
+                scenario_seed = self.derive_scenario_seed("bootstrap", processed)
+
+                self.reporter.set_context(
+                    f"bootstrap_{processed}", processed, self.seed, scenario_seed
+                )
 
                 self.collector.start_scenario()
-                results = self.multi_runner.run(
-                    scenario, coverage_collector=self.collector
+                artifacts = self.run_scenario_with_artifacts(
+                    scenario,
+                    seed=scenario_seed,
+                    coverage_collector=self.collector,
                 )
 
-                analysis = self.result_analyzer.analyze_run(
-                    scenario, results.ivy_result, results.boa_results
+                self.reporter.ingest_run(
+                    artifacts.analysis, artifacts, debug_mode=self.debug_mode
                 )
 
-                if all_boa_configs_failed_to_compile(results.boa_results) and not (
-                    analysis.crashes or analysis.divergences
+                edge_ids = self._hash_collected_arcs()
+                if not edge_ids and not (
+                    artifacts.analysis.crashes or artifacts.analysis.divergences
                 ):
                     continue
-
-                arcs_by_config = self.collector.get_arcs_by_config()
-                if self.edge_map.tag_with_config:
-                    edge_ids = self.edge_map.hash_arcs_by_config(arcs_by_config)
-                else:
-                    edge_ids = self.edge_map.hash_arcs(
-                        self.collector.get_scenario_arcs()
-                    )
 
                 self.tracker.merge(edge_ids)
 
@@ -116,12 +131,6 @@ class CoverageGuidedFuzzer(BaseFuzzer):
         logging.info(f"Bootstrap complete: {added}/{total_items} seeds added")
         return added
 
-    def gatekeeper_decision_fp(self, edge_ids: set[int]) -> str:
-        # Avoid importing fingerprint helper at module import time.
-        from fuzzer.coverage.gatekeeper import coverage_fingerprint
-
-        return coverage_fingerprint(edge_ids)
-
     def fuzz_loop(
         self,
         *,
@@ -129,15 +138,18 @@ class CoverageGuidedFuzzer(BaseFuzzer):
         max_iterations: Optional[int] = None,
         log_interval: int = 100,
     ) -> None:
+        self.reporter.start_timer()
+        self.reporter.start_metrics_stream(self.harness_config.enable_interval_metrics)
+
         if len(self.corpus) == 0:
             if self.bootstrap(test_filter) == 0:
                 logging.error("No seeds loaded, cannot fuzz")
+                self.finalize()
                 return
 
         logging.info(
             f"Starting coverage-guided fuzzing with {len(self.corpus)} seeds..."
         )
-        self.reporter.start_timer()
 
         iteration = 0
         try:
@@ -154,27 +166,22 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                     parent.scenario, scenario_seed=scenario_seed
                 )
 
-                self.collector.start_scenario()
-                results = self.multi_runner.run(
-                    mutated, coverage_collector=self.collector
-                )
-
                 self.reporter.set_context(
                     f"cov_{iteration}", iteration, self.seed, scenario_seed
                 )
-                analysis = self.result_analyzer.analyze_run(
-                    mutated, results.ivy_result, results.boa_results
+
+                self.collector.start_scenario()
+                artifacts = self.run_scenario_with_artifacts(
+                    mutated,
+                    seed=scenario_seed,
+                    coverage_collector=self.collector,
                 )
-                self.reporter.report(analysis, debug_mode=self.debug_mode)
 
-                arcs_by_config = self.collector.get_arcs_by_config()
-                if self.edge_map.tag_with_config:
-                    edge_ids = self.edge_map.hash_arcs_by_config(arcs_by_config)
-                else:
-                    edge_ids = self.edge_map.hash_arcs(
-                        self.collector.get_scenario_arcs()
-                    )
+                self.reporter.ingest_run(
+                    artifacts.analysis, artifacts, debug_mode=self.debug_mode
+                )
 
+                edge_ids = self._hash_collected_arcs()
                 compile_time_s = self.collector.compile_time_s
                 coverage_fp = self.gatekeeper_decision_fp(edge_ids)
                 improves_rep = self.corpus.improves_representative(
@@ -186,8 +193,7 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                 decision = self.gatekeeper.decide_and_update(
                     edge_ids=edge_ids,
                     compile_time_s=compile_time_s,
-                    analysis=analysis,
-                    boa_results=results.boa_results,
+                    analysis=artifacts.analysis,
                     improves_representative=improves_rep,
                     coverage_fp=coverage_fp,
                 )
@@ -209,10 +215,17 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                     self.corpus.add(entry, coverage_fp=decision.coverage_fingerprint)
 
                 if iteration % log_interval == 0:
-                    logging.info(
-                        f"iter={iteration} | corpus={len(self.corpus)} | "
-                        f"unique_divergences={analysis.unique_divergence_count()} | "
-                        f"unique_crashes={analysis.unique_crash_count()}"
+                    snapshot = self.reporter.record_interval_metrics(
+                        iteration=iteration,
+                        corpus_seed_count=len(self.corpus),
+                        corpus_evolved_count=0,
+                        corpus_max_evolved=0,
+                    )
+                    self.reporter.log_generative_progress(
+                        iteration=iteration,
+                        corpus_seed_count=len(self.corpus),
+                        corpus_evolved_count=0,
+                        snapshot=snapshot,
                     )
 
         except KeyboardInterrupt:
@@ -222,15 +235,21 @@ class CoverageGuidedFuzzer(BaseFuzzer):
 
 
 def main():
-    from fuzzer.export_utils import apply_unsupported_exclusions
-    from fuzzer.issue_filter import default_issue_filter
+    import boa  # pyright: ignore[reportMissingImports]
+
+    boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
 
     test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
-    apply_unsupported_exclusions(test_filter)
+    exclude_unsupported_patterns(test_filter)
+
+    from fuzzer.issue_filter import default_issue_filter
 
     issue_filter = default_issue_filter()
 
-    fuzzer = CoverageGuidedFuzzer(issue_filter=issue_filter)
+    fuzzer = CoverageGuidedFuzzer(
+        issue_filter=issue_filter,
+        harness_config=HarnessConfig(),
+    )
     fuzzer.fuzz_loop(test_filter=test_filter, max_iterations=None)
 
 

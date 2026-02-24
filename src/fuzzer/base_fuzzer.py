@@ -2,6 +2,8 @@
 Base fuzzer infrastructure shared between DifferentialFuzzer and GenerativeFuzzer.
 """
 
+from __future__ import annotations
+
 import logging
 import random
 import hashlib
@@ -10,7 +12,10 @@ import typing
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set
+
+if TYPE_CHECKING:
+    from fuzzer.coverage.collector import ArcCoverageCollector
 
 from fuzzer.coverage_types import RuntimeBranchOutcome, RuntimeStmtSite
 from fuzzer.runtime_engine.runtime_fuzz_engine import HarnessConfig
@@ -187,6 +192,7 @@ class BaseFuzzer:
         scenario: Scenario,
         *,
         seed: Optional[int] = None,
+        coverage_collector: Optional["ArcCoverageCollector"] = None,
     ) -> ScenarioRunArtifacts:
         """Run a scenario and return analysis plus runtime metrics/artifacts."""
         from fuzzer.runtime_engine.runtime_fuzz_engine import RuntimeFuzzEngine
@@ -197,6 +203,7 @@ class BaseFuzzer:
         results = self.multi_runner.run_boa_only(
             harness_result.finalized_scenario,
             harness_result.ivy_result,
+            coverage_collector=coverage_collector,
         )
 
         analysis = self.result_analyzer.analyze_run(
