@@ -2,7 +2,7 @@ import random
 from typing import Type
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import TupleT
+from vyper.semantics.types import TYPE_T, TupleT
 
 from fuzzer.mutator.ast_utils import expr_type
 
@@ -41,24 +41,28 @@ class CandidateSelector:
         # TODO
         ast.IfExp: 0.0,
         ast.For: 0.15,
+        ast.Continue: 0.35,
+        ast.Break: 0.35,
         # TODO
         ast.Assert: 0.0,
         # ─────────────────────────────────────────────
         # Assignments - safe with type-aware RHS swap
         # ─────────────────────────────────────────────
         ast.Assign: 0.25,
-        # TODO
-        ast.AugAssign: 0.0,
+        ast.AugAssign: 0.25,
         # TODO
         ast.VariableDecl: 0.0,
-        # TODO
-        ast.Return: 0.0,
+        ast.Return: 0.25,
         # ─────────────────────────────────────────────
         # Access patterns - moderate risk, keep lower
         # ─────────────────────────────────────────────
         ast.Subscript: 0.2,
         # TODO
         ast.Attribute: 0.0,
+        # ─────────────────────────────────────────────
+        # Function calls - mutate arguments
+        # ─────────────────────────────────────────────
+        ast.Call: 0.2,
     }
 
     def __init__(self, rng: random.Random, prob_map: dict[Type, float] | None = None):
@@ -88,6 +92,9 @@ class CandidateSelector:
 
     def filter(self, node: ast.VyperNode) -> bool:
         """Return True if node is a valid mutation candidate."""
+        if isinstance(self._type_of(node), TYPE_T):
+            return False
+
         # Tuple subscript indices - changing index changes result type
         if isinstance(node, ast.Subscript):
             base_type = self._type_of(node.value)
@@ -100,9 +107,34 @@ class CandidateSelector:
         """Safely extract the inferred type from AST metadata."""
         return expr_type(node)
 
+    # Type definition nodes whose subtrees should never be mutated.
+    _SKIP_SUBTREE = (ast.StructDef, ast.EventDef, ast.FlagDef, ast.InterfaceDef)
+
+    _SKIP_FUNC = frozenset({"range", "empty", "raw_call"})
+
+    def _should_skip_subtree(self, node: ast.VyperNode, field_name: str) -> bool:
+        if isinstance(self._type_of(node), TYPE_T):
+            return True
+
+        if field_name in ("annotation", "returns"):
+            return True
+
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in self._SKIP_FUNC
+            and field_name in ("args", "keywords")
+        ):
+            return True
+
+        return False
+
     def _walk(self, node: ast.VyperNode):
         """Yield all nodes in the AST (preorder), skipping unmutatable subtrees."""
         if node is None:
+            return
+
+        if isinstance(node, self._SKIP_SUBTREE):
             return
 
         yield node
@@ -111,27 +143,7 @@ class CandidateSelector:
             if not hasattr(node, field_name):
                 continue
 
-            # Skip type annotation subtrees - never mutate type definitions
-            if field_name in ("annotation", "returns"):
-                continue
-
-            # Skip range() arguments - bounds define loop semantics
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "range"
-                and field_name in ("args", "keywords")
-            ):
-                continue
-
-            # Skip empty() arguments - they contain type definitions where
-            # subscript indices represent type lengths (must be >= 1)
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "empty"
-                and field_name in ("args", "keywords")
-            ):
+            if self._should_skip_subtree(node, field_name):
                 continue
 
             val = getattr(node, field_name)

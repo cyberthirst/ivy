@@ -5,9 +5,10 @@ and reports success rate + unique arc counts as JSON to stdout.
 Uses all available cores via multiprocessing.
 
 Usage:
-    uv run python bench.py --n 2000
-    uv run python bench.py --n 2000 --save-failures bench_failures/
-    uv run python bench.py --n 2000 -j 4   # limit to 4 workers
+    uv run python covbench.py --n 2000
+    uv run python covbench.py --n 2000 --save-failures bench_failures/
+    uv run python covbench.py --n 2000 -j 4   # limit to 4 workers
+    uv run python covbench.py --n 2000 --mutate   # mutate existing exports
 """
 
 import argparse
@@ -192,24 +193,9 @@ def _build_focus_output(focus_accumulators: dict, total_programs: int) -> dict:
     return output
 
 
-def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
-    """Worker: generate one random program, compile under coverage, return results."""
-    seed_i = random.randint(0, 2**32 - 1)
-
-    # imports inside worker to avoid issues with forked coverage state
-    from vyper.ast import nodes as ast
+def _compile_with_coverage(source, focus_regions):
     from fuzzer.compilation import compile_vyper
     from fuzzer.coverage.collector import ArcCoverageCollector
-    from fuzzer.mutator.ast_mutator import AstMutator
-    from unparser.unparser import unparse
-
-    rng = random.Random(seed_i)
-    mutator = AstMutator(rng, generate=True)
-    module = mutator.mutate(ast.Module(body=[]))
-    source = unparse(module)
-
-    if mutator.type_generator.source_fragments:
-        source = "\n\n".join(mutator.type_generator.source_fragments) + "\n\n" + source
 
     collector = ArcCoverageCollector()
     collector.start_scenario()
@@ -220,7 +206,10 @@ def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
     if focus_regions:
         file_analysis = collector.get_scenario_line_analysis()
         focus_line_sets = _collect_focus_line_sets(focus_regions, file_analysis)
+    return result, arcs, focus_line_sets
 
+
+def _classify_outcome(result, source, compilation_xfails):
     failure_text = None
     if result.is_success:
         outcome = OUTCOME_SUCCESS
@@ -232,7 +221,7 @@ def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
             )
         )
         failure_text = f"{source}\n\n{tb}"
-    elif mutator.context.compilation_xfails:
+    elif compilation_xfails:
         outcome = OUTCOME_XFAIL
     else:
         outcome = OUTCOME_FAILED
@@ -242,7 +231,91 @@ def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
             )
         )
         failure_text = f"{source}\n\n{tb}"
+    return outcome, failure_text
 
+
+def _load_export_solc_jsons() -> list[dict]:
+    """Load unique solc_json dicts from test exports."""
+    from fuzzer.export_utils import (
+        load_all_exports,
+        filter_exports,
+        iter_unique_solc_jsons,
+        TestFilter,
+    )
+
+    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
+    exports = load_all_exports("tests/vyper-exports", include_compiler_settings=False)
+    exports = filter_exports(exports, test_filter=test_filter)
+    return [solc_json for solc_json, _, _ in iter_unique_solc_jsons(exports)]
+
+
+# module-level storage for worker processes (set via pool initializer)
+_WORKER_SOLC_JSONS: list[dict] = []
+
+
+def _init_mutate_worker(solc_jsons: list[dict]) -> None:
+    global _WORKER_SOLC_JSONS
+    _WORKER_SOLC_JSONS = solc_jsons
+
+
+def _run_one_mutate(_, focus_regions: tuple[FocusRegion, ...] = ()):
+    """Worker: pick a random export, mutate it, compile under coverage, return results."""
+    seed_i = random.randint(0, 2**32 - 1)
+
+    from ivy.frontend.loader import loads_from_solc_json
+    from fuzzer.mutator.ast_mutator import AstMutator
+
+    rng = random.Random(seed_i)
+    solc_json = rng.choice(_WORKER_SOLC_JSONS)
+
+    # get annotated AST from the original source
+    data = loads_from_solc_json(solc_json, get_compiler_data=True)
+
+    n_mutations = rng.randint(1, 8)
+    mutator = AstMutator(rng, max_mutations=n_mutations)
+    mutation_result = mutator.mutate_source_with_compiler_data(data)
+
+    if mutation_result is None:
+        return (
+            OUTCOME_FAILED,
+            set(),
+            {},
+            seed_i,
+            f"mutation returned None for seed {seed_i}",
+        )
+
+    mutated_source = next(iter(mutation_result.sources.values()))
+
+    result, arcs, focus_line_sets = _compile_with_coverage(
+        mutated_source, focus_regions
+    )
+    outcome, failure_text = _classify_outcome(
+        result, mutated_source, mutation_result.compilation_xfails
+    )
+    return outcome, arcs, focus_line_sets, seed_i, failure_text
+
+
+def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
+    """Worker: generate one random program, compile under coverage, return results."""
+    seed_i = random.randint(0, 2**32 - 1)
+
+    # imports inside worker to avoid issues with forked coverage state
+    from vyper.ast import nodes as ast
+    from fuzzer.mutator.ast_mutator import AstMutator
+    from unparser.unparser import unparse
+
+    rng = random.Random(seed_i)
+    mutator = AstMutator(rng, generate=True)
+    module = mutator.mutate(ast.Module(body=[]))
+    source = unparse(module)
+
+    if mutator.type_generator.source_fragments:
+        source = "\n\n".join(mutator.type_generator.source_fragments) + "\n\n" + source
+
+    result, arcs, focus_line_sets = _compile_with_coverage(source, focus_regions)
+    outcome, failure_text = _classify_outcome(
+        result, source, mutator.context.compilation_xfails
+    )
     return outcome, arcs, focus_line_sets, seed_i, failure_text
 
 
@@ -276,6 +349,12 @@ def main():
         type=int,
         default=None,
         help="Number of parallel workers (default: all cores)",
+    )
+    parser.add_argument(
+        "--mutate",
+        action="store_true",
+        default=False,
+        help="Mutate existing test exports instead of generating from scratch",
     )
     parser.add_argument(
         "--focus",
@@ -320,8 +399,21 @@ def main():
     ice = 0
     done = 0
 
-    run_one = partial(_run_one, focus_regions=focus_regions)
-    with multiprocessing.Pool(n_workers) as pool:
+    if args.mutate:
+        solc_jsons = _load_export_solc_jsons()
+        if not solc_jsons:
+            print("ERROR: no sources found in exports", file=sys.stderr)
+            sys.exit(1)
+        print(f"Loaded {len(solc_jsons)} unique sources from exports", file=sys.stderr)
+        run_one = partial(_run_one_mutate, focus_regions=focus_regions)
+        pool = multiprocessing.Pool(
+            n_workers, initializer=_init_mutate_worker, initargs=(solc_jsons,)
+        )
+    else:
+        run_one = partial(_run_one, focus_regions=focus_regions)
+        pool = multiprocessing.Pool(n_workers)
+
+    with pool:
         for outcome, arcs, focus_line_sets, seed_i, failure_text in pool.imap_unordered(
             run_one, range(total), chunksize=16
         ):
@@ -329,7 +421,9 @@ def main():
                 successful += 1
                 all_arcs |= arcs
                 if focus_accumulators:
-                    _update_focus_accumulators(focus_accumulators, arcs, focus_line_sets)
+                    _update_focus_accumulators(
+                        focus_accumulators, arcs, focus_line_sets
+                    )
             elif outcome == OUTCOME_ICE:
                 ice += 1
                 if ice_dir and failure_text:
@@ -349,6 +443,7 @@ def main():
     target_counts = arcs_by_target(all_arcs)
 
     output = {
+        "mode": "mutate" if args.mutate else "generate",
         "n": total,
         "success": successful,
         "success_pct": round(successful / total if total > 0 else 0.0, 4),

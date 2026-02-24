@@ -8,11 +8,15 @@ from fuzzer.mutator.mutations import (
     binop,
     if_stmt,
     assign,
+    augassign,
     compare,
     unaryop,
     boolop,
     subscript,
     for_loop,
+    return_stmt,
+    continue_break,
+    call,
 )
 
 
@@ -26,10 +30,14 @@ def register_all(registry: StrategyRegistry) -> None:
         binop,
         if_stmt,
         assign,
+        augassign,
         compare,
         unaryop,
         boolop,
         subscript,
         for_loop,
+        return_stmt,
+        continue_break,
+        call,
     ):
         register_decorated(registry, mod)

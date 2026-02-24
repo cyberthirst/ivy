@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from contextlib import nullcontext
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT
+from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT, SArrayT, DArrayT
 from vyper.semantics.types.function import FunctionVisibility
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
@@ -23,9 +23,17 @@ from fuzzer.mutator.context import (
 )
 from fuzzer.mutator.expr_generator import ExprGenerator
 from fuzzer.mutator.stmt_generator import StatementGenerator
-from fuzzer.mutator.ast_utils import body_is_terminated, expr_type, hoist_prelude_decls
+from fuzzer.mutator.ast_utils import (
+    body_is_terminated,
+    expr_type,
+    hoist_prelude_decls,
+    iter_root_var_name,
+)
 from fuzzer.mutator.strategy import StrategyRegistry
-from fuzzer.mutator.constant_folding import evaluate_constant_expression
+from fuzzer.mutator.constant_folding import (
+    evaluate_constant_expression,
+    fold_constant_expression_status,
+)
 from fuzzer.mutator.mutation_engine import MutationEngine
 from fuzzer.mutator.mutations import register_all as register_all_mutations
 from fuzzer.mutator.mutations.base import MutationCtx
@@ -398,6 +406,20 @@ class AstMutator(VyperNodeTransformer):
         # and non-constants cannot have one. Constants are out of scope for mutation for now.
         return node
 
+    def visit_StructDef(self, node: ast.StructDef):
+        # Struct member AnnAssign nodes must not be visited — their field names
+        # are not local variables and must not be registered in all_vars.
+        return node
+
+    def visit_EventDef(self, node: ast.EventDef):
+        return node
+
+    def visit_FlagDef(self, node: ast.FlagDef):
+        return node
+
+    def visit_InterfaceDef(self, node: ast.InterfaceDef):
+        return node
+
     def visit_AnnAssign(self, node: ast.AnnAssign):
         """Handle local variable declaration."""
         node.value = self.visit(node.value)
@@ -527,9 +549,13 @@ class AstMutator(VyperNodeTransformer):
         return node
 
     def visit_Return(self, node: ast.Return):
-        # TODO: mutate return value (e.g. replace with var/generated expr of same type)
         if node.value:
             node.value = self.visit(node.value)
+        cur = self.function_registry.current_function
+        if cur and node.value:
+            func_type = self.function_registry.functions.get(cur)
+            if func_type and func_type.return_type:
+                return self._try_mutate(node, inferred_type=func_type.return_type)
         return node
 
     def visit_Assign(self, node: ast.Assign):
@@ -540,12 +566,21 @@ class AstMutator(VyperNodeTransformer):
         node.value = self.visit(node.value)
         return self._try_mutate(node, inferred_type=self._type_of(node.value))
 
+    def visit_AugAssign(self, node: ast.AugAssign):
+        node.target = self.visit(node.target)
+        node.value = self.visit(node.value)
+        return self._try_mutate(node)
+
     def visit_UnaryOp(self, node: ast.UnaryOp):
         node.operand = self.visit(node.operand)
         return self._try_mutate(node)
 
     def visit_BoolOp(self, node: ast.BoolOp):
         node.values = [self.visit(value) for value in node.values]
+        return self._try_mutate(node)
+
+    def visit_Call(self, node: ast.Call):
+        node = super().generic_visit(node)
         return self._try_mutate(node)
 
     def visit_Attribute(self, node: ast.Attribute):
@@ -556,10 +591,29 @@ class AstMutator(VyperNodeTransformer):
     def visit_Subscript(self, node: ast.Subscript):
         node.value = self.visit(node.value)
         node.slice = self.visit(node.slice)
-        return self._try_mutate(node)
+        node = self._try_mutate(node)
+        self._fixup_subscript_index(node)
+        return node
+
+    def _fixup_subscript_index(self, node: ast.Subscript) -> None:
+        """If the slice constant-folds to an OOB or negative value, regenerate it."""
+        base_type = self._type_of(node.value)
+        if not isinstance(base_type, (SArrayT, DArrayT)):
+            return
+        status, folded = fold_constant_expression_status(
+            node.slice, self.context.constants
+        )
+        if status != "value" or not isinstance(folded, ast.Int):
+            return
+        if 0 <= folded.value < base_type.length:
+            return
+        self.expr_generator._active_context = self.context
+        node.slice = self.expr_generator._generate_index_for_sequence(
+            node.value, base_type, self.context,
+            depth=self.expr_generator.root_depth(),
+        )
 
     def visit_For(self, node: ast.For):
-        node.target = self.visit(node.target)
         node.iter = self.visit(node.iter)
 
         # Mutation happens inside scope context so injected statements have access to loop var
@@ -578,10 +632,31 @@ class AstMutator(VyperNodeTransformer):
                 )
                 self.context.add_variable(loop_var_name.id, var_info)
 
+            # Shadow the iterated variable as RUNTIME_CONSTANT to prevent
+            # injected statements from writing to it (ImmutableViolation).
+            iter_name = iter_root_var_name(node.iter)
+            if iter_name is not None:
+                existing = self.context.all_vars.get(iter_name)
+                if existing is not None:
+                    self.context.add_variable(
+                        iter_name,
+                        VarInfo(
+                            typ=existing.typ,
+                            location=existing.location,
+                            modifiability=Modifiability.RUNTIME_CONSTANT,
+                        ),
+                    )
+
             node = self._try_mutate(node)
-            node = super().generic_visit(node)
+            node.body = [self.visit(stmt) for stmt in node.body]
 
         return node
+
+    def visit_Continue(self, node: ast.Continue):
+        return self._try_mutate(node)
+
+    def visit_Break(self, node: ast.Break):
+        return self._try_mutate(node)
 
     def visit_Compare(self, node: ast.Compare):
         node.left = self.visit(node.left)

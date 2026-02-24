@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from vyper.ast import nodes as ast
 
@@ -118,7 +118,25 @@ def body_is_terminated(body: list[ast.VyperNode]) -> bool:
     if not body:
         return False
     last_stmt = body[-1]
-    return isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise))
+    if isinstance(last_stmt, (ast.Continue, ast.Break, ast.Return, ast.Raise)):
+        return True
+    if isinstance(last_stmt, ast.If) and last_stmt.orelse:
+        return body_is_terminated(last_stmt.body) and body_is_terminated(
+            last_stmt.orelse
+        )
+    return False
+
+
+def iter_root_var_name(node: ast.VyperNode) -> Optional[str]:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        if isinstance(node.value, ast.Name) and node.value.id == "self":
+            return node.attr
+        return iter_root_var_name(node.value)
+    if isinstance(node, ast.Subscript):
+        return iter_root_var_name(node.value)
+    return None
 
 
 def expr_type(node: ast.VyperNode):
