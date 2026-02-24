@@ -14,6 +14,7 @@ Fingerprinting Strategy
 | Divergence: xfail violation           | Yes    | (xfail_expected, xfail_actual, xfail_reasons)          |
 | Compiler crash                        | Yes    | (error_type, msg[:20], last_3_frames)                  |
 | Compilation failure                   | Yes    | (error_type, msg[:20], last_5_frames)                  |
+| Compilation timeout                   | Yes    | (error_type, msg[:20], last_5_frames)                  |
 
 Error fingerprinting uses:
 - error_type: Exception class name (e.g., "CompilerPanic")
@@ -106,6 +107,7 @@ class Deduper:
     def __init__(self):
         self._seen_crashes: Set[str] = set()
         self._seen_compile_failures: Set[str] = set()
+        self._seen_compilation_timeouts: Set[str] = set()
         self._seen_divergences: Set[str] = set()
 
     def _compute_fingerprint(self, sig: Tuple) -> str:
@@ -222,11 +224,34 @@ class Deduper:
             fingerprint=fingerprint,
         )
 
+    def check_compilation_timeout(self, error: Exception) -> KeepDecision:
+        """
+        Check if a compilation timeout should be kept or dropped.
+        """
+        error_fp = fingerprint_error(error, self.COMPILE_FAILURE_FRAMES)
+        sig = ("compile_timeout", error_fp)
+        fingerprint = self._compute_fingerprint(sig)
+
+        if fingerprint in self._seen_compilation_timeouts:
+            return KeepDecision(
+                keep=False,
+                reason="duplicate_compilation_timeout",
+                fingerprint=fingerprint,
+            )
+
+        self._seen_compilation_timeouts.add(fingerprint)
+        return KeepDecision(
+            keep=True,
+            reason="new_compilation_timeout",
+            fingerprint=fingerprint,
+        )
+
     def get_stats(self) -> Dict[str, int]:
         """Return statistics about seen fingerprints."""
         return {
             "unique_crashes": len(self._seen_crashes),
             "unique_compile_failures": len(self._seen_compile_failures),
+            "unique_compilation_timeouts": len(self._seen_compilation_timeouts),
             "unique_divergences": len(self._seen_divergences),
         }
 
@@ -234,4 +259,5 @@ class Deduper:
         """Clear all seen fingerprints."""
         self._seen_crashes.clear()
         self._seen_compile_failures.clear()
+        self._seen_compilation_timeouts.clear()
         self._seen_divergences.clear()

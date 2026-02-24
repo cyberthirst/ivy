@@ -22,6 +22,7 @@ def _empty_analysis() -> Any:
         failed_calls=0,
         crashes=[],
         compile_failures=[],
+        compilation_timeouts=[],
         divergences=[],
     )
 

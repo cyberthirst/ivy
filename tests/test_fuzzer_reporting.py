@@ -54,6 +54,7 @@ def _empty_analysis():
         failed_calls=0,
         crashes=[],
         compile_failures=[],
+        compilation_timeouts=[],
         divergences=[],
     )
 

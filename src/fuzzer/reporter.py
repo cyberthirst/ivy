@@ -93,6 +93,7 @@ class FuzzerReporter:
     successful_deployments: int = 0
     deployment_failures: int = 0
     compilation_failures: int = 0
+    compilation_timeouts: int = 0
     compiler_crashes: int = 0
 
     # Call statistics
@@ -126,6 +127,7 @@ class FuzzerReporter:
     _last_snapshot_calls_to_no_code: int = 0
     _last_snapshot_total_deployments: int = 0
     _last_snapshot_compilation_failures: int = 0
+    _last_snapshot_compilation_timeouts: int = 0
     _last_snapshot_compiler_crashes: int = 0
     _runtime_edges_sum: int = 0
     _runtime_edges_samples: int = 0
@@ -151,6 +153,9 @@ class FuzzerReporter:
 
     def record_compilation_failure(self):
         self.compilation_failures += 1
+
+    def record_compilation_timeout(self):
+        self.compilation_timeouts += 1
 
     def record_compiler_crash(self):
         self.compiler_crashes += 1
@@ -194,6 +199,14 @@ class FuzzerReporter:
                 # Compiler crash (CompilerPanic, CodegenPanic, etc.)
                 self.record_compiler_crash()
                 self.save_compiler_crash(
+                    deployment_result.solc_json,
+                    deployment_result.error,
+                    type(deployment_result.error).__name__,
+                    compiler_settings=deployment_result.compiler_settings,
+                )
+            elif deployment_result.is_compilation_timeout:
+                self.record_compilation_timeout()
+                self.save_compilation_timeout(
                     deployment_result.solc_json,
                     deployment_result.error,
                     type(deployment_result.error).__name__,
@@ -288,6 +301,33 @@ class FuzzerReporter:
                 )
             if debug_mode:
                 self.save_compilation_failure(
+                    solc_json,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="unfiltered",
+                )
+
+        # Report compilation timeouts
+        for deployment_result, decision in analysis.compilation_timeouts:
+            self.compilation_timeouts += 1
+            solc_json = deployment_result.solc_json
+            error = deployment_result.error
+            error_type = type(error).__name__
+
+            if decision.keep:
+                logging.debug(
+                    f"compile_timeout| new | {item_name} | mut#{scenario_num} | {error_type}"
+                )
+                self.save_compilation_timeout(
+                    solc_json,
+                    error,
+                    error_type,
+                    compiler_settings=deployment_result.compiler_settings,
+                    subfolder="filtered",
+                )
+            if debug_mode:
+                self.save_compilation_timeout(
                     solc_json,
                     error,
                     error_type,
@@ -561,9 +601,11 @@ class FuzzerReporter:
             self.successful_deployments
             + self.deployment_failures
             + self.compilation_failures
+            + self.compilation_timeouts
             + self.compiler_crashes
         )
         self._last_snapshot_compilation_failures = self.compilation_failures
+        self._last_snapshot_compilation_timeouts = self.compilation_timeouts
         self._last_snapshot_compiler_crashes = self.compiler_crashes
         if not enabled:
             self._metrics_path = None
@@ -619,6 +661,7 @@ class FuzzerReporter:
             self.successful_deployments
             + self.deployment_failures
             + self.compilation_failures
+            + self.compilation_timeouts
             + self.compiler_crashes
         )
         deployments_interval = (
@@ -626,6 +669,9 @@ class FuzzerReporter:
         )
         compilation_failures_interval = (
             self.compilation_failures - self._last_snapshot_compilation_failures
+        )
+        compilation_timeouts_interval = (
+            self.compilation_timeouts - self._last_snapshot_compilation_timeouts
         )
         compiler_crashes_interval = (
             self.compiler_crashes - self._last_snapshot_compiler_crashes
@@ -724,8 +770,10 @@ class FuzzerReporter:
             },
             "compile": {
                 "compilation_failures_total": self.compilation_failures,
+                "compilation_timeouts_total": self.compilation_timeouts,
                 "compiler_crashes_total": self.compiler_crashes,
                 "compilation_failures_interval": compilation_failures_interval,
+                "compilation_timeouts_interval": compilation_timeouts_interval,
                 "compiler_crashes_interval": compiler_crashes_interval,
                 "compilation_failures_per_scenario": self._safe_rate(
                     compilation_failures_interval, scenarios_interval
@@ -776,6 +824,7 @@ class FuzzerReporter:
             "issues": {
                 "divergences_total": self.divergences,
                 "compilation_failures_total": self.compilation_failures,
+                "compilation_timeouts_total": self.compilation_timeouts,
                 "compiler_crashes_total": self.compiler_crashes,
             },
         }
@@ -790,6 +839,7 @@ class FuzzerReporter:
         self._last_snapshot_calls_to_no_code = calls_to_no_code_total
         self._last_snapshot_total_deployments = all_deployments_total
         self._last_snapshot_compilation_failures = self.compilation_failures
+        self._last_snapshot_compilation_timeouts = self.compilation_timeouts
         self._last_snapshot_compiler_crashes = self.compiler_crashes
         self._clear_pending_metrics_state()
 
@@ -872,6 +922,7 @@ class FuzzerReporter:
             "successful_deployments": self.successful_deployments,
             "deployment_failures": self.deployment_failures,
             "compilation_failures": self.compilation_failures,
+            "compilation_timeouts": self.compilation_timeouts,
             "compiler_crashes": self.compiler_crashes,
             "successful_calls": self.successful_calls,
             "call_failures": self.call_failures,
@@ -992,6 +1043,47 @@ class FuzzerReporter:
             json.dump(failure_data, f, indent=2, default=str)
 
         logging.debug(f"Compilation failure saved to {filepath}")
+
+    def save_compilation_timeout(
+        self,
+        solc_json: Optional[Dict[str, Any]],
+        error: Optional[Exception],
+        error_type: Optional[str] = None,
+        compiler_settings: Optional[Dict[str, Any]] = None,
+        subfolder: Optional[str] = None,
+    ):
+        """Save a compilation timeout with the source code that caused it."""
+        error_type = self._resolve_error_type(error, error_type)
+
+        timeout_dir = self._get_run_reports_dir()
+        if subfolder:
+            timeout_dir = timeout_dir / subfolder
+        timeout_dir = timeout_dir / "compilation_timeouts" / "untriaged"
+        timeout_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
+        filename = f"timeout_{error_type}_{timestamp}.json"
+        filepath = timeout_dir / filename
+
+        timeout_data = {
+            "timestamp": datetime.now().isoformat(),
+            "error_type": error_type,
+            "error_message": _safe_str(error),
+            "error_traceback": _format_traceback(error),
+            "solc_json": solc_json,
+            "compiler_settings": compiler_settings,
+            "reproduction_info": {
+                "seed": self.seed,
+                "item_name": self.current_item_name or "unknown",
+                "scenario_num": self.current_scenario_num or -1,
+                "scenario_seed": getattr(self, "_current_scenario_seed", None),
+            },
+        }
+
+        with open(filepath, "w") as f:
+            json.dump(timeout_data, f, indent=2, default=str)
+
+        logging.debug(f"Compilation timeout saved to {filepath}")
 
     def save_statistics(self):
         """Save the campaign statistics to a JSON file."""

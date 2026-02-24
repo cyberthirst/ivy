@@ -99,6 +99,16 @@ class DeploymentResult(BaseResult):
         )
 
     @property
+    def is_compilation_timeout(self) -> bool:
+        """Check if this is a compilation timeout."""
+        if self.success or self.error is None or self.error_phase != "compile":
+            return False
+        return (
+            classify_compilation_error(self.error)
+            is CompilationOutcome.COMPILATION_TIMEOUT
+        )
+
+    @property
     def is_compiler_crash(self) -> bool:
         """Check if this is a compiler crash (internal error)."""
         if self.success or self.error is None or self.error_phase != "compile":

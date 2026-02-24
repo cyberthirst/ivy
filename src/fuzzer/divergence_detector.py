@@ -97,6 +97,8 @@ def _get_xfail_reasons(expectations: list[XFailExpectation]) -> list[str]:
 
 
 def _deployment_outcome_label(result: DeploymentResult) -> str:
+    if result.is_compilation_timeout:
+        return "compilation_timeout"
     if result.is_compilation_failure:
         return "compilation_failure"
     if result.is_compiler_crash:
@@ -116,6 +118,8 @@ def _execution_outcome_label(
     if result.success:
         return "success"
     if isinstance(result, DeploymentResult):
+        if result.is_compilation_timeout:
+            return "compilation_timeout"
         if result.is_compilation_failure:
             return "compilation_failure"
         if result.is_compiler_crash:
@@ -193,6 +197,7 @@ class DivergenceDetector:
                     reasons = _get_xfail_reasons(trace_result.compilation_xfails)
                     if reasons and not (
                         deployment_result.is_compilation_failure
+                        or deployment_result.is_compilation_timeout
                         or deployment_result.is_compiler_crash
                     ):
                         return Divergence(
@@ -236,8 +241,10 @@ class DivergenceDetector:
                 ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
                 assert isinstance(ivy_res, DeploymentResult)
                 assert isinstance(boa_res, DeploymentResult)
-                # Compiler crashes invalidate comparison for this trace.
+                # Compiler crashes and timeouts invalidate comparison.
                 if ivy_res.is_compiler_crash or boa_res.is_compiler_crash:
+                    break
+                if ivy_res.is_compilation_timeout or boa_res.is_compilation_timeout:
                     break
                 if not self._compare_deployment_results(ivy_res, boa_res):
                     return Divergence(

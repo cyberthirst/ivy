@@ -25,6 +25,7 @@ class CompilationTimeout(Exception):
 class CompilationOutcome(Enum):
     SUCCESS = auto()
     COMPILATION_FAILURE = auto()  # invalid code rejected (VyperException)
+    COMPILATION_TIMEOUT = auto()  # compilation exceeded time limit
     COMPILER_CRASH = auto()  # bug in the compiler (ICE or bare Exception)
 
 
@@ -43,13 +44,17 @@ class CompilationResult:
         return self.outcome is CompilationOutcome.COMPILATION_FAILURE
 
     @property
+    def is_compilation_timeout(self) -> bool:
+        return self.outcome is CompilationOutcome.COMPILATION_TIMEOUT
+
+    @property
     def is_compiler_crash(self) -> bool:
         return self.outcome is CompilationOutcome.COMPILER_CRASH
 
 
 def classify_compilation_error(e: Exception) -> CompilationOutcome:
     if isinstance(e, CompilationTimeout):
-        return CompilationOutcome.COMPILATION_FAILURE
+        return CompilationOutcome.COMPILATION_TIMEOUT
     if isinstance(e, VyperInternalException):
         return CompilationOutcome.COMPILER_CRASH
     if isinstance(e, (ParserException, JSONError, BadArchive, VyperException)):
