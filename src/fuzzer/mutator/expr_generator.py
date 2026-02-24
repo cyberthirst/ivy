@@ -148,7 +148,7 @@ class ExprGenerator(BaseGenerator):
             )
             annotation = ast.Call(
                 func=ast.Name(id="constant"),
-                args=[ast.Name(id=str(expr_type))],
+                args=[ast.Name(id=context.type_name(expr_type))],
             )
             decl: ast.VyperNode = ast.VariableDecl(
                 target=ast.Name(id=name),
@@ -169,7 +169,7 @@ class ExprGenerator(BaseGenerator):
             )
             decl = ast.AnnAssign(
                 target=ast.Name(id=name),
-                annotation=ast.Name(id=str(expr_type)),
+                annotation=ast.Name(id=context.type_name(expr_type)),
                 value=expr,
             )
 
@@ -219,7 +219,7 @@ class ExprGenerator(BaseGenerator):
 
         if isinstance(target_type, TupleT) and not allow_tuple_literal:
             # Tuple literals are rejected in assignment-like contexts; use empty(T).
-            fallback = lambda: self._build_empty(target_type)
+            fallback = lambda: self._build_empty(target_type, context)
         else:
             fallback = lambda: self._generate_literal(ctx=ctx)
 
@@ -935,7 +935,7 @@ class ExprGenerator(BaseGenerator):
             address_value = self.literal_generator.generate(AddressT())
             address_node = ast_builder.literal(address_value, AddressT())
 
-        return ast_builder.interface_cast(target_type, address_node)
+        return ast_builder.interface_cast(ctx.context.type_name(target_type), target_type, address_node)
 
     @strategy(
         name="expr.env_var",
@@ -956,8 +956,8 @@ class ExprGenerator(BaseGenerator):
         node._metadata = {"type": typ}
         return node
 
-    def _build_empty(self, target_type: VyperType) -> ast.Call:
-        return ast_builder.empty_call(target_type)
+    def _build_empty(self, target_type: VyperType, context: GenerationContext) -> ast.Call:
+        return ast_builder.empty_call(context.type_name(target_type), target_type)
 
     def random_var_ref(
         self, target_type: VyperType, context: GenerationContext
@@ -1827,7 +1827,7 @@ class ExprGenerator(BaseGenerator):
         address_node._metadata = {"type": AddressT()}
 
         # Build: InterfaceName(address)
-        iface_cast = ast_builder.interface_cast(iface_type, address_node)
+        iface_cast = ast_builder.interface_cast(iface_type._id, iface_type, address_node)
 
         # Build: Interface(address).func
         attr_node = ast.Attribute(value=iface_cast, attr=func.name)

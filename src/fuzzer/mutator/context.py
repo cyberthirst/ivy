@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from enum import Enum, auto
 
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
-from vyper.semantics.types import VyperType, SArrayT, DArrayT
+from vyper.semantics.types import VyperType, SArrayT, DArrayT, InterfaceT
 from vyper.semantics.types.function import StateMutability
 
 from fuzzer.xfail import XFailExpectation
@@ -68,6 +68,12 @@ class GenerationContext:
     in_init: bool = False
     remaining_immutables: Set[str] = field(default_factory=set)
     iterable_expr_depth: int = 0
+    interface_aliases: Dict[str, str] = field(default_factory=dict)
+
+    def type_name(self, typ: VyperType) -> str:
+        if isinstance(typ, InterfaceT):
+            return self.interface_aliases.get(typ._id, typ._id)
+        return str(typ)
 
     def _push_scope(self, scope_type: ScopeType) -> None:
         self.scope_stack.append(self.current_scope)

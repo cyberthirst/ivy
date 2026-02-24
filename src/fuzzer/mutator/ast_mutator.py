@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from contextlib import nullcontext
 
 from vyper.ast import nodes as ast
-from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT, SArrayT, DArrayT
+from vyper.semantics.types import VyperType, ContractFunctionT, HashMapT, SArrayT, DArrayT, InterfaceT
 from vyper.semantics.types.function import FunctionVisibility
 from vyper.semantics.analysis.base import VarInfo, DataLocation, Modifiability
 from vyper.compiler.phases import CompilerData
@@ -390,6 +390,11 @@ class AstMutator(VyperNodeTransformer):
                             pass
                         else:
                             self.context.add_constant(item.target.id, const_value)
+
+            elif isinstance(item, (ast.Import, ast.ImportFrom)):
+                for info in item._metadata.get("import_infos", []):
+                    if isinstance(info.typ, InterfaceT):
+                        self.context.interface_aliases[info.typ._id] = info.alias
 
         # Seed call graph with calls already present in the annotated module.
         for fn_t in function_types:

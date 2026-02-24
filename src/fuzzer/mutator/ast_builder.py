@@ -181,9 +181,9 @@ def literal(value, typ: VyperType) -> ast.VyperNode:
     )
 
 
-def interface_cast(iface_type: InterfaceT, address_node: ast.VyperNode) -> ast.Call:
+def interface_cast(iface_name: str, iface_type: InterfaceT, address_node: ast.VyperNode) -> ast.Call:
     """Build InterfaceName(address) with proper type metadata."""
-    iface_name_node = ast.Name(id=iface_type._id)
+    iface_name_node = ast.Name(id=iface_name)
     iface_name_node._metadata = {"type": TYPE_T(iface_type)}
 
     call_node = ast.Call(func=iface_name_node, args=[address_node], keywords=[])
@@ -191,9 +191,9 @@ def interface_cast(iface_type: InterfaceT, address_node: ast.VyperNode) -> ast.C
     return call_node
 
 
-def empty_call(typ: VyperType) -> ast.Call:
+def empty_call(type_name: str, typ: VyperType) -> ast.Call:
     """Build empty(T) call with proper type metadata."""
-    type_node = ast.Name(id=str(typ))
+    type_node = ast.Name(id=type_name)
     call_node = ast.Call(func=ast.Name(id="empty"), args=[type_node], keywords=[])
     call_node._metadata = getattr(call_node, "_metadata", {})
     call_node._metadata["type"] = typ

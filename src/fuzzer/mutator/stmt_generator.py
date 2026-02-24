@@ -779,7 +779,7 @@ class StatementGenerator(BaseGenerator):
         """
         var_name, var_info = self._generate_varinfo(context)
 
-        anno: ast.VyperNode = ast.Name(id=str(var_info.typ))
+        anno: ast.VyperNode = ast.Name(id=context.type_name(var_info.typ))
 
         # These flags only apply to module scope (var_info already reflects this)
         if var_info.modifiability == Modifiability.CONSTANT:
@@ -933,7 +933,7 @@ class StatementGenerator(BaseGenerator):
         # Build target (AnnAssign structure as expected by Vyper)
         target = ast.AnnAssign(
             target=ast.Name(id=loop_var_name),
-            annotation=ast.Name(id=str(target_type)),
+            annotation=ast.Name(id=ctx.context.type_name(target_type)),
             value=None,
         )
 
