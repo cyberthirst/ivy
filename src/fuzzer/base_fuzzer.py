@@ -178,11 +178,6 @@ class BaseFuzzer:
                             mutation_result.runtime_xfails
                         )
 
-            if compiler_data and hasattr(compiler_data, "settings"):
-                settings = settings_to_kwargs(compiler_data.settings)
-                # TODO the ast mutator should return the settings
-                trace.compiler_settings = settings
-
         return new_scenario
 
     def run_scenario_with_artifacts(
