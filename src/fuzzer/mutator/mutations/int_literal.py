@@ -5,21 +5,14 @@ from vyper.semantics.types import IntegerT
 
 from fuzzer.mutator.strategy import strategy
 from fuzzer.mutator.mutations.base import MutationCtx
-from fuzzer.xfail import XFailExpectation
 
 
-def _check_bounds_and_xfail(ctx: MutationCtx, new_value: int) -> None:
-    """Check if new_value is within type bounds, add xfail if not."""
+def _in_bounds(ctx: MutationCtx, value: int) -> bool:
+    """Return True if *value* is within the inferred integer type bounds."""
     if ctx.inferred_type is None or not isinstance(ctx.inferred_type, IntegerT):
-        return
+        return True  # no type info → optimistically allow
     lower, upper = ctx.inferred_type.ast_bounds
-    if new_value < lower or new_value > upper:
-        ctx.context.compilation_xfails.append(
-            XFailExpectation(
-                kind="compilation",
-                reason=f"integer literal {new_value} out of bounds for {ctx.inferred_type}",
-            )
-        )
+    return lower <= value <= upper
 
 
 def _has_integer_type(*, ctx: MutationCtx, **_) -> bool:
@@ -33,7 +26,8 @@ def _has_integer_type(*, ctx: MutationCtx, **_) -> bool:
 )
 def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = ctx.node.value + 1
-    _check_bounds_and_xfail(ctx, new_value)
+    if not _in_bounds(ctx, new_value):
+        return ctx.node
     ctx.node.value = new_value
     return ctx.node
 
@@ -45,7 +39,8 @@ def _add_one(*, ctx: MutationCtx, **_) -> ast.Int:
 )
 def _subtract_one(*, ctx: MutationCtx, **_) -> ast.Int:
     new_value = ctx.node.value - 1
-    _check_bounds_and_xfail(ctx, new_value)
+    if not _in_bounds(ctx, new_value):
+        return ctx.node
     ctx.node.value = new_value
     return ctx.node
 
