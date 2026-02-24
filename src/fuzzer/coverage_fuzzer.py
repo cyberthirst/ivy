@@ -241,6 +241,9 @@ def main():
 
     test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
     exclude_unsupported_patterns(test_filter)
+    test_filter.exclude_source(r"\bsend\s*\(")
+    test_filter.include_path("functional/codegen/")
+    test_filter.exclude_name("zero_length_side_effects")
 
     from fuzzer.issue_filter import default_issue_filter
 
