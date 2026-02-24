@@ -38,9 +38,16 @@ class VyperValue:
 
     typ: VyperType
 
+    _UNBOX_SIZE_LIMIT = 32 * 1024
+
     def unbox(self):
+        if self.typ.memory_bytes_required > self._UNBOX_SIZE_LIMIT:
+            return "<truncated>"
+        return self._unbox()
+
+    def _unbox(self):
         raise NotImplementedError(
-            f"{type(self).__name__}.unbox() is not implemented"
+            f"{type(self).__name__}._unbox() is not implemented"
         )
 
 
@@ -765,7 +772,7 @@ class _Sequence(_Container, Generic[T]):
         )
         return any(item == value for value in self)
 
-    def unbox(self):
+    def _unbox(self):
         return [x.unbox() for x in self]
 
     def __str__(self):
@@ -918,7 +925,7 @@ class Struct(_Container):
         values = [self._values[k] for k, _ in self.typ.members.items()]
         return values
 
-    def unbox(self):
+    def _unbox(self):
         return {key: self[key].unbox() for key in self.typ.members}
 
     def __str__(self):
@@ -967,7 +974,7 @@ class Tuple(_Container):
         for i in range(self.length):
             yield self._values[i]
 
-    def unbox(self):
+    def _unbox(self):
         return tuple(self._values[i].unbox() for i in range(self.length))
 
     def __str__(self):

@@ -994,3 +994,51 @@ def setup_token():
             ],
         }
     }
+
+
+def test_storage_dump_large_static_array_truncated(get_contract):
+    """Static array > 32KB (1025 uint256 = 1025*32 = 32800 bytes) is truncated."""
+    src = """
+arr: uint256[1025]
+
+@external
+def set_first(val: uint256):
+    self.arr[0] = val
+    """
+    c = get_contract(src)
+    c.set_first(42)
+    dump = c.storage_dump()
+    assert dump == {"arr": "<truncated>"}
+
+
+def test_storage_dump_static_array_at_limit_not_truncated(get_contract):
+    """Static array <= 32KB (1024 uint256 = 1024*32 = 32768 bytes) is NOT truncated."""
+    src = """
+arr: uint256[1024]
+
+@external
+def set_first(val: uint256):
+    self.arr[0] = val
+    """
+    c = get_contract(src)
+    c.set_first(99)
+    dump = c.storage_dump()
+    assert isinstance(dump["arr"], list)
+    assert len(dump["arr"]) == 1024
+    assert dump["arr"][0] == 99
+    assert dump["arr"][1] == 0
+
+
+def test_storage_dump_large_static_array_small_element(get_contract):
+    """bool[4097] = 4097*32 = 131104 bytes > 32KB, should be truncated."""
+    src = """
+flags: bool[4097]
+
+@external
+def set_flag():
+    self.flags[0] = True
+    """
+    c = get_contract(src)
+    c.set_flag()
+    dump = c.storage_dump()
+    assert dump == {"flags": "<truncated>"}
