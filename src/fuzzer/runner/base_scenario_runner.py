@@ -285,10 +285,12 @@ class BaseScenarioRunner(ABC):
         return self.DEFAULT_TX_ORIGIN
 
     def _get_merged_compiler_settings(self, trace: DeploymentTrace) -> Dict[str, Any]:
-        return {
+        merged = {
             **(trace.compiler_settings or {}),
             **self.compiler_settings,
         }
+        merged.setdefault("enable_decimals", True)
+        return merged
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         """Run a complete scenario (including dependencies)"""

@@ -181,8 +181,6 @@ class BaseFuzzer:
             if compiler_data and hasattr(compiler_data, "settings"):
                 settings = settings_to_kwargs(compiler_data.settings)
                 # TODO the ast mutator should return the settings
-                # this is a temporary fix to avoid compilation failures
-                settings["enable_decimals"] = True
                 trace.compiler_settings = settings
 
         return new_scenario
