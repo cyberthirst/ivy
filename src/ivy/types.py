@@ -38,6 +38,11 @@ class VyperValue:
 
     typ: VyperType
 
+    def unbox(self):
+        raise NotImplementedError(
+            f"{type(self).__name__}.unbox() is not implemented"
+        )
+
 
 T = TypeVar("T")
 
@@ -73,6 +78,9 @@ class VyperInt(VyperValue, int):
         instance = super().__new__(cls, value)
         instance.typ = typ
         return instance
+
+    def unbox(self):
+        return int(self)
 
     def __deepcopy__(self, memo):
         return VyperInt(int(self), self.typ)
@@ -223,6 +231,9 @@ class VyperBytes(VyperValue, bytes):
         instance.typ = typ
         return instance
 
+    def unbox(self):
+        return bytes(self)
+
     def __deepcopy__(self, memo):
         return VyperBytes(bytes(self), self.typ)
 
@@ -262,6 +273,9 @@ class VyperString(VyperValue, bytes):
         instance.typ = typ
         return instance
 
+    def unbox(self):
+        return str(self)
+
     def __str__(self) -> str:
         """Decode as UTF-8 for display, using surrogateescape for invalid bytes."""
         return self.decode("utf-8", errors="surrogateescape")
@@ -297,6 +311,9 @@ class VyperBytesM(VyperValue, bytes):
         instance = super().__new__(cls, value)
         instance.typ = typ
         return instance
+
+    def unbox(self):
+        return bytes(self)
 
     def __deepcopy__(self, memo):
         return VyperBytesM(bytes(self), self.typ)
@@ -400,6 +417,9 @@ class VyperBool(VyperValue):
     def __hash__(self) -> int:
         return hash(self._value)
 
+    def unbox(self):
+        return self._value
+
     def __repr__(self) -> str:
         return f"VyperBool({self._value})"
 
@@ -457,6 +477,9 @@ class Address(VyperValue, str):
     def __ne__(self, other: object) -> bool:
         return not self.__eq__(other)
 
+    def unbox(self):
+        return str(self)
+
     def __hash__(self) -> int:
         return str.__hash__(self)
 
@@ -504,6 +527,9 @@ class Flag(VyperValue):
     def __contains__(self, other):
         other_flag = self._require_flag_other(other, "Flag membership")
         return (self.value & other_flag.value) != 0
+
+    def unbox(self):
+        return self.value
 
     def __hash__(self):
         return hash(self.value)
@@ -643,6 +669,9 @@ class VyperDecimal(VyperValue):
         int_part, dec_part = s[: -self.PRECISION] or "0", s[-self.PRECISION :]
         return f"{'-' if neg else ''}{int_part}.{dec_part}"
 
+    def unbox(self):
+        return Decimal(str(self))
+
     def __repr__(self) -> str:
         return f"Decimal('{self}')"
 
@@ -735,6 +764,9 @@ class _Sequence(_Container, Generic[T]):
             f"Membership type mismatch: {item.typ} not compatible with {self.value_type}"
         )
         return any(item == value for value in self)
+
+    def unbox(self):
+        return [x.unbox() for x in self]
 
     def __str__(self):
         values = [str(self[i]) for i in range(self.length)]
@@ -845,6 +877,11 @@ class Map(_Container):
     def items(self):
         return self._values.items()
 
+    def unbox(self):
+        return {
+            k.unbox(): v.unbox() for k, v in self._values.items()
+        }
+
     def __deepcopy__(self, _):
         result = super().__deepcopy__(_)
         result.value_type = self.value_type
@@ -880,6 +917,9 @@ class Struct(_Container):
     def values(self):
         values = [self._values[k] for k, _ in self.typ.members.items()]
         return values
+
+    def unbox(self):
+        return {key: self[key].unbox() for key in self.typ.members}
 
     def __str__(self):
         items = [f"{k}={str(self[k])}" for k in self.typ.members.keys()]
@@ -926,6 +966,9 @@ class Tuple(_Container):
     def __iter__(self):
         for i in range(self.length):
             yield self._values[i]
+
+    def unbox(self):
+        return tuple(self._values[i].unbox() for i in range(self.length))
 
     def __str__(self):
         values = [str(self._values[i]) for i in range(self.length)]

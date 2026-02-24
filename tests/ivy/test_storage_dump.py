@@ -577,12 +577,11 @@ def set_price(val: decimal):
     """
     c = get_contract(src)
     dump = c.storage_dump()
-    # VyperDecimal with 0 value
-    assert str(dump["price"]) == "0.0000000000"
+    assert dump["price"] == Decimal("0")
 
     c.set_price(Decimal("3.14"))
     dump = c.storage_dump()
-    assert str(dump["price"]) == "3.1400000000"
+    assert dump["price"] == Decimal("3.14")
 
 
 def test_storage_dump_multiple_variables(get_contract):
