@@ -29,7 +29,7 @@ class GenerativeFuzzer(BaseFuzzer):
         self,
         exports_dir: Path = Path("tests/vyper-exports"),
         seed: Optional[int] = None,
-        debug_mode: bool = False,
+        debug_mode: bool = True,
         generate_prob: float = 0.5,
         harness_config: HarnessConfig = HarnessConfig(),
         issue_filter: Optional[IssueFilter] = None,
@@ -117,12 +117,14 @@ class GenerativeFuzzer(BaseFuzzer):
                         corpus_seed_count=seed_count,
                         corpus_evolved_count=0,
                         corpus_max_evolved=0,
+                        debug_mode=self.debug_mode,
                     )
                     self.reporter.log_generative_progress(
                         iteration=self._iteration,
                         corpus_seed_count=seed_count,
                         corpus_evolved_count=0,
                         snapshot=snapshot,
+                        debug_mode=self.debug_mode,
                     )
 
         except KeyboardInterrupt:
@@ -133,12 +135,14 @@ class GenerativeFuzzer(BaseFuzzer):
             corpus_seed_count=seed_count,
             corpus_evolved_count=0,
             corpus_max_evolved=0,
+            debug_mode=self.debug_mode,
         )
         self.reporter.log_generative_progress(
             iteration=self._iteration,
             corpus_seed_count=seed_count,
             corpus_evolved_count=0,
             snapshot=final_snapshot,
+            debug_mode=self.debug_mode,
         )
         self.finalize()
 

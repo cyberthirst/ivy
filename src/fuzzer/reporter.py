@@ -643,6 +643,7 @@ class FuzzerReporter:
         corpus_seed_count: int,
         corpus_evolved_count: int,
         corpus_max_evolved: int,
+        debug_mode: bool = False,
     ) -> Optional[Dict[str, Any]]:
         if not self._metrics_enabled or self._metrics_path is None:
             self._clear_pending_metrics_state()
@@ -841,7 +842,7 @@ class FuzzerReporter:
                 "compiler_crashes_total": self.compiler_crashes,
             },
             "memory": {
-                "rss_mb": self._get_rss_mb(),
+                "rss_mb": self._get_rss_mb() if debug_mode else -1,
             },
         }
 
@@ -868,6 +869,7 @@ class FuzzerReporter:
         corpus_seed_count: int,
         corpus_evolved_count: int,
         snapshot: Optional[Dict[str, Any]],
+        debug_mode: bool = False,
     ) -> None:
         """Log interval progress for the generative fuzzer."""
         elapsed = self.get_elapsed_time()
@@ -894,7 +896,7 @@ class FuzzerReporter:
                 coverage.get("branch_coverage_pct_interval", 0.0)
             )
 
-        rss_mb = self._get_rss_mb()
+        rss_mb = self._get_rss_mb() if debug_mode else -1
         logging.info(
             f"iter={iteration} | "
             f"seeds={corpus_seed_count} | "

@@ -32,7 +32,7 @@ class CoverageGuidedFuzzer(BaseFuzzer):
         exports_dir: Path = Path("tests/vyper-exports"),
         *,
         seed: Optional[int] = None,
-        debug_mode: bool = False,
+        debug_mode: bool = True,
         map_size: int = 1 << 20,
         tag_edges_with_config: bool = False,
         harness_config: HarnessConfig = HarnessConfig(),
@@ -220,12 +220,14 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                         corpus_seed_count=len(self.corpus),
                         corpus_evolved_count=0,
                         corpus_max_evolved=0,
+                        debug_mode=self.debug_mode,
                     )
                     self.reporter.log_generative_progress(
                         iteration=iteration,
                         corpus_seed_count=len(self.corpus),
                         corpus_evolved_count=0,
                         snapshot=snapshot,
+                        debug_mode=self.debug_mode,
                     )
 
         except KeyboardInterrupt:
