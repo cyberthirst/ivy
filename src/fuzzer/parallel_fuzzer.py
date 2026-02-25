@@ -12,7 +12,6 @@ from typing import Any, MutableSequence, Optional
 
 from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.coverage.collector import ArcCoverageCollector
-from fuzzer.coverage.corpus import scenario_source_size
 from fuzzer.coverage.disk_corpus import (
     DiskEntryMeta,
     DiskIndex,
@@ -31,13 +30,16 @@ from fuzzer.coverage.gatekeeper import (
     had_any_successful_compile,
 )
 from fuzzer.coverage.shared_tracker import SharedEdgeTracker, create_shared_edge_counts
-from fuzzer.coverage_fuzzer import (
-    build_default_coverage_issue_filter,
-    build_default_coverage_test_filter,
+from fuzzer.export_utils import (
+    TestFilter,
+    exclude_unsupported_patterns,
+    solc_json_source_size,
 )
-from fuzzer.export_utils import TestFilter
+from fuzzer.issue_filter import IssueFilter, default_issue_filter
 from fuzzer.runtime_engine import HarnessConfig
-from fuzzer.runner.scenario import create_scenario_from_item
+from fuzzer.generator import generate_scenario
+from fuzzer.runner.scenario import Scenario, create_scenario_from_item
+from fuzzer.trace_types import DeploymentTrace
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -48,6 +50,27 @@ _STATE_IDLE = 0
 _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
+
+
+def _scenario_source_size(scenario: Scenario) -> int:
+    size = 0
+    for trace in scenario.traces:
+        if isinstance(trace, DeploymentTrace):
+            size += solc_json_source_size(trace.solc_json)
+    return size
+
+
+def build_default_coverage_test_filter() -> TestFilter:
+    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
+    exclude_unsupported_patterns(test_filter)
+    test_filter.exclude_source(r"\bsend\s*\(")
+    test_filter.include_path("functional/codegen/")
+    test_filter.exclude_name("zero_length_side_effects")
+    return test_filter
+
+
+def build_default_coverage_issue_filter() -> IssueFilter:
+    return default_issue_filter()
 
 
 def _disable_alarm_timeouts() -> None:
@@ -210,7 +233,7 @@ def _bootstrap_worker(
                 scenario=scenario,
                 edge_ids=edge_ids,
                 compile_time_s=max(collector.compile_time_s, _EPS),
-                source_size=scenario_source_size(scenario),
+                source_size=_scenario_source_size(scenario),
                 generation=0,
                 keep_forever=True,
                 coverage_fp=coverage_fingerprint(edge_ids),
@@ -252,6 +275,7 @@ def _worker_main(
     max_energy: int = 16,
     max_iterations: Optional[int] = None,
     log_interval: int = _LOG_INTERVAL,
+    stagnation_threshold: int = 200,
 ) -> None:
     import boa  # pyright: ignore[reportMissingImports]
 
@@ -282,6 +306,7 @@ def _worker_main(
 
     iteration = 0
     batch_id = 0
+    iters_since_accept = 0
     last_scan = time.monotonic()
     last_purge = last_scan
 
@@ -363,29 +388,35 @@ def _worker_main(
                     state=_STATE_RUNNING,
                 )
 
-            parent = select_parent(
-                disk_index,
-                corpus_dir,
-                shared_counts,
-                rng,
-                k=8,
-            )
-            if parent is None:
-                _touch_heartbeat(
-                    worker_id,
-                    last_progress_ts,
-                    last_iter,
-                    worker_state,
-                    iteration=iteration,
-                    state=_STATE_IDLE,
+            # Pick a starting scenario: generate from scratch or select from corpus
+            if iters_since_accept >= stagnation_threshold:
+                gen_seed = _derive_seed(worker_seed, "gen", batch_id)
+                parent_scenario = generate_scenario(seed=gen_seed)
+                if parent_scenario is None:
+                    continue
+                energy = rng.randint(min_energy, max_energy)
+                generation = 1
+            else:
+                parent = select_parent(
+                    disk_index, corpus_dir, shared_counts, rng, k=8
                 )
-                time.sleep(0.05)
-                continue
+                if parent is None:
+                    _touch_heartbeat(
+                        worker_id,
+                        last_progress_ts,
+                        last_iter,
+                        worker_state,
+                        iteration=iteration,
+                        state=_STATE_IDLE,
+                    )
+                    time.sleep(0.05)
+                    continue
 
-            parent_meta, parent_scenario = parent
-            energy = compute_energy(
-                parent_meta, rng, min_e=min_energy, max_e=max_energy
-            )
+                parent_meta, parent_scenario = parent
+                energy = compute_energy(
+                    parent_meta, rng, min_e=min_energy, max_e=max_energy
+                )
+                generation = parent_meta.generation + 1
 
             for e_idx in range(energy):
                 if stop_event.is_set():
@@ -393,11 +424,11 @@ def _worker_main(
 
                 iteration += 1
                 scenario_seed = _derive_seed(
-                    worker_seed,
-                    "cov",
-                    batch_id,
-                    e_idx,
-                    iteration,
+                    worker_seed, "cov", batch_id, e_idx, iteration
+                )
+
+                mutated = base_fuzzer.mutate_scenario(
+                    parent_scenario, scenario_seed=scenario_seed
                 )
 
                 reporter.set_context(
@@ -405,11 +436,6 @@ def _worker_main(
                     iteration,
                     worker_seed,
                     scenario_seed,
-                )
-
-                mutated = base_fuzzer.mutate_scenario(
-                    parent_scenario,
-                    scenario_seed=scenario_seed,
                 )
 
                 collector.start_scenario()
@@ -424,7 +450,7 @@ def _worker_main(
                 edge_ids = _hash_collected_arcs(collector, edge_map)
                 compile_time_s = max(collector.compile_time_s, _EPS)
                 coverage_fp = coverage_fingerprint(edge_ids)
-                source_size = scenario_source_size(mutated)
+                source_size = _scenario_source_size(mutated)
 
                 decision = gatekeeper.decide_and_update(
                     edge_ids=edge_ids,
@@ -446,12 +472,15 @@ def _worker_main(
                         edge_ids=edge_ids,
                         compile_time_s=compile_time_s,
                         source_size=source_size,
-                        generation=parent_meta.generation + 1,
+                        generation=generation,
                         keep_forever=decision.reason in ("issue", "new_edge"),
                         coverage_fp=decision.coverage_fingerprint,
                         worker_id=worker_id,
                     )
                     disk_index.scan_new()
+                    iters_since_accept = 0
+                else:
+                    iters_since_accept += 1
 
                 _touch_heartbeat(
                     worker_id,
