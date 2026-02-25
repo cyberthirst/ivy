@@ -1,5 +1,5 @@
 """
-Base fuzzer infrastructure shared between DifferentialFuzzer and GenerativeFuzzer.
+Base fuzzer infrastructure shared across fuzzing modes.
 """
 
 from __future__ import annotations
@@ -25,7 +25,6 @@ from fuzzer.export_utils import (
     load_all_exports,
     filter_exports,
     TestFilter,
-    settings_to_kwargs,
 )
 from fuzzer.trace_types import (
     DeploymentTrace,

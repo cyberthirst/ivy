@@ -49,7 +49,7 @@ uv run pyright src/                       # Type check
 
 ### Running the Fuzzer
 ```bash
-uv run python -m src.fuzzer.generative_fuzzer
+uv run python -m src.fuzzer.parallel_fuzzer
 ```
 
 ## Code Style Guidelines

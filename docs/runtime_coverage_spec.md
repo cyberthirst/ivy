@@ -156,7 +156,7 @@ Create tiny contracts and assert that:
 - **Interestingness heuristic**: should the fuzzer look at raw set growth, a weighted score, or an AFL-style bitmap?
 - **Performance knobs**: if overhead is too high, skip `on_node` entirely and emit only statement-level events.
 - **Env singleton interactions**: ensure coverage is reset between scenarios/tests (pytest `-n` runs).
-- **Fuzzer integration**: coverage infrastructure exists but is not yet consumed by `generative_fuzzer.py` for corpus guidance.
+- **Fuzzer integration**: coverage infrastructure is consumed by the fuzzer corpus guidance loop.
 
 ## Files to Add / Modify
 - Add: `src/ivy/execution_metadata.py`

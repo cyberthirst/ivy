@@ -16,7 +16,6 @@ from vyper.compiler.input_bundle import FileInput, JSONInputBundle
 from vyper.compiler.phases import CompilerData
 from vyper.compiler.settings import Settings
 
-from fuzzer.compilation import compilation_timeout
 from fuzzer.runner.base_scenario_runner import BaseScenarioRunner, ScenarioResult
 from fuzzer.runner.scenario import Scenario
 from fuzzer.trace_types import Env
@@ -70,18 +69,13 @@ class BoaScenarioRunner(BaseScenarioRunner):
         solc_json: Dict[str, Any],
         compiler_settings: Optional[Dict[str, Any]] = None,
     ) -> Any:
-        with compilation_timeout():
-            if self.coverage_collector is None:
-                return _deployer_from_solc_json(
-                    solc_json, compiler_args=compiler_settings
-                )
+        if self.coverage_collector is None:
+            return _deployer_from_solc_json(solc_json, compiler_args=compiler_settings)
 
-            # Track coverage of Vyper's codegen/IR/venom passes during compilation.
-            # VyperDeployer initialization triggers full compilation.
-            with self.coverage_collector.collect_compile(config_name=self.config_name):
-                return _deployer_from_solc_json(
-                    solc_json, compiler_args=compiler_settings
-                )
+        # Track coverage of Vyper's codegen/IR/venom passes during compilation.
+        # VyperDeployer initialization triggers full compilation.
+        with self.coverage_collector.collect_compile(config_name=self.config_name):
+            return _deployer_from_solc_json(solc_json, compiler_args=compiler_settings)
 
     def _deploy_compiled(
         self,
