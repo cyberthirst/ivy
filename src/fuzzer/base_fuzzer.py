@@ -33,6 +33,7 @@ from fuzzer.trace_types import (
 )
 from ivy.frontend.loader import loads_from_solc_json
 
+from fuzzer.runner.base_scenario_runner import ScenarioResult
 from fuzzer.runner.scenario import Scenario
 from fuzzer.runner.multi_runner import MultiRunner
 from fuzzer.deduper import Deduper
@@ -52,6 +53,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 class ScenarioRunArtifacts:
     analysis: Any
     harness_stats: Any
+    ivy_result: ScenarioResult
     runtime_edge_ids: Set[int]
     runtime_stmt_sites_seen: Set[RuntimeStmtSite]
     runtime_branch_outcomes_seen: Set[RuntimeBranchOutcome]
@@ -208,6 +210,7 @@ class BaseFuzzer:
         return ScenarioRunArtifacts(
             analysis=analysis,
             harness_stats=harness_result.stats,
+            ivy_result=harness_result.ivy_result,
             runtime_edge_ids=set(harness_result.runtime_edge_ids),
             runtime_stmt_sites_seen=set(harness_result.runtime_stmt_sites_seen),
             runtime_branch_outcomes_seen=set(

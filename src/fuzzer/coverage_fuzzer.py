@@ -16,7 +16,7 @@ from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.coverage.collector import ArcCoverageCollector
 from fuzzer.coverage.corpus import Corpus, CorpusEntry, scenario_source_size
 from fuzzer.coverage.edge_map import EdgeMap
-from fuzzer.coverage.gatekeeper import Gatekeeper
+from fuzzer.coverage.gatekeeper import Gatekeeper, had_any_successful_compile
 from fuzzer.coverage.tracker import GlobalEdgeTracker
 from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
 from fuzzer.issue_filter import IssueFilter
@@ -100,6 +100,9 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                 self.reporter.ingest_run(
                     artifacts.analysis, artifacts, debug_mode=self.debug_mode
                 )
+
+                if not had_any_successful_compile(artifacts.ivy_result):
+                    continue
 
                 edge_ids = self._hash_collected_arcs()
                 if not edge_ids and not (
@@ -194,6 +197,7 @@ class CoverageGuidedFuzzer(BaseFuzzer):
                     edge_ids=edge_ids,
                     compile_time_s=compile_time_s,
                     analysis=artifacts.analysis,
+                    ivy_result=artifacts.ivy_result,
                     improves_representative=improves_rep,
                     coverage_fp=coverage_fp,
                 )

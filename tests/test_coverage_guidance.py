@@ -96,10 +96,21 @@ def test_gatekeeper_accepts_new_edges_and_updates_global_counts():
         )
     }
 
+    ivy_result = ScenarioResult(
+        results=[
+            TraceResult(
+                trace_type="deployment",
+                trace_index=0,
+                result=DeploymentResult(success=True),
+            )
+        ]
+    )
+
     decision = gatekeeper.decide_and_update(
         edge_ids={1, 2, 3},
         compile_time_s=0.01,
         analysis=analysis,
+        ivy_result=ivy_result,
         boa_results=boa_results,
         improves_representative=False,
     )
@@ -133,10 +144,21 @@ def test_gatekeeper_rejects_when_all_boa_configs_fail_compile():
     }
     assert all_boa_configs_failed_to_compile(boa_results) is True
 
+    ivy_result = ScenarioResult(
+        results=[
+            TraceResult(
+                trace_type="deployment",
+                trace_index=0,
+                result=DeploymentResult(success=True),
+            )
+        ]
+    )
+
     decision = gatekeeper.decide_and_update(
         edge_ids=set(),
         compile_time_s=0.01,
         analysis=AnalysisResult(),
+        ivy_result=ivy_result,
         boa_results=boa_results,
         improves_representative=True,
     )

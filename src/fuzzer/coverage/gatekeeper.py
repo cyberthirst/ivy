@@ -21,8 +21,8 @@ def coverage_fingerprint(edge_ids: Set[int]) -> str:
     return h.hexdigest()
 
 
-def _boa_config_had_any_successful_compile(boa_result: ScenarioResult) -> bool:
-    for _, deployment_result in boa_result.get_deployment_results():
+def had_any_successful_compile(result: ScenarioResult) -> bool:
+    for _, deployment_result in result.get_deployment_results():
         assert isinstance(deployment_result, DeploymentResult)
         if deployment_result.success or deployment_result.is_runtime_failure:
             return True
@@ -35,7 +35,7 @@ def all_boa_configs_failed_to_compile(
     if not boa_results:
         return True
     return all(
-        not _boa_config_had_any_successful_compile(result)
+        not had_any_successful_compile(result)
         for _, result in boa_results.values()
     )
 
@@ -66,11 +66,25 @@ class Gatekeeper:
         edge_ids: Optional[Set[int]],
         compile_time_s: Optional[float],
         analysis: AnalysisResult,
+        ivy_result: ScenarioResult,
         boa_results: Optional[Dict[str, Tuple[object, ScenarioResult]]] = None,
         improves_representative: bool,
         coverage_fp: Optional[str] = None,
     ) -> GatekeeperDecision:
         is_issue = bool(analysis.crashes or analysis.divergences)
+
+        # Reject if nothing compiled under Ivy. The AST mutator depends on the
+        # compiler frontend to parse and annotate the source, so a scenario that
+        # can't compile is a dead end — we won't be able to mutate it further.
+        if not had_any_successful_compile(ivy_result):
+            return GatekeeperDecision(
+                accept=False,
+                reason="no_ivy_compile",
+                coverage_fingerprint=coverage_fp or "",
+                new_edges=0,
+                rare_edge_score=0.0,
+                selection_weight=0.0,
+            )
 
         if edge_ids is None or compile_time_s is None:
             self._tracker.merge(edge_ids or set())
