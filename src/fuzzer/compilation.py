@@ -7,6 +7,7 @@ from enum import Enum, auto
 from typing import Generator, Optional
 
 from vyper.compiler.phases import CompilerData
+from vyper.compiler.settings import Settings
 from vyper.exceptions import (
     BadArchive,
     JSONError,
@@ -83,10 +84,12 @@ def compilation_timeout(
         signal.signal(signal.SIGALRM, old_handler)
 
 
-def compile_vyper(source: str) -> CompilationResult:
+def compile_vyper(
+    source: str, settings: Optional[Settings] = None
+) -> CompilationResult:
     try:
         with compilation_timeout():
-            data = CompilerData(source)
+            data = CompilerData(source, settings=settings)
             data.bytecode  # trigger full compilation
             data.bytecode_runtime
         return CompilationResult(CompilationOutcome.SUCCESS, compiler_data=data)

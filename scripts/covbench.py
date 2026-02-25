@@ -193,14 +193,14 @@ def _build_focus_output(focus_accumulators: dict, total_programs: int) -> dict:
     return output
 
 
-def _compile_with_coverage(source, focus_regions):
+def _compile_with_coverage(source, focus_regions, settings=None):
     from fuzzer.compilation import compile_vyper
     from fuzzer.coverage.collector import ArcCoverageCollector
 
     collector = ArcCoverageCollector()
     collector.start_scenario()
     with collector.collect_compile():
-        result = compile_vyper(source)
+        result = compile_vyper(source, settings=settings)
     arcs = collector.get_scenario_arcs()
     focus_line_sets = {}
     if focus_regions:
@@ -258,7 +258,7 @@ def _init_mutate_worker(solc_jsons: list[dict]) -> None:
     _WORKER_SOLC_JSONS = solc_jsons
 
 
-def _run_one_mutate(_, focus_regions: tuple[FocusRegion, ...] = ()):
+def _run_one_mutate(_, focus_regions: tuple[FocusRegion, ...] = (), settings=None):
     """Worker: pick a random export, mutate it, compile under coverage, return results."""
     seed_i = random.randint(0, 2**32 - 1)
 
@@ -287,7 +287,7 @@ def _run_one_mutate(_, focus_regions: tuple[FocusRegion, ...] = ()):
     mutated_source = next(iter(mutation_result.sources.values()))
 
     result, arcs, focus_line_sets = _compile_with_coverage(
-        mutated_source, focus_regions
+        mutated_source, focus_regions, settings=settings
     )
     outcome, failure_text = _classify_outcome(
         result, mutated_source, mutation_result.compilation_xfails
@@ -295,7 +295,7 @@ def _run_one_mutate(_, focus_regions: tuple[FocusRegion, ...] = ()):
     return outcome, arcs, focus_line_sets, seed_i, failure_text
 
 
-def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
+def _run_one(_, focus_regions: tuple[FocusRegion, ...] = (), settings=None):
     """Worker: generate one random program, compile under coverage, return results."""
     seed_i = random.randint(0, 2**32 - 1)
 
@@ -312,7 +312,9 @@ def _run_one(_, focus_regions: tuple[FocusRegion, ...] = ()):
     if mutator.type_generator.source_fragments:
         source = "\n\n".join(mutator.type_generator.source_fragments) + "\n\n" + source
 
-    result, arcs, focus_line_sets = _compile_with_coverage(source, focus_regions)
+    result, arcs, focus_line_sets = _compile_with_coverage(
+        source, focus_regions, settings=settings
+    )
     outcome, failure_text = _classify_outcome(
         result, source, mutator.context.compilation_xfails
     )
@@ -366,6 +368,12 @@ def main():
             "Can be passed multiple times."
         ),
     )
+    parser.add_argument(
+        "--venom",
+        action="store_true",
+        default=False,
+        help="Compile using the Venom pipeline (experimental_codegen)",
+    )
     args = parser.parse_args()
 
     failures_dir = None
@@ -389,6 +397,13 @@ def main():
         region.key: _new_focus_accumulator(region) for region in focus_regions
     }
 
+    from vyper.compiler.settings import Settings
+
+    compiler_settings = Settings(
+        enable_decimals=True,
+        experimental_codegen=True if args.venom else None,
+    )
+
     total = args.n
     n_workers = args.jobs or os.cpu_count() or 1
 
@@ -405,12 +420,18 @@ def main():
             print("ERROR: no sources found in exports", file=sys.stderr)
             sys.exit(1)
         print(f"Loaded {len(solc_jsons)} unique sources from exports", file=sys.stderr)
-        run_one = partial(_run_one_mutate, focus_regions=focus_regions)
+        run_one = partial(
+            _run_one_mutate,
+            focus_regions=focus_regions,
+            settings=compiler_settings,
+        )
         pool = multiprocessing.Pool(
             n_workers, initializer=_init_mutate_worker, initargs=(solc_jsons,)
         )
     else:
-        run_one = partial(_run_one, focus_regions=focus_regions)
+        run_one = partial(
+            _run_one, focus_regions=focus_regions, settings=compiler_settings
+        )
         pool = multiprocessing.Pool(n_workers)
 
     with pool:
@@ -444,6 +465,7 @@ def main():
 
     output = {
         "mode": "mutate" if args.mutate else "generate",
+        "venom": args.venom,
         "n": total,
         "success": successful,
         "success_pct": round(successful / total if total > 0 else 0.0, 4),
