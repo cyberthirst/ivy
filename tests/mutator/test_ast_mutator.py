@@ -101,6 +101,31 @@ def top() -> uint256:
     assert registry.reachable_from_nonreentrant("_leaf")
 
 
+def test_preprocess_module_seeds_function_local_names():
+    source = """
+@external
+def foo(x: uint256, y: uint256) -> uint256:
+    gen_var0: uint256 = x
+    if x > 0:
+        gen_var1: uint256 = y
+        for gen_var2: uint256 in range(3):
+            gen_var3: uint256 = gen_var2
+    else:
+        gen_var4: uint256 = x + y
+    return gen_var0
+"""
+
+    result = compile_vyper(source)
+    assert result.is_success
+    assert result.compiler_data is not None
+
+    module = result.compiler_data.annotated_vyper_module
+    mutator = AstMutator(random.Random(0))
+    mutator._preprocess_module(module)
+
+    assert mutator.name_generator.generate() == "gen_var5"
+
+
 @pytest.mark.xfail(
     reason="mutator WIP - many mutations cause compilation failures", strict=False
 )

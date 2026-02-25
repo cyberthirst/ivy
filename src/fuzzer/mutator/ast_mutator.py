@@ -44,6 +44,29 @@ from fuzzer.type_generator import TypeGenerator
 from fuzzer.xfail import XFailExpectation
 
 
+def _collect_local_var_names(body: list, names: set[str]) -> None:
+    """Collect all local variable names declared in a function/block body.
+
+    Walks AnnAssign declarations and For loop targets recursively through
+    nested if/for blocks so the name generator can avoid collisions with
+    names that already exist in the source being mutated.
+    """
+    for stmt in body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            names.add(stmt.target.id)
+        if isinstance(stmt, ast.For):
+            target = stmt.target
+            if isinstance(target, ast.AnnAssign) and isinstance(
+                target.target, ast.Name
+            ):
+                names.add(target.target.id)
+            _collect_local_var_names(stmt.body, names)
+        elif isinstance(stmt, ast.If):
+            _collect_local_var_names(stmt.body, names)
+            if stmt.orelse:
+                _collect_local_var_names(stmt.orelse, names)
+
+
 @dataclass
 class MutationResult:
     sources: Dict[str, str]
@@ -421,6 +444,7 @@ class AstMutator(VyperNodeTransformer):
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 existing_names.add(item.name)
+                _collect_local_var_names(item.body, existing_names)
             elif isinstance(item, ast.VariableDecl):
                 if isinstance(item.target, ast.Name):
                     existing_names.add(item.target.id)
