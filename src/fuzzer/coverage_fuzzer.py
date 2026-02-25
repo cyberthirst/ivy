@@ -19,11 +19,24 @@ from fuzzer.coverage.edge_map import EdgeMap
 from fuzzer.coverage.gatekeeper import Gatekeeper, had_any_successful_compile
 from fuzzer.coverage.tracker import GlobalEdgeTracker
 from fuzzer.export_utils import TestFilter, exclude_unsupported_patterns
-from fuzzer.issue_filter import IssueFilter
+from fuzzer.issue_filter import IssueFilter, default_issue_filter
 from fuzzer.runtime_engine import HarnessConfig
 from fuzzer.runner.scenario import create_scenario_from_item
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+
+def build_default_coverage_test_filter() -> TestFilter:
+    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
+    exclude_unsupported_patterns(test_filter)
+    test_filter.exclude_source(r"\bsend\s*\(")
+    test_filter.include_path("functional/codegen/")
+    test_filter.exclude_name("zero_length_side_effects")
+    return test_filter
+
+
+def build_default_coverage_issue_filter() -> IssueFilter:
+    return default_issue_filter()
 
 
 class CoverageGuidedFuzzer(BaseFuzzer):
@@ -245,15 +258,8 @@ def main():
 
     boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
 
-    test_filter = TestFilter(exclude_multi_module=True, exclude_deps=True)
-    exclude_unsupported_patterns(test_filter)
-    test_filter.exclude_source(r"\bsend\s*\(")
-    test_filter.include_path("functional/codegen/")
-    test_filter.exclude_name("zero_length_side_effects")
-
-    from fuzzer.issue_filter import default_issue_filter
-
-    issue_filter = default_issue_filter()
+    test_filter = build_default_coverage_test_filter()
+    issue_filter = build_default_coverage_issue_filter()
 
     fuzzer = CoverageGuidedFuzzer(
         issue_filter=issue_filter,
