@@ -980,7 +980,8 @@ class FuzzerReporter:
         with open(filepath, "w") as f:
             json.dump(divergence_data, f, indent=2, default=str)
 
-        logging.error(f"Divergence saved to {filepath}")
+        if subfolder != "unfiltered":
+            logging.error(f"Divergence saved to {filepath}")
 
     def save_compiler_crash(
         self,
@@ -1021,7 +1022,8 @@ class FuzzerReporter:
         with open(filepath, "w") as f:
             json.dump(crash_data, f, indent=2, default=str)
 
-        logging.error(f"Compiler crash saved to {filepath}")
+        if subfolder != "unfiltered":
+            logging.error(f"Compiler crash saved to {filepath}")
 
     def save_compilation_failure(
         self,
