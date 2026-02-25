@@ -11,6 +11,7 @@ import time
 from typing import Any, MutableSequence, Optional
 
 from fuzzer.base_fuzzer import BaseFuzzer
+from fuzzer.deduper import Deduper
 from fuzzer.coverage.collector import ArcCoverageCollector
 from fuzzer.coverage.disk_corpus import (
     DiskEntryMeta,
@@ -276,6 +277,10 @@ def _worker_main(
     max_iterations: Optional[int] = None,
     log_interval: int = _LOG_INTERVAL,
     stagnation_threshold: int = 200,
+    seen_crashes: Optional[dict[str, bool]] = None,
+    seen_compile_failures: Optional[dict[str, bool]] = None,
+    seen_compilation_timeouts: Optional[dict[str, bool]] = None,
+    seen_divergences: Optional[dict[str, bool]] = None,
 ) -> None:
     import boa  # pyright: ignore[reportMissingImports]
 
@@ -292,12 +297,20 @@ def _worker_main(
     disk_index = DiskIndex(corpus_dir)
     test_filter = _deserialize_test_filter(test_filter_config)
 
+    deduper = Deduper(
+        seen_crashes=seen_crashes,
+        seen_compile_failures=seen_compile_failures,
+        seen_compilation_timeouts=seen_compilation_timeouts,
+        seen_divergences=seen_divergences,
+    )
+
     base_fuzzer = BaseFuzzer(
         exports_dir=exports_dir,
         seed=worker_seed,
         debug_mode=False,
         issue_filter=build_default_coverage_issue_filter(),
         harness_config=harness_config,
+        deduper=deduper,
     )
     reporter = base_fuzzer.reporter
     reporter.reports_dir = reports_dir
@@ -607,6 +620,12 @@ class ParallelFuzzer:
             lock=False,
         )
 
+        self._manager = self.ctx.Manager()
+        self._shared_seen_crashes = self._manager.dict()
+        self._shared_seen_compile_failures = self._manager.dict()
+        self._shared_seen_compilation_timeouts = self._manager.dict()
+        self._shared_seen_divergences = self._manager.dict()
+
         self._worker_epochs = [0 for _ in range(self.num_workers)]
         self._test_filter_config: Optional[dict[str, Any]] = None
 
@@ -636,6 +655,10 @@ class ParallelFuzzer:
                 "min_energy": self.min_energy,
                 "max_energy": self.max_energy,
                 "max_iterations": self.max_iterations_per_worker,
+                "seen_crashes": self._shared_seen_crashes,
+                "seen_compile_failures": self._shared_seen_compile_failures,
+                "seen_compilation_timeouts": self._shared_seen_compilation_timeouts,
+                "seen_divergences": self._shared_seen_divergences,
             },
             name=f"parallel-fuzzer-worker-{worker_id}",
         )

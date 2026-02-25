@@ -25,7 +25,7 @@ Error fingerprinting uses:
 import hashlib
 import traceback
 from dataclasses import dataclass
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, Optional, Tuple
 
 from fuzzer.divergence_detector import Divergence, DivergenceType
 
@@ -104,11 +104,18 @@ class Deduper:
     COMPILE_FAILURE_FRAMES = 5
     DIVERGENCE_FRAMES = 3
 
-    def __init__(self):
-        self._seen_crashes: Set[str] = set()
-        self._seen_compile_failures: Set[str] = set()
-        self._seen_compilation_timeouts: Set[str] = set()
-        self._seen_divergences: Set[str] = set()
+    def __init__(
+        self,
+        *,
+        seen_crashes: Optional[Dict[str, bool]] = None,
+        seen_compile_failures: Optional[Dict[str, bool]] = None,
+        seen_compilation_timeouts: Optional[Dict[str, bool]] = None,
+        seen_divergences: Optional[Dict[str, bool]] = None,
+    ):
+        self._seen_crashes: Dict[str, bool] = seen_crashes if seen_crashes is not None else {}
+        self._seen_compile_failures: Dict[str, bool] = seen_compile_failures if seen_compile_failures is not None else {}
+        self._seen_compilation_timeouts: Dict[str, bool] = seen_compilation_timeouts if seen_compilation_timeouts is not None else {}
+        self._seen_divergences: Dict[str, bool] = seen_divergences if seen_divergences is not None else {}
 
     def _compute_fingerprint(self, sig: Tuple) -> str:
         """Compute blake2b fingerprint from a signature tuple."""
@@ -173,7 +180,7 @@ class Deduper:
                 fingerprint=fingerprint,
             )
 
-        self._seen_divergences.add(fingerprint)
+        self._seen_divergences[fingerprint] = True
         return KeepDecision(
             keep=True,
             reason="new_divergence",
@@ -195,7 +202,7 @@ class Deduper:
                 fingerprint=fingerprint,
             )
 
-        self._seen_crashes.add(fingerprint)
+        self._seen_crashes[fingerprint] = True
         return KeepDecision(
             keep=True,
             reason="new_crash",
@@ -217,7 +224,7 @@ class Deduper:
                 fingerprint=fingerprint,
             )
 
-        self._seen_compile_failures.add(fingerprint)
+        self._seen_compile_failures[fingerprint] = True
         return KeepDecision(
             keep=True,
             reason="new_compile_failure",
@@ -239,7 +246,7 @@ class Deduper:
                 fingerprint=fingerprint,
             )
 
-        self._seen_compilation_timeouts.add(fingerprint)
+        self._seen_compilation_timeouts[fingerprint] = True
         return KeepDecision(
             keep=True,
             reason="new_compilation_timeout",

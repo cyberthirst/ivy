@@ -72,6 +72,7 @@ class BaseFuzzer:
         debug_mode: bool = True,
         issue_filter: Optional[IssueFilter] = None,
         harness_config: HarnessConfig = HarnessConfig(),
+        deduper: Optional[Deduper] = None,
     ):
         self.exports_dir = exports_dir
         self.seed = seed if seed is not None else secrets.randbits(64)
@@ -79,7 +80,7 @@ class BaseFuzzer:
         self.rng = random.Random(self.seed)
         self.harness_config = harness_config
 
-        self.deduper = Deduper()
+        self.deduper = deduper if deduper is not None else Deduper()
         self.reporter = FuzzerReporter(seed=self.seed)
         self.issue_filter = issue_filter
         self.result_analyzer = ResultAnalyzer(self.deduper, issue_filter)
