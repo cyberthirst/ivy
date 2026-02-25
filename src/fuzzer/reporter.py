@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
+import os
+import subprocess
 import time
 import json
 import logging
@@ -425,6 +427,21 @@ class FuzzerReporter:
         return count / denominator
 
     @staticmethod
+    def _get_rss_mb() -> int:
+        """Return current RSS in megabytes, or -1 if unavailable."""
+        try:
+            # macOS/Linux/BSD: `ps` reports current RSS in KB.
+            rss_kb = int(
+                subprocess.check_output(
+                    ["ps", "-o", "rss=", "-p", str(os.getpid())],
+                    text=True,
+                ).strip()
+            )
+            return max(0, rss_kb // 1024)
+        except Exception:
+            return -1
+
+    @staticmethod
     def _resolve_error_type(
         error: Optional[Exception], error_type: Optional[str]
     ) -> str:
@@ -546,9 +563,7 @@ class FuzzerReporter:
             )
             self._pending_runtime_edges_samples += 1
 
-        contract_fingerprints = set(
-            getattr(artifacts, "contract_fingerprints", set())
-        )
+        contract_fingerprints = set(getattr(artifacts, "contract_fingerprints", set()))
         self._pending_contracts_observed_sum += len(contract_fingerprints)
         self._pending_contracts_observed_samples += 1
         new_fingerprints = contract_fingerprints.difference(
@@ -567,9 +582,7 @@ class FuzzerReporter:
             )
             self._pending_stmt_coverage_pct_samples += 1
 
-        branch_outcomes_seen = getattr(
-            artifacts, "runtime_branch_outcomes_seen", set()
-        )
+        branch_outcomes_seen = getattr(artifacts, "runtime_branch_outcomes_seen", set())
         if branch_outcomes_total:
             self._pending_branch_coverage_pct_sum += self._safe_pct(
                 len(branch_outcomes_seen), len(branch_outcomes_total)
@@ -827,6 +840,9 @@ class FuzzerReporter:
                 "compilation_timeouts_total": self.compilation_timeouts,
                 "compiler_crashes_total": self.compiler_crashes,
             },
+            "memory": {
+                "rss_mb": self._get_rss_mb(),
+            },
         }
 
         with open(self._metrics_path, "a") as f:
@@ -878,6 +894,7 @@ class FuzzerReporter:
                 coverage.get("branch_coverage_pct_interval", 0.0)
             )
 
+        rss_mb = self._get_rss_mb()
         logging.info(
             f"iter={iteration} | "
             f"seeds={corpus_seed_count} | "
@@ -889,7 +906,8 @@ class FuzzerReporter:
             f"avg_contracts={new_contracts_interval:.2f} | "
             f"avg_stmt_cov={stmt_coverage_interval:.2f}% | "
             f"avg_branch_cov={branch_coverage_interval:.2f}% | "
-            f"rate={rate:.1f}/s"
+            f"rate={rate:.1f}/s | "
+            f"rss={rss_mb}MB"
         )
 
     def print_summary(self):
