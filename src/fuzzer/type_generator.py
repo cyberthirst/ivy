@@ -16,13 +16,21 @@ from vyper.semantics.types import (
     StructT,
 )
 
+from fuzzer.mutator.name_generator import FreshNameGenerator
+
+STRUCT_NAME_PREFIX = "MyStruct"
+
 
 class TypeGenerator:
     """Generates random Vyper types for fuzzing."""
 
-    def __init__(self, rng: Optional[random.Random] = None):
+    def __init__(
+        self,
+        rng: Optional[random.Random] = None,
+        name_generator: Optional[FreshNameGenerator] = None,
+    ):
         self.rng = rng or random.Random()
-        self.struct_counter = 0
+        self.name_generator = name_generator or FreshNameGenerator()
         self.source_fragments: List[str] = []
 
         # Type categories
@@ -453,8 +461,7 @@ class TypeGenerator:
             fields[field_name] = field_type
 
         # Generate unique struct name
-        struct_name = f"MyStruct{self.struct_counter}"
-        self.struct_counter += 1
+        struct_name = self.name_generator.generate(prefix=STRUCT_NAME_PREFIX)
 
         # Create struct type
         struct_type = StructT(struct_name, fields)

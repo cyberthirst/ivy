@@ -1,22 +1,28 @@
 import copy
 import random
-from typing import List
+from typing import List, Optional
 
 from vyper.ast import nodes as ast
 from vyper.semantics.types import InterfaceT
 from vyper.semantics.types.function import ContractFunctionT, StateMutability
 
+from fuzzer.mutator.name_generator import FreshNameGenerator
+
+INTERFACE_NAME_PREFIX = "IGen"
+
 
 class InterfaceRegistry:
     """Registry for generating interfaces for external calls."""
 
-    def __init__(self, rng: random.Random):
+    def __init__(
+        self, rng: random.Random, name_generator: Optional[FreshNameGenerator] = None
+    ):
         self.rng = rng
-        self.counter = 0
+        self.name_generator = name_generator or FreshNameGenerator()
         self._interfaces: List[ast.InterfaceDef] = []
 
     def reset(self):
-        self.counter = 0
+        # name_generator is shared and reset centrally by AstMutator
         self._interfaces.clear()
 
     def _mutability_name(self, mutability: StateMutability) -> str:
@@ -52,8 +58,7 @@ class InterfaceRegistry:
 
     def create_interface(self, func: ContractFunctionT) -> tuple[str, InterfaceT]:
         """Create a fresh interface for the given function."""
-        iface_name = f"IGen{self.counter}"
-        self.counter += 1
+        iface_name = self.name_generator.generate(prefix=INTERFACE_NAME_PREFIX)
 
         func_def = self._build_interface_func_def(func)
         iface_def = ast.InterfaceDef(name=iface_name, body=[func_def])

@@ -138,7 +138,10 @@ class ExprGenerator(BaseGenerator):
             raise ValueError("hoist_to_tmp_var requires an active generation context")
 
         expr_type = self._expr_type(expr)
-        name = self.name_generator.generate(prefix=prefix)
+        if prefix is None:
+            name = self.name_generator.generate()
+        else:
+            name = self.name_generator.generate(prefix=prefix)
 
         if context.is_module_scope:
             var_info = VarInfo(

@@ -120,17 +120,22 @@ class AstMutator(VyperNodeTransformer):
         self._mutation_targets: set[int] = set()
         self._candidate_selector = CandidateSelector(rng)
         self.context = GenerationContext()
-        self.name_generator = FreshNameGenerator(prefix="gen_var")
+        self.name_generator = FreshNameGenerator()
         self.literal_generator = LiteralGenerator(rng)
         self.value_mutator = ValueMutator(rng)
         # Type generator for random types
-        self.type_generator = TypeGenerator(rng)
+        self.type_generator = TypeGenerator(rng, name_generator=self.name_generator)
         # Function registry for tracking and generating functions
         self.function_registry = FunctionRegistry(
-            self.rng, max_initial_functions=5, max_dynamic_functions=5
+            self.rng,
+            max_initial_functions=5,
+            max_dynamic_functions=5,
+            name_generator=self.name_generator,
         )
         # Interface registry for external calls
-        self.interface_registry = InterfaceRegistry(self.rng)
+        self.interface_registry = InterfaceRegistry(
+            self.rng, name_generator=self.name_generator
+        )
         # Expression generator with function and interface registries
         self.expr_generator = ExprGenerator(
             self.literal_generator,
@@ -260,7 +265,6 @@ class AstMutator(VyperNodeTransformer):
         self.context = GenerationContext()
         self.context.scope_stack.append(self.context.current_scope)  # keep module scope
         self.name_generator.reset()
-        self.type_generator.struct_counter = 0
         self.type_generator.source_fragments = []
         self.expr_generator.reset_state()
         self.function_registry.reset()
@@ -361,6 +365,7 @@ class AstMutator(VyperNodeTransformer):
             bool(getattr(settings, "nonreentrancy_by_default", False))
         )
         function_types: List[ContractFunctionT] = []
+        import_aliases: set[str] = set()
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
                 # Register existing function in the registry
@@ -393,6 +398,9 @@ class AstMutator(VyperNodeTransformer):
 
             elif isinstance(item, (ast.Import, ast.ImportFrom)):
                 for info in item._metadata.get("import_infos", []):
+                    alias = getattr(info, "alias", None)
+                    if isinstance(alias, str):
+                        import_aliases.add(alias)
                     if isinstance(info.typ, InterfaceT):
                         self.context.interface_aliases[info.typ._id] = info.alias
 
@@ -404,6 +412,27 @@ class AstMutator(VyperNodeTransformer):
                     callee_t.name,
                     internal=True,
                 )
+
+        existing_names: set[str] = set()
+        existing_names.update(self.context.all_vars.keys())
+        existing_names.update(self.function_registry.functions.keys())
+        existing_names.update(import_aliases)
+        existing_names.update(self.context.interface_aliases.values())
+        for item in node.body:
+            if isinstance(item, ast.FunctionDef):
+                existing_names.add(item.name)
+            elif isinstance(item, ast.VariableDecl):
+                if isinstance(item.target, ast.Name):
+                    existing_names.add(item.target.id)
+            elif isinstance(item, ast.StructDef):
+                existing_names.add(item.name)
+            elif isinstance(item, ast.InterfaceDef):
+                existing_names.add(item.name)
+            elif isinstance(item, ast.EventDef):
+                existing_names.add(item.name)
+            elif isinstance(item, ast.FlagDef):
+                existing_names.add(item.name)
+        self.name_generator.reset(existing_names)
 
     def visit_VariableDecl(self, node: ast.VariableDecl):
         # VariableDecl is module-level only (storage, immutables, transient, constants).

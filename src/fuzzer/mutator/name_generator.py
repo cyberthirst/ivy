@@ -2,14 +2,19 @@ from __future__ import annotations
 
 
 class FreshNameGenerator:
-    def __init__(self, prefix: str = "gen_var"):
-        self.prefix = prefix
-        self.counter = 0
+    def __init__(self):
+        self._counters: dict[str, int] = {}
+        self._existing_names: set[str] = set()
 
-    def generate(self, prefix: str | None = None) -> str:
-        name = f"{prefix or self.prefix}{self.counter}"
-        self.counter += 1
-        return name
+    def generate(self, prefix: str = "gen_var") -> str:
+        counter = self._counters.get(prefix, 0)
+        while True:
+            name = f"{prefix}{counter}"
+            counter += 1
+            if name not in self._existing_names:
+                self._counters[prefix] = counter
+                return name
 
-    def reset(self) -> None:
-        self.counter = 0
+    def reset(self, existing_names: set[str] | None = None) -> None:
+        self._counters.clear()
+        self._existing_names = existing_names or set()

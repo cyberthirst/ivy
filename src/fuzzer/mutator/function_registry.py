@@ -22,19 +22,11 @@ from vyper.builtins._signatures import BuiltinFunctionT
 from vyper.ast import nodes as ast
 
 from fuzzer.mutator.convert_utils import convert_target_supported
+from fuzzer.mutator.name_generator import FreshNameGenerator
 
 KWARG_PLACEHOLDER_TAG = "kwarg_placeholder"
 
-
-class FreshFunctionNameGenerator:
-    def __init__(self, prefix: str = "gen_func"):
-        self.prefix = prefix
-        self.counter = 0
-
-    def generate(self) -> str:
-        name = f"{self.prefix}_{self.counter}"
-        self.counter += 1
-        return name
+FUNC_NAME_PREFIX = "gen_func_"
 
 
 class FunctionRegistry:
@@ -46,6 +38,7 @@ class FunctionRegistry:
         nonreentrant_external_prob: float = 0.04,
         nonreentrant_internal_prob: float = 0.01,
         nonreentrancy_by_default: bool = False,
+        name_generator: Optional[FreshNameGenerator] = None,
     ):
         self.rng = rng
         self.functions: Dict[str, ContractFunctionT] = {}
@@ -59,7 +52,7 @@ class FunctionRegistry:
         self.current_function: Optional[str] = (
             None  # Track which function we're currently generating
         )
-        self.name_generator = FreshFunctionNameGenerator()
+        self.name_generator = name_generator or FreshNameGenerator()
         # Separate budgets for initial (generate mode) and dynamic (during generation)
         self.max_initial_functions = max_initial_functions
         self.max_dynamic_functions = max_dynamic_functions
@@ -434,7 +427,7 @@ class FunctionRegistry:
                 return None
             self.dynamic_count += 1
 
-        name = self.name_generator.generate()
+        name = self.name_generator.generate(prefix=FUNC_NAME_PREFIX)
         positional_args = self._generate_positional_args(type_generator, max_args)
         keyword_args: List[KeywordArg] = []
         if max_kwargs > 0:
@@ -696,7 +689,7 @@ class FunctionRegistry:
         self.call_graph.clear()
         self.internal_call_graph.clear()
         self.current_function = None
-        self.name_generator.counter = 0
+        # name_generator is shared and reset centrally by AstMutator
         self.initial_count = 0
         self.dynamic_count = 0
         self._reachable_from_nonreentrant.clear()
