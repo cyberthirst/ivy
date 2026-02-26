@@ -766,8 +766,8 @@ requires-dist = [
     { name = "pytest-xdist", marker = "extra == 'dev'", specifier = ">=3.6.1" },
     { name = "rlp", specifier = ">=4.1.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.4" },
-    { name = "titanoboa", marker = "extra == 'dev'", git = "https://github.com/cyberthirst/titanoboa.git?rev=b474d27018fb6e37dcadc071f579e7806ecaae21" },
-    { name = "vyper", git = "https://github.com/cyberthirst/vyper.git?rev=9414245b6b412244c422e796687819e4593ee741" },
+    { name = "titanoboa", marker = "extra == 'dev'", git = "https://github.com/cyberthirst/titanoboa.git?rev=3132f72a2d8657090bb891886574d2d6bb632464" },
+    { name = "vyper", git = "https://github.com/cyberthirst/vyper.git?rev=223d9277c6b583a150e99fb502a8472294bf3c12" },
 ]
 provides-extras = ["dev"]
 
@@ -1533,7 +1533,7 @@ wheels = [
 [[package]]
 name = "titanoboa"
 version = "0.2.8"
-source = { git = "https://github.com/cyberthirst/titanoboa.git?rev=b474d27018fb6e37dcadc071f579e7806ecaae21#b474d27018fb6e37dcadc071f579e7806ecaae21" }
+source = { git = "https://github.com/cyberthirst/titanoboa.git?rev=3132f72a2d8657090bb891886574d2d6bb632464#3132f72a2d8657090bb891886574d2d6bb632464" }
 dependencies = [
     { name = "eth-abi" },
     { name = "eth-account" },
@@ -1669,7 +1669,7 @@ wheels = [
 [[package]]
 name = "vyper"
 version = "0.4.4"
-source = { git = "https://github.com/cyberthirst/vyper.git?rev=9414245b6b412244c422e796687819e4593ee741#9414245b6b412244c422e796687819e4593ee741" }
+source = { git = "https://github.com/cyberthirst/vyper.git?rev=223d9277c6b583a150e99fb502a8472294bf3c12#223d9277c6b583a150e99fb502a8472294bf3c12" }
 dependencies = [
     { name = "cbor2" },
     { name = "immutables" },
