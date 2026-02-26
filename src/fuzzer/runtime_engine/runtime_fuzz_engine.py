@@ -442,14 +442,15 @@ class RuntimeFuzzEngine:
 
             deployment_result = trace_result.result
             assert isinstance(deployment_result, DeploymentResult)
-            stats.record_deployment_result(deployment_result)
 
             if deployment_result.success:
+                stats.record_deployment_result(deployment_result)
                 if use_python_args and trace.python_args is not None:
                     trace.python_args["kwargs"] = dict(base_kwargs)
                 return trace_result
 
             if deployment_result.error_phase == "compile":
+                stats.record_deployment_result(deployment_result)
                 return trace_result
 
             if attempt + 1 < attempt_budget:
@@ -457,6 +458,8 @@ class RuntimeFuzzEngine:
                 self.runner._set_balance(sender, balance_before)
 
         assert last_trace_result is not None
+        assert isinstance(last_trace_result.result, DeploymentResult)
+        stats.record_deployment_result(last_trace_result.result)
         return last_trace_result
 
     def _execute_call_and_measure(
