@@ -54,7 +54,7 @@ def _atomic_write_bytes(path: Path, payload: bytes) -> None:
 def _meta_from_dict(entry_id: str, data: dict[str, Any]) -> "DiskEntryMeta":
     return DiskEntryMeta(
         entry_id=entry_id,
-        compile_time_s=float(data["compile_time_s"]),
+        cycle_time_s=float(data["cycle_time_s"]),
         source_size=int(data["source_size"]),
         generation=int(data["generation"]),
         keep_forever=bool(data["keep_forever"]),
@@ -68,7 +68,7 @@ def _meta_from_dict(entry_id: str, data: dict[str, Any]) -> "DiskEntryMeta":
 @dataclass(frozen=True)
 class DiskEntryMeta:
     entry_id: str
-    compile_time_s: float
+    cycle_time_s: float
     source_size: int
     generation: int
     keep_forever: bool
@@ -151,7 +151,7 @@ class DiskIndex:
         *,
         coverage_fp: str,
         source_size: int,
-        compile_time_s: float,
+        cycle_time_s: float,
     ) -> bool:
         reps = self._reps.get(coverage_fp)
         if not reps:
@@ -161,7 +161,7 @@ class DiskIndex:
         fastest = reps.get("fastest")
         if smallest is None or source_size < smallest.source_size:
             return True
-        if fastest is None or compile_time_s < fastest.compile_time_s:
+        if fastest is None or cycle_time_s < fastest.cycle_time_s:
             return True
         return False
 
@@ -177,7 +177,7 @@ class DiskIndex:
         fastest = reps.get("fastest")
         if smallest is None or meta.source_size < smallest.source_size:
             reps["smallest"] = meta
-        if fastest is None or meta.compile_time_s < fastest.compile_time_s:
+        if fastest is None or meta.cycle_time_s < fastest.cycle_time_s:
             reps["fastest"] = meta
 
     def _rebuild_representatives(self) -> None:
@@ -191,7 +191,7 @@ def write_corpus_entry(
     *,
     scenario: Scenario,
     edge_ids: set[int],
-    compile_time_s: float,
+    cycle_time_s: float,
     source_size: int,
     generation: int,
     keep_forever: bool,
@@ -217,7 +217,7 @@ def write_corpus_entry(
 
     meta_payload = json.dumps(
         {
-            "compile_time_s": float(compile_time_s),
+            "cycle_time_s": float(cycle_time_s),
             "source_size": int(source_size),
             "generation": int(generation),
             "keep_forever": bool(keep_forever),
@@ -291,7 +291,7 @@ def tournament_select(
         for edge_id in edge_ids:
             rare_score += 1.0 / (edge_counts[edge_id] + 1.0)
 
-        score = rare_score / max(candidate.compile_time_s, _EPS)
+        score = rare_score / max(candidate.cycle_time_s, _EPS)
         scored.append((score, candidate))
 
     for _, candidate in sorted(scored, key=lambda x: x[0], reverse=True):

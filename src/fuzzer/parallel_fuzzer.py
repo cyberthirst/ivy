@@ -184,6 +184,7 @@ def _bootstrap_worker(
                 continue
 
             processed += 1
+            cycle_start = time.perf_counter()
             scenario = create_scenario_from_item(item, use_python_args=True)
             scenario_seed = _derive_seed(worker_seed, "bootstrap", processed)
 
@@ -200,6 +201,7 @@ def _bootstrap_worker(
                 seed=scenario_seed,
                 coverage_collector=collector,
             )
+            cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
             reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
@@ -233,7 +235,7 @@ def _bootstrap_worker(
                 corpus_dir,
                 scenario=scenario,
                 edge_ids=edge_ids,
-                compile_time_s=max(collector.compile_time_s, _EPS),
+                cycle_time_s=cycle_time_s,
                 source_size=_scenario_source_size(scenario),
                 generation=0,
                 keep_forever=True,
@@ -440,6 +442,7 @@ def _worker_main(
                     worker_seed, "cov", batch_id, e_idx, iteration
                 )
 
+                cycle_start = time.perf_counter()
                 mutated = base_fuzzer.mutate_scenario(
                     parent_scenario, scenario_seed=scenario_seed
                 )
@@ -457,23 +460,23 @@ def _worker_main(
                     seed=scenario_seed,
                     coverage_collector=collector,
                 )
+                cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
                 reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
-                compile_time_s = max(collector.compile_time_s, _EPS)
                 coverage_fp = coverage_fingerprint(edge_ids)
                 source_size = _scenario_source_size(mutated)
 
                 decision = gatekeeper.decide_and_update(
                     edge_ids=edge_ids,
-                    compile_time_s=compile_time_s,
+                    cycle_time_s=cycle_time_s,
                     analysis=artifacts.analysis,
                     ivy_result=artifacts.ivy_result,
                     improves_representative=disk_index.improves_representative(
                         coverage_fp=coverage_fp,
                         source_size=source_size,
-                        compile_time_s=compile_time_s,
+                        cycle_time_s=cycle_time_s,
                     ),
                     coverage_fp=coverage_fp,
                 )
@@ -483,7 +486,7 @@ def _worker_main(
                         corpus_dir,
                         scenario=mutated,
                         edge_ids=edge_ids,
-                        compile_time_s=compile_time_s,
+                        cycle_time_s=cycle_time_s,
                         source_size=source_size,
                         generation=generation,
                         keep_forever=decision.reason in ("issue", "new_edge"),
@@ -702,7 +705,7 @@ class ParallelFuzzer:
             keep_ids = {entry.entry_id for entry in entries if entry.keep_forever}
 
             smallest = min(entries, key=lambda e: e.source_size)
-            fastest = min(entries, key=lambda e: e.compile_time_s)
+            fastest = min(entries, key=lambda e: e.cycle_time_s)
             keep_ids.add(smallest.entry_id)
             keep_ids.add(fastest.entry_id)
 

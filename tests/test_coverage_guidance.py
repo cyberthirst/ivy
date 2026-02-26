@@ -108,7 +108,7 @@ def test_gatekeeper_accepts_new_edges_and_updates_global_counts():
 
     decision = gatekeeper.decide_and_update(
         edge_ids={1, 2, 3},
-        compile_time_s=0.01,
+        cycle_time_s=0.01,
         analysis=analysis,
         ivy_result=ivy_result,
         boa_results=boa_results,
@@ -156,7 +156,7 @@ def test_gatekeeper_rejects_when_all_boa_configs_fail_compile():
 
     decision = gatekeeper.decide_and_update(
         edge_ids=set(),
-        compile_time_s=0.01,
+        cycle_time_s=0.01,
         analysis=AnalysisResult(),
         ivy_result=ivy_result,
         boa_results=boa_results,

@@ -64,7 +64,7 @@ class Gatekeeper:
         self,
         *,
         edge_ids: Optional[Set[int]],
-        compile_time_s: Optional[float],
+        cycle_time_s: Optional[float],
         analysis: AnalysisResult,
         ivy_result: ScenarioResult,
         boa_results: Optional[Dict[str, Tuple[object, ScenarioResult]]] = None,
@@ -86,7 +86,7 @@ class Gatekeeper:
                 selection_weight=0.0,
             )
 
-        if edge_ids is None or compile_time_s is None:
+        if edge_ids is None or cycle_time_s is None:
             self._tracker.merge(edge_ids or set())
             fp = coverage_fp or coverage_fingerprint(edge_ids or set())
             return GatekeeperDecision(
@@ -101,7 +101,7 @@ class Gatekeeper:
         fp = coverage_fp or coverage_fingerprint(edge_ids)
 
         rare_edge_score = self._tracker.compute_rare_score(edge_ids)
-        selection_weight = rare_edge_score / max(compile_time_s, self._eps)
+        selection_weight = rare_edge_score / max(cycle_time_s, self._eps)
         new_edges = self._tracker.merge(edge_ids)
 
         if is_issue:
