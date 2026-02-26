@@ -28,7 +28,6 @@ from fuzzer.coverage.edge_map import EdgeMap
 from fuzzer.coverage.gatekeeper import (
     Gatekeeper,
     coverage_fingerprint,
-    had_any_successful_compile,
 )
 from fuzzer.coverage.shared_tracker import SharedEdgeTracker, create_shared_edge_counts
 from fuzzer.export_utils import (
@@ -150,6 +149,50 @@ def _hash_collected_arcs(
     return edge_map.hash_arcs(collector.get_scenario_arcs())
 
 
+def _admit_to_corpus(
+    *,
+    scenario: Scenario,
+    artifacts: Any,
+    edge_ids: set[int],
+    cycle_time_s: float,
+    generation: int,
+    worker_id: int,
+    gatekeeper: Gatekeeper,
+    disk_index: DiskIndex,
+    corpus_dir: Path,
+) -> bool:
+    coverage_fp = coverage_fingerprint(edge_ids)
+    source_size = _scenario_source_size(scenario)
+
+    decision = gatekeeper.decide_and_update(
+        edge_ids=edge_ids,
+        cycle_time_s=cycle_time_s,
+        analysis=artifacts.analysis,
+        ivy_result=artifacts.ivy_result,
+        improves_representative=disk_index.improves_representative(
+            coverage_fp=coverage_fp,
+            source_size=source_size,
+            cycle_time_s=cycle_time_s,
+        ),
+        coverage_fp=coverage_fp,
+    )
+    if not decision.accept:
+        return False
+
+    write_corpus_entry(
+        corpus_dir,
+        scenario=scenario,
+        edge_ids=edge_ids,
+        cycle_time_s=cycle_time_s,
+        source_size=source_size,
+        generation=generation,
+        coverage_fp=decision.coverage_fingerprint,
+        worker_id=worker_id,
+    )
+    disk_index.scan_new()
+    return True
+
+
 def _bootstrap_worker(
     *,
     worker_id: int,
@@ -158,7 +201,8 @@ def _bootstrap_worker(
     test_filter: Optional[TestFilter],
     collector: ArcCoverageCollector,
     edge_map: EdgeMap,
-    tracker: SharedEdgeTracker,
+    gatekeeper: Gatekeeper,
+    disk_index: DiskIndex,
     corpus_dir: Path,
     stop_event: Any,
     last_progress_ts: MutableSequence[float],
@@ -199,43 +243,19 @@ def _bootstrap_worker(
 
             reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
-            if not had_any_successful_compile(artifacts.ivy_result):
-                _touch_heartbeat(
-                    worker_id,
-                    last_progress_ts,
-                    last_iter,
-                    worker_state,
-                    iteration=processed,
-                    state=_STATE_BOOTSTRAPPING,
-                )
-                continue
-
             edge_ids = _hash_collected_arcs(collector, edge_map)
-            if not edge_ids and not (
-                artifacts.analysis.crashes or artifacts.analysis.divergences
-            ):
-                _touch_heartbeat(
-                    worker_id,
-                    last_progress_ts,
-                    last_iter,
-                    worker_state,
-                    iteration=processed,
-                    state=_STATE_BOOTSTRAPPING,
-                )
-                continue
-
-            tracker.merge(edge_ids)
-            write_corpus_entry(
-                corpus_dir,
+            if _admit_to_corpus(
                 scenario=scenario,
+                artifacts=artifacts,
                 edge_ids=edge_ids,
                 cycle_time_s=cycle_time_s,
-                source_size=_scenario_source_size(scenario),
                 generation=0,
-                coverage_fp=coverage_fingerprint(edge_ids),
                 worker_id=worker_id,
-            )
-            added += 1
+                gatekeeper=gatekeeper,
+                disk_index=disk_index,
+                corpus_dir=corpus_dir,
+            ):
+                added += 1
             _touch_heartbeat(
                 worker_id,
                 last_progress_ts,
@@ -345,7 +365,8 @@ def _worker_main(
                 test_filter=test_filter,
                 collector=collector,
                 edge_map=edge_map,
-                tracker=tracker,
+                gatekeeper=gatekeeper,
+                disk_index=disk_index,
                 corpus_dir=corpus_dir,
                 stop_event=stop_event,
                 last_progress_ts=last_progress_ts,
@@ -457,34 +478,17 @@ def _worker_main(
                 reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
-                coverage_fp = coverage_fingerprint(edge_ids)
-                source_size = _scenario_source_size(mutated)
-
-                decision = gatekeeper.decide_and_update(
+                if _admit_to_corpus(
+                    scenario=mutated,
+                    artifacts=artifacts,
                     edge_ids=edge_ids,
                     cycle_time_s=cycle_time_s,
-                    analysis=artifacts.analysis,
-                    ivy_result=artifacts.ivy_result,
-                    improves_representative=disk_index.improves_representative(
-                        coverage_fp=coverage_fp,
-                        source_size=source_size,
-                        cycle_time_s=cycle_time_s,
-                    ),
-                    coverage_fp=coverage_fp,
-                )
-
-                if decision.accept:
-                    write_corpus_entry(
-                        corpus_dir,
-                        scenario=mutated,
-                        edge_ids=edge_ids,
-                        cycle_time_s=cycle_time_s,
-                        source_size=source_size,
-                        generation=generation,
-                        coverage_fp=decision.coverage_fingerprint,
-                        worker_id=worker_id,
-                    )
-                    disk_index.scan_new()
+                    generation=generation,
+                    worker_id=worker_id,
+                    gatekeeper=gatekeeper,
+                    disk_index=disk_index,
+                    corpus_dir=corpus_dir,
+                ):
                     iters_since_accept = 0
                 else:
                     iters_since_accept += 1
