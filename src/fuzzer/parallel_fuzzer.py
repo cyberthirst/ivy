@@ -97,50 +97,6 @@ def _touch_heartbeat(
         worker_state[worker_id] = state
 
 
-def _serialize_test_filter(
-    test_filter: Optional[TestFilter],
-) -> Optional[dict[str, Any]]:
-    if test_filter is None:
-        return None
-    return {
-        "exclude_multi_module": test_filter.exclude_multi_module,
-        "exclude_deps": test_filter.exclude_deps,
-        "path_includes": [p.pattern for p in test_filter.path_includes],
-        "path_excludes": [p.pattern for p in test_filter.path_excludes],
-        "source_excludes": [p.pattern for p in test_filter.source_excludes],
-        "source_includes": [p.pattern for p in test_filter.source_includes],
-        "name_includes": [p.pattern for p in test_filter.name_includes],
-        "name_excludes": [p.pattern for p in test_filter.name_excludes],
-    }
-
-
-def _deserialize_test_filter(
-    data: Optional[dict[str, Any]],
-) -> Optional[TestFilter]:
-    if data is None:
-        return None
-
-    test_filter = TestFilter(
-        exclude_multi_module=bool(data.get("exclude_multi_module", False)),
-        exclude_deps=bool(data.get("exclude_deps", False)),
-    )
-
-    for pattern in data.get("path_includes", []):
-        test_filter.include_path(str(pattern))
-    for pattern in data.get("path_excludes", []):
-        test_filter.exclude_path(str(pattern))
-    for pattern in data.get("source_excludes", []):
-        test_filter.exclude_source(str(pattern))
-    for pattern in data.get("source_includes", []):
-        test_filter.include_source(str(pattern))
-    for pattern in data.get("name_includes", []):
-        test_filter.include_name(str(pattern))
-    for pattern in data.get("name_excludes", []):
-        test_filter.exclude_name(str(pattern))
-
-    return test_filter
-
-
 def _hash_collected_arcs(
     collector: ArcCoverageCollector, edge_map: EdgeMap
 ) -> set[int]:
@@ -278,7 +234,7 @@ def _worker_main(
     exports_dir: Path,
     seed: int,
     worker_epoch: int,
-    test_filter_config: Optional[dict[str, Any]],
+    test_filter: Optional[TestFilter],
     stop_event: Any,
     last_progress_ts: MutableSequence[float],
     last_iter: MutableSequence[int],
@@ -309,8 +265,6 @@ def _worker_main(
     tracker = SharedEdgeTracker(shared_counts, map_size)
     gatekeeper = Gatekeeper(tracker=tracker)  # pyright: ignore[reportArgumentType]
     disk_index = DiskIndex(corpus_dir)
-    test_filter = _deserialize_test_filter(test_filter_config)
-
     deduper = Deduper(
         seen_crashes=seen_crashes,
         seen_compile_failures=seen_compile_failures,
@@ -625,7 +579,7 @@ class ParallelFuzzer:
         self._shared_seen_divergences = self._manager.dict()
 
         self._worker_epochs = [0 for _ in range(self.num_workers)]
-        self._test_filter_config: Optional[dict[str, Any]] = None
+        self._test_filter: Optional[TestFilter] = None
 
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         (self.corpus_dir / "queue").mkdir(parents=True, exist_ok=True)
@@ -642,7 +596,7 @@ class ParallelFuzzer:
                 "exports_dir": self.exports_dir,
                 "seed": self.seed,
                 "worker_epoch": self._worker_epochs[worker_id],
-                "test_filter_config": self._test_filter_config,
+                "test_filter": self._test_filter,
                 "stop_event": self.stop_event,
                 "last_progress_ts": self.last_progress_ts,
                 "last_iter": self.last_iter,
@@ -764,7 +718,7 @@ class ParallelFuzzer:
         return restarted
 
     def run(self, test_filter: Optional[TestFilter] = None) -> None:
-        self._test_filter_config = _serialize_test_filter(test_filter)
+        self._test_filter = test_filter
 
         queue_has_entries = any((self.corpus_dir / "queue").glob("*.meta.json"))
         if queue_has_entries:
