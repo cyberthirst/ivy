@@ -74,12 +74,6 @@ def build_default_coverage_issue_filter() -> IssueFilter:
     return default_issue_filter()
 
 
-def _disable_alarm_timeouts() -> None:
-    from fuzzer import compilation as fuzzer_compilation
-
-    fuzzer_compilation.compilation_timeout.__defaults__ = (0,)  # pyright: ignore[reportAttributeAccessIssue]
-
-
 def _derive_seed(seed: int, *parts: object) -> int:
     h = hashlib.blake2b(digest_size=16)
     h.update(str(seed).encode("utf-8"))
@@ -287,7 +281,6 @@ def _worker_main(
     import boa  # pyright: ignore[reportMissingImports]
 
     boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
-    _disable_alarm_timeouts()
 
     worker_seed = _derive_seed(seed, "worker", worker_id, worker_epoch)
     rng = random.Random(worker_seed)
