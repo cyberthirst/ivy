@@ -57,7 +57,6 @@ def _meta_from_dict(entry_id: str, data: dict[str, Any]) -> "DiskEntryMeta":
         cycle_time_s=float(data["cycle_time_s"]),
         source_size=int(data["source_size"]),
         generation=int(data["generation"]),
-        keep_forever=bool(data["keep_forever"]),
         coverage_fp=str(data["coverage_fp"]),
         n_edges=int(data["n_edges"]),
         timestamp=float(data["timestamp"]),
@@ -71,7 +70,6 @@ class DiskEntryMeta:
     cycle_time_s: float
     source_size: int
     generation: int
-    keep_forever: bool
     coverage_fp: str
     n_edges: int
     timestamp: float
@@ -194,7 +192,6 @@ def write_corpus_entry(
     cycle_time_s: float,
     source_size: int,
     generation: int,
-    keep_forever: bool,
     coverage_fp: str,
     worker_id: int,
     timestamp: Optional[float] = None,
@@ -220,7 +217,6 @@ def write_corpus_entry(
             "cycle_time_s": float(cycle_time_s),
             "source_size": int(source_size),
             "generation": int(generation),
-            "keep_forever": bool(keep_forever),
             "coverage_fp": coverage_fp,
             "n_edges": len(ordered_edges),
             "timestamp": float(timestamp),

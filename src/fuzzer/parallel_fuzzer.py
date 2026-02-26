@@ -232,7 +232,6 @@ def _bootstrap_worker(
                 cycle_time_s=cycle_time_s,
                 source_size=_scenario_source_size(scenario),
                 generation=0,
-                keep_forever=True,
                 coverage_fp=coverage_fingerprint(edge_ids),
                 worker_id=worker_id,
             )
@@ -482,7 +481,6 @@ def _worker_main(
                         cycle_time_s=cycle_time_s,
                         source_size=source_size,
                         generation=generation,
-                        keep_forever=decision.reason in ("issue", "new_edge"),
                         coverage_fp=decision.coverage_fingerprint,
                         worker_id=worker_id,
                     )
@@ -695,8 +693,7 @@ class ParallelFuzzer:
 
         to_delete: list[str] = []
         for entries in by_fp.values():
-            keep_ids = {entry.entry_id for entry in entries if entry.keep_forever}
-
+            keep_ids: set[str] = set()
             smallest = min(entries, key=lambda e: e.source_size)
             fastest = min(entries, key=lambda e: e.cycle_time_s)
             keep_ids.add(smallest.entry_id)
@@ -712,7 +709,7 @@ class ParallelFuzzer:
         ]
         if len(remaining) > self.max_corpus_size:
             evictable = sorted(
-                [entry for entry in remaining if not entry.keep_forever],
+                remaining,
                 key=lambda e: e.timestamp,
             )
             excess = len(remaining) - self.max_corpus_size
