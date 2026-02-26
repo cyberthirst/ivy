@@ -193,6 +193,13 @@ class ArcCoverageCollector:
         cov = self._get_coverage()
 
         # Clear data from previous collection (reusing the Coverage instance).
+        # Workaround for https://github.com/coveragepy/coveragepy/issues/2138:
+        # erase() skips closing in-memory SQLite connections in no_disk mode,
+        # leaking ~130 KB per cycle.
+        # See also https://github.com/coveragepy/coveragepy/issues/2139 for
+        # a clear_data() API that would avoid needing erase() entirely.
+        if cov._data is not None:
+            cov._data.close(force=True)
         cov.erase()
 
         self._active = True
