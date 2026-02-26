@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 from pathlib import Path
 import random
+import resource
 import time
 from typing import Any, MutableSequence, Optional
 
@@ -50,6 +51,16 @@ _STATE_IDLE = 0
 _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
+
+
+def _apply_memory_limit(limit_bytes: int, worker_id: int) -> None:
+    try:
+        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
+        logger.info(
+            f"[w{worker_id}] memory limit set to {limit_bytes / 1024**3:.1f} GiB"
+        )
+    except (ValueError, OSError) as exc:
+        logger.warning(f"[w{worker_id}] failed to set memory limit: {exc}")
 
 
 def _scenario_source_size(scenario: Scenario) -> int:
@@ -252,7 +263,11 @@ def _worker_main(
     seen_compile_failures: Optional[dict[str, bool]] = None,
     seen_compilation_timeouts: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
+    worker_memory_limit: Optional[int] = None,
 ) -> None:
+    if worker_memory_limit is not None:
+        _apply_memory_limit(worker_memory_limit, worker_id)
+
     import boa  # pyright: ignore[reportMissingImports]
 
     boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
@@ -379,9 +394,7 @@ def _worker_main(
                 energy = rng.randint(min_energy, max_energy)
                 generation = 1
             else:
-                parent = select_parent(
-                    disk_index, corpus_dir, shared_counts, rng, k=8
-                )
+                parent = select_parent(disk_index, corpus_dir, shared_counts, rng, k=8)
                 if parent is None:
                     _touch_heartbeat(
                         worker_id,
@@ -533,6 +546,7 @@ class ParallelFuzzer:
         max_runtime_s: Optional[float] = None,
         max_iterations_per_worker: Optional[int] = None,
         reports_dir: Path = Path("reports"),
+        worker_memory_limit: Optional[int] = None,
     ):
         self.exports_dir = Path(exports_dir)
         self.corpus_dir = Path(corpus_dir)
@@ -551,6 +565,7 @@ class ParallelFuzzer:
         self.max_runtime_s = max_runtime_s
         self.max_iterations_per_worker = max_iterations_per_worker
         self.reports_dir = Path(reports_dir)
+        self.worker_memory_limit = worker_memory_limit
 
         self.ctx = multiprocessing.get_context("spawn")
         self.stop_event = self.ctx.Event()
@@ -611,6 +626,7 @@ class ParallelFuzzer:
                 "seen_compile_failures": self._shared_seen_compile_failures,
                 "seen_compilation_timeouts": self._shared_seen_compilation_timeouts,
                 "seen_divergences": self._shared_seen_divergences,
+                "worker_memory_limit": self.worker_memory_limit,
             },
             name=f"parallel-fuzzer-worker-{worker_id}",
         )
@@ -727,9 +743,15 @@ class ParallelFuzzer:
                 for i, count in enumerate(snapshot):
                     self.shared_counts[i] = count
 
+        mem_str = (
+            f"{self.worker_memory_limit / 1024**3:.1f} GiB"
+            if self.worker_memory_limit is not None
+            else "unlimited"
+        )
         logger.info(
             f"starting {self.num_workers} workers, seed={self.seed}, "
-            f"corpus={self.corpus_dir}, reports={self.reports_dir}"
+            f"corpus={self.corpus_dir}, reports={self.reports_dir}, "
+            f"worker_memory_limit={mem_str}"
         )
 
         workers = [
@@ -801,7 +823,25 @@ def main() -> None:
     parser.add_argument("--max-corpus-size", type=int, default=10_000)
     parser.add_argument("--max-runtime-s", type=float, default=None)
     parser.add_argument("--max-iterations-per-worker", type=int, default=None)
+    parser.add_argument(
+        "--available-memory-mb",
+        type=int,
+        default=None,
+        help="Total memory budget in MiB; divided across workers with a 2 GiB OS reserve",
+    )
     args = parser.parse_args()
+
+    if args.num_workers < 1:
+        parser.error("--num-workers must be >= 1")
+    if args.available_memory_mb is not None and args.available_memory_mb <= 0:
+        parser.error("--available-memory-mb must be > 0")
+
+    worker_memory_limit: Optional[int] = None
+    if args.available_memory_mb is not None:
+        total = args.available_memory_mb * 1024**2
+        reserve = 2 * 1024**3
+        usable = max(total - reserve, total // 2)
+        worker_memory_limit = usable // args.num_workers
 
     fuzzer = ParallelFuzzer(
         exports_dir=args.exports_dir,
@@ -813,6 +853,7 @@ def main() -> None:
         max_runtime_s=args.max_runtime_s,
         max_iterations_per_worker=args.max_iterations_per_worker,
         reports_dir=args.reports_dir,
+        worker_memory_limit=worker_memory_limit,
     )
     fuzzer.run(test_filter=build_default_coverage_test_filter())
 
