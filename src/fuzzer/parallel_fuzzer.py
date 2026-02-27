@@ -192,6 +192,7 @@ def _bootstrap_worker(
 
     added = 0
     processed = 0
+    failed = 0
     for item_index, item in enumerate(bootstrap_items):
         if item_index % bootstrap_shard_count != bootstrap_shard_index:
             continue
@@ -199,51 +200,60 @@ def _bootstrap_worker(
             return added
 
         processed += 1
-        cycle_start = time.perf_counter()
-        scenario = create_scenario_from_item(item, use_python_args=True)
-        scenario_seed = _derive_seed(worker_seed, "bootstrap", item_index)
+        try:
+            cycle_start = time.perf_counter()
+            scenario = create_scenario_from_item(item, use_python_args=True)
+            scenario_seed = _derive_seed(worker_seed, "bootstrap", item_index)
 
-        reporter.set_context(
-            f"w{worker_id}_bootstrap_{processed}",
-            processed,
-            worker_seed,
-            scenario_seed,
-        )
+            reporter.set_context(
+                f"w{worker_id}_bootstrap_{processed}",
+                processed,
+                worker_seed,
+                scenario_seed,
+            )
 
-        collector.start_scenario()
-        artifacts = base_fuzzer.run_scenario_with_artifacts(
-            scenario,
-            seed=scenario_seed,
-            coverage_collector=collector,
-        )
-        cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
+            collector.start_scenario()
+            artifacts = base_fuzzer.run_scenario_with_artifacts(
+                scenario,
+                seed=scenario_seed,
+                coverage_collector=collector,
+            )
+            cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-        reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
+            reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
-        edge_ids = _hash_collected_arcs(collector, edge_map)
-        if _admit_to_corpus(
-            scenario=scenario,
-            artifacts=artifacts,
-            edge_ids=edge_ids,
-            cycle_time_s=cycle_time_s,
-            generation=0,
-            worker_id=worker_id,
-            gatekeeper=gatekeeper,
-            disk_index=disk_index,
-            corpus_dir=corpus_dir,
-        ):
-            added += 1
-        _touch_heartbeat(
-            worker_id,
-            last_progress_ts,
-            last_iter,
-            worker_state,
-            iteration=processed,
-            state=_STATE_BOOTSTRAPPING,
-        )
+            edge_ids = _hash_collected_arcs(collector, edge_map)
+            if _admit_to_corpus(
+                scenario=scenario,
+                artifacts=artifacts,
+                edge_ids=edge_ids,
+                cycle_time_s=cycle_time_s,
+                generation=0,
+                worker_id=worker_id,
+                gatekeeper=gatekeeper,
+                disk_index=disk_index,
+                corpus_dir=corpus_dir,
+            ):
+                added += 1
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            logger.warning(
+                f"[w{worker_id}] bootstrap item failed at shard index {item_index}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        finally:
+            _touch_heartbeat(
+                worker_id,
+                last_progress_ts,
+                last_iter,
+                worker_state,
+                iteration=processed,
+                state=_STATE_BOOTSTRAPPING,
+            )
 
     logger.info(
-        f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added "
+        f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added, "
+        f"failed={failed} "
         f"(shard={bootstrap_shard_index}/{bootstrap_shard_count}, "
         f"total={len(bootstrap_items)})"
     )
