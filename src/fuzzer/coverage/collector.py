@@ -22,6 +22,7 @@ FileLineAnalysis = Tuple[Set[int], Set[int]]
 
 DEFAULT_GUIDANCE_TARGETS: Tuple[str, ...] = (
     "vyper/codegen",
+    "vyper/codegen_venom",
     "vyper/ir",
     "vyper/venom",
     "vyper/evm",
