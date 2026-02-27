@@ -125,6 +125,11 @@ class DiskIndex:
             return meta
         return None
 
+    def clear_fresh(self) -> int:
+        n = len(self._fresh_ids)
+        self._fresh_ids.clear()
+        return n
+
     def purge_deleted(self) -> int:
         removed_ids = {
             meta.entry_id

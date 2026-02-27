@@ -166,6 +166,8 @@ def _bootstrap_worker(
     worker_seed: int,
     base_fuzzer: BaseFuzzer,
     test_filter: Optional[TestFilter],
+    bootstrap_shard_index: int,
+    bootstrap_shard_count: int,
     collector: ArcCoverageCollector,
     edge_map: EdgeMap,
     gatekeeper: Gatekeeper,
@@ -179,60 +181,72 @@ def _bootstrap_worker(
     reporter = base_fuzzer.reporter
     exports = base_fuzzer.load_filtered_exports(test_filter)
 
-    added = 0
-    processed = 0
-    for export in exports.values():
-        for item in export.items.values():
-            if stop_event.is_set():
-                return added
+    bootstrap_items = []
+    for export_path in sorted(exports, key=lambda p: str(p)):
+        export = exports[export_path]
+        for item_name in sorted(export.items):
+            item = export.items[item_name]
             if item.item_type == "fixture":
                 continue
+            bootstrap_items.append(item)
 
-            processed += 1
-            cycle_start = time.perf_counter()
-            scenario = create_scenario_from_item(item, use_python_args=True)
-            scenario_seed = _derive_seed(worker_seed, "bootstrap", processed)
+    added = 0
+    processed = 0
+    for item_index, item in enumerate(bootstrap_items):
+        if item_index % bootstrap_shard_count != bootstrap_shard_index:
+            continue
+        if stop_event.is_set():
+            return added
 
-            reporter.set_context(
-                f"w{worker_id}_bootstrap_{processed}",
-                processed,
-                worker_seed,
-                scenario_seed,
-            )
+        processed += 1
+        cycle_start = time.perf_counter()
+        scenario = create_scenario_from_item(item, use_python_args=True)
+        scenario_seed = _derive_seed(worker_seed, "bootstrap", item_index)
 
-            collector.start_scenario()
-            artifacts = base_fuzzer.run_scenario_with_artifacts(
-                scenario,
-                seed=scenario_seed,
-                coverage_collector=collector,
-            )
-            cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
+        reporter.set_context(
+            f"w{worker_id}_bootstrap_{processed}",
+            processed,
+            worker_seed,
+            scenario_seed,
+        )
 
-            reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
+        collector.start_scenario()
+        artifacts = base_fuzzer.run_scenario_with_artifacts(
+            scenario,
+            seed=scenario_seed,
+            coverage_collector=collector,
+        )
+        cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-            edge_ids = _hash_collected_arcs(collector, edge_map)
-            if _admit_to_corpus(
-                scenario=scenario,
-                artifacts=artifacts,
-                edge_ids=edge_ids,
-                cycle_time_s=cycle_time_s,
-                generation=0,
-                worker_id=worker_id,
-                gatekeeper=gatekeeper,
-                disk_index=disk_index,
-                corpus_dir=corpus_dir,
-            ):
-                added += 1
-            _touch_heartbeat(
-                worker_id,
-                last_progress_ts,
-                last_iter,
-                worker_state,
-                iteration=processed,
-                state=_STATE_BOOTSTRAPPING,
-            )
+        reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
 
-    logger.info(f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added")
+        edge_ids = _hash_collected_arcs(collector, edge_map)
+        if _admit_to_corpus(
+            scenario=scenario,
+            artifacts=artifacts,
+            edge_ids=edge_ids,
+            cycle_time_s=cycle_time_s,
+            generation=0,
+            worker_id=worker_id,
+            gatekeeper=gatekeeper,
+            disk_index=disk_index,
+            corpus_dir=corpus_dir,
+        ):
+            added += 1
+        _touch_heartbeat(
+            worker_id,
+            last_progress_ts,
+            last_iter,
+            worker_state,
+            iteration=processed,
+            state=_STATE_BOOTSTRAPPING,
+        )
+
+    logger.info(
+        f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added "
+        f"(shard={bootstrap_shard_index}/{bootstrap_shard_count}, "
+        f"total={len(bootstrap_items)})"
+    )
     return added
 
 
@@ -264,6 +278,11 @@ def _worker_main(
     seen_compilation_timeouts: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
     worker_memory_limit: Optional[int] = None,
+    bootstrap_required: bool = False,
+    bootstrap_done_event: Optional[Any] = None,
+    bootstrap_done_flags: Optional[MutableSequence[int]] = None,
+    bootstrap_shard_count: int = 1,
+    drop_initial_fresh: bool = False,
 ) -> None:
     if worker_memory_limit is not None:
         _apply_memory_limit(worker_memory_limit, worker_id)
@@ -318,7 +337,9 @@ def _worker_main(
     try:
         disk_index.scan_new()
 
-        if worker_id == 0 and len(disk_index) == 0:
+        if bootstrap_required:
+            if bootstrap_done_event is None or bootstrap_done_flags is None:
+                raise ValueError("bootstrap synchronization primitives are required")
             _touch_heartbeat(
                 worker_id,
                 last_progress_ts,
@@ -327,22 +348,46 @@ def _worker_main(
                 iteration=iteration,
                 state=_STATE_BOOTSTRAPPING,
             )
-            _bootstrap_worker(
-                worker_id=worker_id,
-                worker_seed=worker_seed,
-                base_fuzzer=base_fuzzer,
-                test_filter=test_filter,
-                collector=collector,
-                edge_map=edge_map,
-                gatekeeper=gatekeeper,
-                disk_index=disk_index,
-                corpus_dir=corpus_dir,
-                stop_event=stop_event,
-                last_progress_ts=last_progress_ts,
-                last_iter=last_iter,
-                worker_state=worker_state,
-            )
+            if bootstrap_done_flags[worker_id] == 0:
+                _bootstrap_worker(
+                    worker_id=worker_id,
+                    worker_seed=worker_seed,
+                    base_fuzzer=base_fuzzer,
+                    test_filter=test_filter,
+                    bootstrap_shard_index=worker_id,
+                    bootstrap_shard_count=bootstrap_shard_count,
+                    collector=collector,
+                    edge_map=edge_map,
+                    gatekeeper=gatekeeper,
+                    disk_index=disk_index,
+                    corpus_dir=corpus_dir,
+                    stop_event=stop_event,
+                    last_progress_ts=last_progress_ts,
+                    last_iter=last_iter,
+                    worker_state=worker_state,
+                )
+                disk_index.scan_new()
+                bootstrap_done_flags[worker_id] = 1
+                if all(int(flag) == 1 for flag in bootstrap_done_flags):
+                    bootstrap_done_event.set()
+
+            while not bootstrap_done_event.is_set() and not stop_event.is_set():
+                time.sleep(0.5)
+                disk_index.scan_new()
+                _touch_heartbeat(
+                    worker_id,
+                    last_progress_ts,
+                    last_iter,
+                    worker_state,
+                    iteration=iteration,
+                    state=_STATE_BOOTSTRAPPING,
+                )
+
             disk_index.scan_new()
+        if drop_initial_fresh:
+            cleared = disk_index.clear_fresh()
+            if cleared > 0:
+                logger.info(f"[w{worker_id}] cleared {cleared} fresh bootstrap entries")
 
         while len(disk_index) == 0 and not stop_event.is_set():
             time.sleep(0.5)
@@ -586,6 +631,12 @@ class ParallelFuzzer:
             self.num_workers,
             lock=False,
         )
+        self._bootstrap_done_event = self.ctx.Event()
+        self._bootstrap_done_flags = self.ctx.Array(
+            ctypes.c_uint8,
+            self.num_workers,
+            lock=False,
+        )
 
         self._manager = self.ctx.Manager()
         self._shared_seen_crashes = self._manager.dict()
@@ -595,6 +646,8 @@ class ParallelFuzzer:
 
         self._worker_epochs = [0 for _ in range(self.num_workers)]
         self._test_filter: Optional[TestFilter] = None
+        self._bootstrap_required = False
+        self._drop_initial_fresh = False
 
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         (self.corpus_dir / "queue").mkdir(parents=True, exist_ok=True)
@@ -627,6 +680,11 @@ class ParallelFuzzer:
                 "seen_compilation_timeouts": self._shared_seen_compilation_timeouts,
                 "seen_divergences": self._shared_seen_divergences,
                 "worker_memory_limit": self.worker_memory_limit,
+                "bootstrap_required": self._bootstrap_required,
+                "bootstrap_done_event": self._bootstrap_done_event,
+                "bootstrap_done_flags": self._bootstrap_done_flags,
+                "bootstrap_shard_count": self.num_workers,
+                "drop_initial_fresh": self._drop_initial_fresh,
             },
             name=f"parallel-fuzzer-worker-{worker_id}",
         )
@@ -714,6 +772,9 @@ class ParallelFuzzer:
                 restarted = True
                 continue
 
+            if self.worker_state[worker_id] == _STATE_BOOTSTRAPPING:
+                continue
+
             last_ts = self.last_progress_ts[worker_id]
             if now - last_ts <= self.worker_stall_timeout_s:
                 continue
@@ -737,6 +798,17 @@ class ParallelFuzzer:
         self._test_filter = test_filter
 
         queue_has_entries = any((self.corpus_dir / "queue").glob("*.meta.json"))
+        self._bootstrap_required = not queue_has_entries
+        self._drop_initial_fresh = self._bootstrap_required
+        if self._bootstrap_required:
+            self._bootstrap_done_event.clear()
+            for i in range(self.num_workers):
+                self._bootstrap_done_flags[i] = 0
+        else:
+            self._bootstrap_done_event.set()
+            for i in range(self.num_workers):
+                self._bootstrap_done_flags[i] = 1
+
         if queue_has_entries:
             snapshot = load_edge_count_snapshot(self.corpus_dir, self.map_size)
             if snapshot is not None:
@@ -751,7 +823,8 @@ class ParallelFuzzer:
         logger.info(
             f"starting {self.num_workers} workers, seed={self.seed}, "
             f"corpus={self.corpus_dir}, reports={self.reports_dir}, "
-            f"worker_memory_limit={mem_str}"
+            f"worker_memory_limit={mem_str}, "
+            f"bootstrap_required={self._bootstrap_required}"
         )
 
         workers = [
