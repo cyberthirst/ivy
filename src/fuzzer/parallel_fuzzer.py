@@ -168,6 +168,8 @@ def _bootstrap_worker(
     test_filter: Optional[TestFilter],
     bootstrap_shard_index: int,
     bootstrap_shard_count: int,
+    resume_from_processed: int,
+    bootstrap_progress: MutableSequence[int],
     collector: ArcCoverageCollector,
     edge_map: EdgeMap,
     gatekeeper: Gatekeeper,
@@ -196,10 +198,12 @@ def _bootstrap_worker(
     for item_index, item in enumerate(bootstrap_items):
         if item_index % bootstrap_shard_count != bootstrap_shard_index:
             continue
+        processed += 1
+        if processed <= resume_from_processed:
+            continue
         if stop_event.is_set():
             return added
 
-        processed += 1
         try:
             cycle_start = time.perf_counter()
             scenario = create_scenario_from_item(item, use_python_args=True)
@@ -242,6 +246,7 @@ def _bootstrap_worker(
                 f"{type(exc).__name__}: {exc}"
             )
         finally:
+            bootstrap_progress[worker_id] = processed
             _touch_heartbeat(
                 worker_id,
                 last_progress_ts,
@@ -291,6 +296,7 @@ def _worker_main(
     bootstrap_required: bool = False,
     bootstrap_done_event: Optional[Any] = None,
     bootstrap_done_flags: Optional[MutableSequence[int]] = None,
+    bootstrap_progress: Optional[MutableSequence[int]] = None,
     bootstrap_shard_count: int = 1,
     drop_initial_fresh: bool = False,
 ) -> None:
@@ -348,7 +354,11 @@ def _worker_main(
         disk_index.scan_new()
 
         if bootstrap_required:
-            if bootstrap_done_event is None or bootstrap_done_flags is None:
+            if (
+                bootstrap_done_event is None
+                or bootstrap_done_flags is None
+                or bootstrap_progress is None
+            ):
                 raise ValueError("bootstrap synchronization primitives are required")
             _touch_heartbeat(
                 worker_id,
@@ -366,6 +376,8 @@ def _worker_main(
                     test_filter=test_filter,
                     bootstrap_shard_index=worker_id,
                     bootstrap_shard_count=bootstrap_shard_count,
+                    resume_from_processed=int(bootstrap_progress[worker_id]),
+                    bootstrap_progress=bootstrap_progress,
                     collector=collector,
                     edge_map=edge_map,
                     gatekeeper=gatekeeper,
@@ -647,6 +659,11 @@ class ParallelFuzzer:
             self.num_workers,
             lock=False,
         )
+        self._bootstrap_progress = self.ctx.Array(
+            ctypes.c_uint64,
+            self.num_workers,
+            lock=False,
+        )
 
         self._manager = self.ctx.Manager()
         self._shared_seen_crashes = self._manager.dict()
@@ -693,6 +710,7 @@ class ParallelFuzzer:
                 "bootstrap_required": self._bootstrap_required,
                 "bootstrap_done_event": self._bootstrap_done_event,
                 "bootstrap_done_flags": self._bootstrap_done_flags,
+                "bootstrap_progress": self._bootstrap_progress,
                 "bootstrap_shard_count": self.num_workers,
                 "drop_initial_fresh": self._drop_initial_fresh,
             },
@@ -814,10 +832,12 @@ class ParallelFuzzer:
             self._bootstrap_done_event.clear()
             for i in range(self.num_workers):
                 self._bootstrap_done_flags[i] = 0
+                self._bootstrap_progress[i] = 0
         else:
             self._bootstrap_done_event.set()
             for i in range(self.num_workers):
                 self._bootstrap_done_flags[i] = 1
+                self._bootstrap_progress[i] = 0
 
         if queue_has_entries:
             snapshot = load_edge_count_snapshot(self.corpus_dir, self.map_size)
