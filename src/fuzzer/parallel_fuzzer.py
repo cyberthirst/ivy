@@ -51,7 +51,7 @@ _STATE_IDLE = 0
 _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
-_DEFAULT_WORKER_MEMORY_LIMIT_BYTES = 2 * 1024**3
+_DEFAULT_WORKER_MEMORY_LIMIT_BYTES = 1 * 1024**3
 
 
 def _apply_memory_limit(limit_bytes: int, worker_id: int) -> None:
@@ -243,7 +243,7 @@ def _bootstrap_worker(
 
             edge_ids = _hash_collected_arcs(collector, edge_map)
             if _admit_to_corpus(
-                scenario=scenario,
+                scenario=artifacts.finalized_scenario,
                 artifacts=artifacts,
                 edge_ids=edge_ids,
                 cycle_time_s=cycle_time_s,
@@ -533,7 +533,7 @@ def _worker_main(
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
                 if _admit_to_corpus(
-                    scenario=mutated,
+                    scenario=artifacts.finalized_scenario,
                     artifacts=artifacts,
                     edge_ids=edge_ids,
                     cycle_time_s=cycle_time_s,
