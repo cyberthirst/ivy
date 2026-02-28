@@ -239,7 +239,7 @@ def _bootstrap_worker(
             )
             cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-            reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
+            reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=base_fuzzer.debug_mode)
 
             edge_ids = _hash_collected_arcs(collector, edge_map)
             if _admit_to_corpus(
@@ -309,6 +309,7 @@ def _worker_main(
     seen_compilation_timeouts: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
     worker_memory_limit: Optional[int] = None,
+    debug_mode: bool = False,
     bootstrap_required: bool = False,
     bootstrap_done_event: Optional[Any] = None,
     bootstrap_done_flags: Optional[MutableSequence[int]] = None,
@@ -338,7 +339,7 @@ def _worker_main(
     base_fuzzer = BaseFuzzer(
         exports_dir=exports_dir,
         seed=worker_seed,
-        debug_mode=False,
+        debug_mode=debug_mode,
         issue_filter=build_default_coverage_issue_filter(),
         harness_config=harness_config,
         deduper=deduper,
@@ -528,7 +529,7 @@ def _worker_main(
                 )
                 cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-                reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=False)
+                reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=debug_mode)
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
                 if _admit_to_corpus(
@@ -561,7 +562,7 @@ def _worker_main(
                         corpus_seed_count=len(disk_index),
                         corpus_evolved_count=0,
                         corpus_max_evolved=0,
-                        debug_mode=False,
+                        debug_mode=debug_mode,
                     )
                     _log_worker_progress(
                         worker_id, iteration, len(disk_index), reporter, snapshot
@@ -633,6 +634,7 @@ class ParallelFuzzer:
         max_iterations_per_worker: Optional[int] = None,
         reports_dir: Path = Path("reports"),
         worker_memory_limit: Optional[int] = _DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
+        debug_mode: bool = False,
     ):
         self.exports_dir = Path(exports_dir)
         self.corpus_dir = Path(corpus_dir)
@@ -652,6 +654,7 @@ class ParallelFuzzer:
         self.max_iterations_per_worker = max_iterations_per_worker
         self.reports_dir = Path(reports_dir)
         self.worker_memory_limit = worker_memory_limit
+        self.debug_mode = debug_mode
 
         self.ctx = multiprocessing.get_context("spawn")
         self.stop_event = self.ctx.Event()
@@ -726,6 +729,7 @@ class ParallelFuzzer:
                 "seen_compilation_timeouts": self._shared_seen_compilation_timeouts,
                 "seen_divergences": self._shared_seen_divergences,
                 "worker_memory_limit": self.worker_memory_limit,
+                "debug_mode": self.debug_mode,
                 "bootstrap_required": self._bootstrap_required,
                 "bootstrap_done_event": self._bootstrap_done_event,
                 "bootstrap_done_flags": self._bootstrap_done_flags,
@@ -945,6 +949,7 @@ def main() -> None:
     parser.add_argument("--max-corpus-size", type=int, default=10_000)
     parser.add_argument("--max-runtime-s", type=float, default=None)
     parser.add_argument("--max-iterations-per-worker", type=int, default=None)
+    parser.add_argument("--debug", action="store_true", default=False)
     args = parser.parse_args()
 
     if args.num_workers < 1:
@@ -961,6 +966,7 @@ def main() -> None:
         max_iterations_per_worker=args.max_iterations_per_worker,
         reports_dir=args.reports_dir,
         worker_memory_limit=_DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
+        debug_mode=args.debug,
     )
     fuzzer.run(test_filter=build_default_coverage_test_filter())
 
