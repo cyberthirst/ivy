@@ -51,6 +51,7 @@ _STATE_IDLE = 0
 _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
+_DEFAULT_WORKER_MEMORY_LIMIT_BYTES = 2 * 1024**3
 
 
 def _apply_memory_limit(limit_bytes: int, worker_id: int) -> None:
@@ -179,7 +180,7 @@ def _bootstrap_worker(
     last_progress_ts: MutableSequence[float],
     last_iter: MutableSequence[int],
     worker_state: MutableSequence[int],
-) -> int:
+) -> bool:
     reporter = base_fuzzer.reporter
     exports = base_fuzzer.load_filtered_exports(test_filter)
 
@@ -194,7 +195,6 @@ def _bootstrap_worker(
 
     added = 0
     processed = 0
-    failed = 0
     for item_index, item in enumerate(bootstrap_items):
         if item_index % bootstrap_shard_count != bootstrap_shard_index:
             continue
@@ -202,7 +202,7 @@ def _bootstrap_worker(
         if processed <= resume_from_processed:
             continue
         if stop_event.is_set():
-            return added
+            return False
 
         try:
             cycle_start = time.perf_counter()
@@ -240,11 +240,12 @@ def _bootstrap_worker(
             ):
                 added += 1
         except Exception as exc:  # noqa: BLE001
-            failed += 1
-            logger.warning(
+            logger.error(
                 f"[w{worker_id}] bootstrap item failed at shard index {item_index}: "
                 f"{type(exc).__name__}: {exc}"
             )
+            stop_event.set()
+            return False
         finally:
             bootstrap_progress[worker_id] = processed
             _touch_heartbeat(
@@ -257,12 +258,11 @@ def _bootstrap_worker(
             )
 
     logger.info(
-        f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added, "
-        f"failed={failed} "
+        f"[w{worker_id}] bootstrap complete: {added}/{processed} seeds added "
         f"(shard={bootstrap_shard_index}/{bootstrap_shard_count}, "
         f"total={len(bootstrap_items)})"
     )
-    return added
+    return True
 
 
 def _worker_main(
@@ -366,7 +366,7 @@ def _worker_main(
                 state=_STATE_BOOTSTRAPPING,
             )
             if bootstrap_done_flags[worker_id] == 0:
-                _bootstrap_worker(
+                bootstrap_ok = _bootstrap_worker(
                     worker_id=worker_id,
                     worker_seed=worker_seed,
                     base_fuzzer=base_fuzzer,
@@ -385,6 +385,8 @@ def _worker_main(
                     last_iter=last_iter,
                     worker_state=worker_state,
                 )
+                if not bootstrap_ok or stop_event.is_set():
+                    return
                 disk_index.scan_new()
                 bootstrap_done_flags[worker_id] = 1
                 if all(int(flag) == 1 for flag in bootstrap_done_flags):
@@ -613,7 +615,7 @@ class ParallelFuzzer:
         max_runtime_s: Optional[float] = None,
         max_iterations_per_worker: Optional[int] = None,
         reports_dir: Path = Path("reports"),
-        worker_memory_limit: Optional[int] = None,
+        worker_memory_limit: Optional[int] = _DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
     ):
         self.exports_dir = Path(exports_dir)
         self.corpus_dir = Path(corpus_dir)
@@ -926,25 +928,10 @@ def main() -> None:
     parser.add_argument("--max-corpus-size", type=int, default=10_000)
     parser.add_argument("--max-runtime-s", type=float, default=None)
     parser.add_argument("--max-iterations-per-worker", type=int, default=None)
-    parser.add_argument(
-        "--available-memory-mb",
-        type=int,
-        default=None,
-        help="Total memory budget in MiB; divided across workers with a 2 GiB OS reserve",
-    )
     args = parser.parse_args()
 
     if args.num_workers < 1:
         parser.error("--num-workers must be >= 1")
-    if args.available_memory_mb is not None and args.available_memory_mb <= 0:
-        parser.error("--available-memory-mb must be > 0")
-
-    worker_memory_limit: Optional[int] = None
-    if args.available_memory_mb is not None:
-        total = args.available_memory_mb * 1024**2
-        reserve = 2 * 1024**3
-        usable = max(total - reserve, total // 2)
-        worker_memory_limit = usable // args.num_workers
 
     fuzzer = ParallelFuzzer(
         exports_dir=args.exports_dir,
@@ -956,7 +943,7 @@ def main() -> None:
         max_runtime_s=args.max_runtime_s,
         max_iterations_per_worker=args.max_iterations_per_worker,
         reports_dir=args.reports_dir,
-        worker_memory_limit=worker_memory_limit,
+        worker_memory_limit=_DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
     )
     fuzzer.run(test_filter=build_default_coverage_test_filter())
 
