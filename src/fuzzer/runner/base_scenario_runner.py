@@ -300,6 +300,7 @@ class BaseScenarioRunner(ABC):
             **self.compiler_settings,
         }
         merged.setdefault("enable_decimals", True)
+        merged.setdefault("no_static_assert", True)
         return merged
 
     def run(self, scenario: Scenario) -> ScenarioResult:
