@@ -300,9 +300,6 @@ def _worker_main(
     bootstrap_shard_count: int = 1,
     drop_initial_fresh: bool = False,
 ) -> None:
-    if worker_memory_limit is not None:
-        _apply_memory_limit(worker_memory_limit, worker_id)
-
     import boa  # pyright: ignore[reportMissingImports]
 
     boa.interpret.disable_cache()  # pyright: ignore[reportAttributeAccessIssue]
@@ -410,6 +407,9 @@ def _worker_main(
             cleared = disk_index.clear_fresh()
             if cleared > 0:
                 logger.info(f"[w{worker_id}] cleared {cleared} fresh bootstrap entries")
+
+        if worker_memory_limit is not None:
+            _apply_memory_limit(worker_memory_limit, worker_id)
 
         while len(disk_index) == 0 and not stop_event.is_set():
             time.sleep(0.5)
