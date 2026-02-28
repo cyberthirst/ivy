@@ -28,6 +28,7 @@ from fuzzer.coverage.disk_corpus import (
 from fuzzer.coverage.edge_map import EdgeMap
 from fuzzer.coverage.gatekeeper import (
     Gatekeeper,
+    GatekeeperDecision,
     coverage_fingerprint,
 )
 from fuzzer.coverage.shared_tracker import SharedEdgeTracker, create_shared_edge_counts
@@ -128,7 +129,7 @@ def _admit_to_corpus(
     gatekeeper: Gatekeeper,
     disk_index: DiskIndex,
     corpus_dir: Path,
-) -> bool:
+) -> Optional[GatekeeperDecision]:
     coverage_fp = coverage_fingerprint(edge_ids)
     source_size = _scenario_source_size(scenario)
 
@@ -145,7 +146,7 @@ def _admit_to_corpus(
         coverage_fp=coverage_fp,
     )
     if not decision.accept:
-        return False
+        return None
 
     write_corpus_entry(
         corpus_dir,
@@ -158,7 +159,41 @@ def _admit_to_corpus(
         worker_id=worker_id,
     )
     disk_index.scan_new()
-    return True
+    return decision
+
+
+def _has_unique_issue(analysis: Any) -> bool:
+    return (
+        analysis.unique_crash_count() > 0
+        or analysis.unique_divergence_count() > 0
+    )
+
+
+def _update_stagnation_counters(
+    *,
+    decision: Optional[GatekeeperDecision],
+    analysis: Any,
+    iters_since_new_compiler_cov: int,
+    iters_since_unique_issue: int,
+) -> tuple[int, int]:
+    has_new_compiler_cov = (
+        decision is not None
+        and (
+            decision.reason == "new_edge"
+            or decision.new_edges > 0
+        )
+    )
+    if has_new_compiler_cov:
+        iters_since_new_compiler_cov = 0
+    else:
+        iters_since_new_compiler_cov += 1
+
+    if _has_unique_issue(analysis):
+        iters_since_unique_issue = 0
+    else:
+        iters_since_unique_issue += 1
+
+    return iters_since_new_compiler_cov, iters_since_unique_issue
 
 
 def _bootstrap_worker(
@@ -242,7 +277,7 @@ def _bootstrap_worker(
             reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=base_fuzzer.debug_mode)
 
             edge_ids = _hash_collected_arcs(collector, edge_map)
-            if _admit_to_corpus(
+            decision = _admit_to_corpus(
                 scenario=artifacts.finalized_scenario,
                 artifacts=artifacts,
                 edge_ids=edge_ids,
@@ -252,7 +287,8 @@ def _bootstrap_worker(
                 gatekeeper=gatekeeper,
                 disk_index=disk_index,
                 corpus_dir=corpus_dir,
-            ):
+            )
+            if decision is not None:
                 added += 1
         except Exception as exc:  # noqa: BLE001
             logger.error(
@@ -351,7 +387,8 @@ def _worker_main(
 
     iteration = 0
     batch_id = 0
-    iters_since_accept = 0
+    iters_since_new_compiler_cov = 0
+    iters_since_unique_issue = 0
     last_scan = time.monotonic()
     last_purge = last_scan
 
@@ -473,7 +510,7 @@ def _worker_main(
                 )
 
             # Pick a starting scenario: generate from scratch or select from corpus
-            if iters_since_accept >= stagnation_threshold:
+            if iters_since_new_compiler_cov >= stagnation_threshold:
                 gen_seed = _derive_seed(worker_seed, "gen", batch_id)
                 parent_scenario = generate_scenario(seed=gen_seed)
                 if parent_scenario is None:
@@ -532,7 +569,7 @@ def _worker_main(
                 reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=debug_mode)
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
-                if _admit_to_corpus(
+                decision = _admit_to_corpus(
                     scenario=artifacts.finalized_scenario,
                     artifacts=artifacts,
                     edge_ids=edge_ids,
@@ -542,10 +579,16 @@ def _worker_main(
                     gatekeeper=gatekeeper,
                     disk_index=disk_index,
                     corpus_dir=corpus_dir,
-                ):
-                    iters_since_accept = 0
-                else:
-                    iters_since_accept += 1
+                )
+                (
+                    iters_since_new_compiler_cov,
+                    iters_since_unique_issue,
+                ) = _update_stagnation_counters(
+                    decision=decision,
+                    analysis=artifacts.analysis,
+                    iters_since_new_compiler_cov=iters_since_new_compiler_cov,
+                    iters_since_unique_issue=iters_since_unique_issue,
+                )
 
                 _touch_heartbeat(
                     worker_id,
@@ -565,7 +608,13 @@ def _worker_main(
                         debug_mode=debug_mode,
                     )
                     _log_worker_progress(
-                        worker_id, iteration, len(disk_index), reporter, snapshot
+                        worker_id,
+                        iteration,
+                        len(disk_index),
+                        reporter,
+                        snapshot,
+                        iters_since_new_compiler_cov,
+                        iters_since_unique_issue,
                     )
 
                 if max_iterations is not None and iteration >= max_iterations:
@@ -595,6 +644,8 @@ def _log_worker_progress(
     corpus_size: int,
     reporter: Any,
     snapshot: Optional[dict[str, Any]],  # noqa: ARG001
+    iters_since_new_compiler_cov: int,
+    iters_since_unique_issue: int,
 ) -> None:
     del snapshot
     elapsed = reporter.get_elapsed_time()
@@ -606,6 +657,8 @@ def _log_worker_progress(
         f"corpus={corpus_size} | "
         f"divergences={reporter.divergences} | "
         f"crashes={reporter.compiler_crashes} | "
+        f"iters_since_cov={iters_since_new_compiler_cov} | "
+        f"iters_since_issue={iters_since_unique_issue} | "
         f"deploy_ok={deploy_ok:.1f}% | "
         f"call_ok={call_ok:.1f}% | "
         f"rate={rate:.1f}/s"
