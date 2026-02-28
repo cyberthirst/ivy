@@ -164,6 +164,7 @@ def _admit_to_corpus(
 def _bootstrap_worker(
     *,
     worker_id: int,
+    bootstrap_seed: int,
     worker_seed: int,
     base_fuzzer: BaseFuzzer,
     test_filter: Optional[TestFilter],
@@ -184,19 +185,28 @@ def _bootstrap_worker(
     reporter = base_fuzzer.reporter
     exports = base_fuzzer.load_filtered_exports(test_filter)
 
-    bootstrap_items = []
+    bootstrap_items: list[tuple[str, str, Any]] = []
     for export_path in sorted(exports, key=lambda p: str(p)):
         export = exports[export_path]
         for item_name in sorted(export.items):
             item = export.items[item_name]
             if item.item_type == "fixture":
                 continue
-            bootstrap_items.append(item)
+            bootstrap_items.append((str(export_path), item_name, item))
 
     added = 0
-    processed = 0
-    for item_index, item in enumerate(bootstrap_items):
-        if item_index % bootstrap_shard_count != bootstrap_shard_index:
+    processed = 0  # number of items processed in this worker's deterministic shard
+    for export_path, item_name, item in bootstrap_items:
+        assigned_worker = (
+            _derive_seed(
+                bootstrap_seed,
+                "bootstrap_assign",
+                export_path,
+                item_name,
+            )
+            % bootstrap_shard_count
+        )
+        if assigned_worker != bootstrap_shard_index:
             continue
         processed += 1
         if processed <= resume_from_processed:
@@ -207,7 +217,12 @@ def _bootstrap_worker(
         try:
             cycle_start = time.perf_counter()
             scenario = create_scenario_from_item(item, use_python_args=True)
-            scenario_seed = _derive_seed(worker_seed, "bootstrap", item_index)
+            scenario_seed = _derive_seed(
+                worker_seed,
+                "bootstrap",
+                export_path,
+                item_name,
+            )
 
             reporter.set_context(
                 f"w{worker_id}_bootstrap_{processed}",
@@ -241,7 +256,8 @@ def _bootstrap_worker(
                 added += 1
         except Exception as exc:  # noqa: BLE001
             logger.error(
-                f"[w{worker_id}] bootstrap item failed at shard index {item_index}: "
+                f"[w{worker_id}] bootstrap item failed "
+                f"({export_path}::{item_name}): "
                 f"{type(exc).__name__}: {exc}"
             )
             stop_event.set()
@@ -368,6 +384,7 @@ def _worker_main(
             if bootstrap_done_flags[worker_id] == 0:
                 bootstrap_ok = _bootstrap_worker(
                     worker_id=worker_id,
+                    bootstrap_seed=seed,
                     worker_seed=worker_seed,
                     base_fuzzer=base_fuzzer,
                     test_filter=test_filter,
