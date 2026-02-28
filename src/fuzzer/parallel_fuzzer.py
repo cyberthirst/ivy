@@ -303,7 +303,7 @@ def _worker_main(
     max_energy: int = 16,
     max_iterations: Optional[int] = None,
     log_interval: int = _LOG_INTERVAL,
-    stagnation_threshold: int = 200,
+    stagnation_threshold: int = 80,
     seen_crashes: Optional[dict[str, bool]] = None,
     seen_compile_failures: Optional[dict[str, bool]] = None,
     seen_compilation_timeouts: Optional[dict[str, bool]] = None,
