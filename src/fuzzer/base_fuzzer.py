@@ -35,6 +35,7 @@ from ivy.frontend.loader import loads_from_solc_json
 from fuzzer.runner.base_scenario_runner import ScenarioResult
 from fuzzer.runner.scenario import Scenario
 from fuzzer.runner.multi_runner import MultiRunner
+from fuzzer.runner.boa_scenario_runner import MinimalNoopGasMeter
 from fuzzer.deduper import Deduper
 from fuzzer.result_analyzer import ResultAnalyzer
 from fuzzer.reporter import FuzzerReporter
@@ -93,6 +94,7 @@ class BaseFuzzer:
         if self._multi_runner is None:
             self._multi_runner = MultiRunner(
                 collect_storage_dumps=self.harness_config.collect_storage_dumps,
+                boa_gas_meter_class=MinimalNoopGasMeter,
             )
         return self._multi_runner
 

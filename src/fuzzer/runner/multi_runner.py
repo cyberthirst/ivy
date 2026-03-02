@@ -47,9 +47,11 @@ class MultiRunner:
     def __init__(
         self,
         collect_storage_dumps: bool = False,
+        boa_gas_meter_class: Optional[type] = None,
     ):
         self.boa_configs = self.BOA_CONFIGS
         self.collect_storage_dumps = collect_storage_dumps
+        self.boa_gas_meter_class = boa_gas_meter_class
 
     def run(
         self,
@@ -91,6 +93,7 @@ class MultiRunner:
                 collect_storage_dumps=self.collect_storage_dumps,
                 coverage_collector=coverage_collector,
                 config_name=config.name,
+                gas_meter_class=self.boa_gas_meter_class,
             )
             result = runner.run(scenario)
             boa_results[config.name] = (config, result)

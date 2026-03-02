@@ -22,6 +22,25 @@ from fuzzer.trace_types import Env
 from fuzzer.coverage.collector import ArcCoverageCollector
 
 
+class MinimalNoopGasMeter:
+    """Gas meter that satisfies py-evm's API but performs no metering."""
+
+    def __init__(self, start_gas: int, *args: Any, **kwargs: Any) -> None:
+        # Some paths in py-evm/boa read these attributes directly.
+        self.start_gas = start_gas
+        self.gas_remaining = start_gas
+        self.gas_refunded = 0
+
+    def consume_gas(self, amount: int, reason: str) -> None:
+        return None
+
+    def return_gas(self, amount: int) -> None:
+        return None
+
+    def refund_gas(self, amount: int) -> None:
+        return None
+
+
 def _deployer_from_solc_json(
     solc_json: Dict[str, Any],
     compiler_args: Optional[Dict[str, Any]] = None,
@@ -59,10 +78,12 @@ class BoaScenarioRunner(BaseScenarioRunner):
         compiler_settings: Optional[Dict[str, Any]] = None,
         coverage_collector: Optional[ArcCoverageCollector] = None,
         config_name: Optional[str] = None,
+        gas_meter_class: Optional[type] = None,
     ):
         super().__init__(boa.env, collect_storage_dumps, compiler_settings)
         self.coverage_collector = coverage_collector
         self.config_name = config_name
+        self.gas_meter_class = gas_meter_class
 
     def _compile_from_solc_json(
         self,
@@ -157,4 +178,6 @@ class BoaScenarioRunner(BaseScenarioRunner):
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         with self.env.anchor():
+            if self.gas_meter_class is not None:
+                self.env.set_gas_meter_class(self.gas_meter_class)
             return super().run(scenario)
