@@ -78,7 +78,7 @@ class Gatekeeper:
         # post-processed scenario even if it's not consumed yet.
         del post_processed_scenario
 
-        is_issue = analysis.unique_divergence_count() > 0
+        has_divergence = analysis.unique_divergence_count() > 0
 
         # Reject if nothing compiled under Ivy. The AST mutator depends on the
         # compiler frontend to parse and annotate the source, so a scenario that
@@ -99,7 +99,7 @@ class Gatekeeper:
         selection_weight = rare_edge_score / max(cycle_time_s, self._eps)
         new_edges = self._tracker.merge(edge_ids)
 
-        if is_issue:
+        if has_divergence:
             return GatekeeperDecision(
                 accept=True,
                 reason="issue",

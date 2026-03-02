@@ -168,6 +168,9 @@ def _admit_to_corpus(
     scenario, has_deployment_trace = _sanitize_scenario_for_corpus(
         scenario, artifacts.ivy_result
     )
+    if not has_deployment_trace:
+        return None
+
     coverage_fp = coverage_fingerprint(edge_ids)
     source_size = _scenario_source_size(scenario)
 
@@ -185,8 +188,6 @@ def _admit_to_corpus(
         coverage_fp=coverage_fp,
     )
     if not decision.accept:
-        return None
-    if not has_deployment_trace:
         return None
 
     write_corpus_entry(
