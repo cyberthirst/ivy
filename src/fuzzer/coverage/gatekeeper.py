@@ -71,7 +71,7 @@ class Gatekeeper:
         improves_representative: bool,
         coverage_fp: Optional[str] = None,
     ) -> GatekeeperDecision:
-        is_issue = bool(analysis.crashes or analysis.divergences)
+        is_issue = analysis.unique_crash_count() > 0 or analysis.unique_divergence_count() > 0
 
         # Reject if nothing compiled under Ivy. The AST mutator depends on the
         # compiler frontend to parse and annotate the source, so a scenario that
