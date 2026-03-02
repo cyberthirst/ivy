@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 from fuzzer.coverage.disk_corpus import DiskIndex, read_scenario
@@ -9,6 +10,8 @@ from fuzzer.deduper import KeepDecision
 from fuzzer.parallel_fuzzer import (
     _admit_to_corpus,
     _has_unique_issue,
+    _load_deduper_fingerprint_snapshot,
+    _save_deduper_fingerprint_snapshot,
     _update_stagnation_counters,
 )
 from fuzzer.result_analyzer import AnalysisResult
@@ -271,3 +274,38 @@ def test_update_stagnation_counters_resets_on_new_edge_and_unique_issue():
 
     assert cov_iters == 0
     assert issue_iters == 0
+
+
+def test_deduper_fingerprint_snapshot_round_trip(tmp_path):
+    corpus_dir = tmp_path / "corpus"
+
+    _save_deduper_fingerprint_snapshot(
+        corpus_dir,
+        seen_crashes={"crash-b": True, "crash-a": True},
+        seen_compile_failures={"compile-fail-a": True},
+        seen_compilation_timeouts={"compile-timeout-a": True},
+        seen_divergences={"div-b": True, "div-a": True},
+    )
+    loaded = _load_deduper_fingerprint_snapshot(corpus_dir)
+
+    assert loaded == {
+        "crashes": {"crash-a", "crash-b"},
+        "compile_failures": {"compile-fail-a"},
+        "compilation_timeouts": {"compile-timeout-a"},
+        "divergences": {"div-a", "div-b"},
+    }
+    snapshot_path = corpus_dir / "snapshots" / "deduper_fingerprints.json"
+    written = json.loads(snapshot_path.read_text())
+    assert "version" not in written
+
+
+def test_deduper_fingerprint_snapshot_missing_file_returns_empty(tmp_path):
+    corpus_dir = tmp_path / "corpus"
+    loaded = _load_deduper_fingerprint_snapshot(corpus_dir)
+
+    assert loaded == {
+        "crashes": set(),
+        "compile_failures": set(),
+        "compilation_timeouts": set(),
+        "divergences": set(),
+    }

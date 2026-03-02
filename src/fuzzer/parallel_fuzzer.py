@@ -3,13 +3,14 @@ from __future__ import annotations
 import argparse
 import ctypes
 import hashlib
+import json
 import logging
 import multiprocessing
 from pathlib import Path
 import random
 import resource
 import time
-from typing import Any, MutableSequence, Optional
+from typing import Any, Mapping, MutableSequence, Optional
 
 from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.deduper import Deduper
@@ -54,6 +55,51 @@ _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
 _DEFAULT_WORKER_MEMORY_LIMIT_BYTES = 1 * 1024**3
+_DEDUPER_FINGERPRINT_SNAPSHOT_FILE = "deduper_fingerprints.json"
+
+
+def _deduper_snapshot_path(corpus_dir: Path) -> Path:
+    return Path(corpus_dir) / "snapshots" / _DEDUPER_FINGERPRINT_SNAPSHOT_FILE
+
+
+def _load_deduper_fingerprint_snapshot(corpus_dir: Path) -> dict[str, set[str]]:
+    snapshot_path = _deduper_snapshot_path(corpus_dir)
+    payload: dict[str, list[str]] = {}
+    if snapshot_path.exists():
+        with open(snapshot_path, "r") as f:
+            payload = json.load(f)
+
+    return {
+        "crashes": set(payload.get("crashes", [])),
+        "compile_failures": set(payload.get("compile_failures", [])),
+        "compilation_timeouts": set(payload.get("compilation_timeouts", [])),
+        "divergences": set(payload.get("divergences", [])),
+    }
+
+
+def _save_deduper_fingerprint_snapshot(
+    corpus_dir: Path,
+    *,
+    seen_crashes: Mapping[str, bool],
+    seen_compile_failures: Mapping[str, bool],
+    seen_compilation_timeouts: Mapping[str, bool],
+    seen_divergences: Mapping[str, bool],
+) -> None:
+    snapshot_path = _deduper_snapshot_path(corpus_dir)
+    snapshot_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "crashes": sorted(fp for fp, keep in seen_crashes.items() if keep),
+        "compile_failures": sorted(
+            fp for fp, keep in seen_compile_failures.items() if keep
+        ),
+        "compilation_timeouts": sorted(
+            fp for fp, keep in seen_compilation_timeouts.items() if keep
+        ),
+        "divergences": sorted(fp for fp, keep in seen_divergences.items() if keep),
+    }
+    with open(snapshot_path, "w") as f:
+        json.dump(payload, f, sort_keys=True)
+        f.write("\n")
 
 
 def _apply_memory_limit(limit_bytes: int, worker_id: int) -> None:
@@ -899,6 +945,31 @@ class ParallelFuzzer:
     def _snapshot_edge_counts(self, shared_counts: MutableSequence[int]) -> None:
         save_edge_count_snapshot(self.corpus_dir, shared_counts)
 
+    def _load_deduper_fingerprints(self) -> None:
+        loaded = _load_deduper_fingerprint_snapshot(self.corpus_dir)
+        self._shared_seen_crashes.clear()
+        self._shared_seen_compile_failures.clear()
+        self._shared_seen_compilation_timeouts.clear()
+        self._shared_seen_divergences.clear()
+        self._shared_seen_crashes.update({fp: True for fp in loaded["crashes"]})
+        self._shared_seen_compile_failures.update(
+            {fp: True for fp in loaded["compile_failures"]}
+        )
+        self._shared_seen_compilation_timeouts.update(
+            {fp: True for fp in loaded["compilation_timeouts"]}
+        )
+        self._shared_seen_divergences.update({fp: True for fp in loaded["divergences"]})
+
+        total = sum(len(fps) for fps in loaded.values())
+        if total > 0:
+            logger.info(
+                "loaded deduper fingerprints from corpus: "
+                f"crashes={len(loaded['crashes'])}, "
+                f"compile_failures={len(loaded['compile_failures'])}, "
+                f"compilation_timeouts={len(loaded['compilation_timeouts'])}, "
+                f"divergences={len(loaded['divergences'])}"
+            )
+
     def _monitor_and_respawn_workers(
         self,
         workers: list[Any],
@@ -939,6 +1010,7 @@ class ParallelFuzzer:
 
     def run(self, test_filter: Optional[TestFilter] = None) -> None:
         self._test_filter = test_filter
+        self._load_deduper_fingerprints()
 
         queue_has_entries = any((self.corpus_dir / "queue").glob("*.meta.json"))
         self._bootstrap_required = not queue_has_entries
@@ -1021,6 +1093,13 @@ class ParallelFuzzer:
                     process.join(timeout=1.0)
 
             self._snapshot_edge_counts(self.shared_counts)
+            _save_deduper_fingerprint_snapshot(
+                self.corpus_dir,
+                seen_crashes=self._shared_seen_crashes,
+                seen_compile_failures=self._shared_seen_compile_failures,
+                seen_compilation_timeouts=self._shared_seen_compilation_timeouts,
+                seen_divergences=self._shared_seen_divergences,
+            )
             elapsed = time.monotonic() - start_time
             total_iters = sum(int(self.last_iter[i]) for i in range(self.num_workers))
             logger.info(
