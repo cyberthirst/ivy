@@ -24,7 +24,6 @@ class IssueType(StrEnum):
     DIVERGENCE = "divergence"
     CRASH = "crash"
     COMPILE_FAILURE = "compile_failure"
-    COMPILATION_TIMEOUT = "compilation_timeout"
 
 
 @dataclass

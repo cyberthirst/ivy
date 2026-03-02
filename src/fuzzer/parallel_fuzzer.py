@@ -72,7 +72,6 @@ def _load_deduper_fingerprint_snapshot(corpus_dir: Path) -> dict[str, set[str]]:
     return {
         "crashes": set(payload.get("crashes", [])),
         "compile_failures": set(payload.get("compile_failures", [])),
-        "compilation_timeouts": set(payload.get("compilation_timeouts", [])),
         "divergences": set(payload.get("divergences", [])),
     }
 
@@ -82,7 +81,6 @@ def _save_deduper_fingerprint_snapshot(
     *,
     seen_crashes: Mapping[str, bool],
     seen_compile_failures: Mapping[str, bool],
-    seen_compilation_timeouts: Mapping[str, bool],
     seen_divergences: Mapping[str, bool],
 ) -> None:
     snapshot_path = _deduper_snapshot_path(corpus_dir)
@@ -91,9 +89,6 @@ def _save_deduper_fingerprint_snapshot(
         "crashes": sorted(fp for fp, keep in seen_crashes.items() if keep),
         "compile_failures": sorted(
             fp for fp, keep in seen_compile_failures.items() if keep
-        ),
-        "compilation_timeouts": sorted(
-            fp for fp, keep in seen_compilation_timeouts.items() if keep
         ),
         "divergences": sorted(fp for fp, keep in seen_divergences.items() if keep),
     }
@@ -425,7 +420,6 @@ def _worker_main(
     stagnation_threshold: int = 80,
     seen_crashes: Optional[dict[str, bool]] = None,
     seen_compile_failures: Optional[dict[str, bool]] = None,
-    seen_compilation_timeouts: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
     worker_memory_limit: Optional[int] = None,
     debug_mode: bool = False,
@@ -451,7 +445,6 @@ def _worker_main(
     deduper = Deduper(
         seen_crashes=seen_crashes,
         seen_compile_failures=seen_compile_failures,
-        seen_compilation_timeouts=seen_compilation_timeouts,
         seen_divergences=seen_divergences,
     )
 
@@ -828,7 +821,6 @@ class ParallelFuzzer:
         self._manager = self.ctx.Manager()
         self._shared_seen_crashes = self._manager.dict()
         self._shared_seen_compile_failures = self._manager.dict()
-        self._shared_seen_compilation_timeouts = self._manager.dict()
         self._shared_seen_divergences = self._manager.dict()
 
         self._worker_epochs = [0 for _ in range(self.num_workers)]
@@ -864,7 +856,6 @@ class ParallelFuzzer:
                 "max_iterations": self.max_iterations_per_worker,
                 "seen_crashes": self._shared_seen_crashes,
                 "seen_compile_failures": self._shared_seen_compile_failures,
-                "seen_compilation_timeouts": self._shared_seen_compilation_timeouts,
                 "seen_divergences": self._shared_seen_divergences,
                 "worker_memory_limit": self.worker_memory_limit,
                 "debug_mode": self.debug_mode,
@@ -949,14 +940,10 @@ class ParallelFuzzer:
         loaded = _load_deduper_fingerprint_snapshot(self.corpus_dir)
         self._shared_seen_crashes.clear()
         self._shared_seen_compile_failures.clear()
-        self._shared_seen_compilation_timeouts.clear()
         self._shared_seen_divergences.clear()
         self._shared_seen_crashes.update({fp: True for fp in loaded["crashes"]})
         self._shared_seen_compile_failures.update(
             {fp: True for fp in loaded["compile_failures"]}
-        )
-        self._shared_seen_compilation_timeouts.update(
-            {fp: True for fp in loaded["compilation_timeouts"]}
         )
         self._shared_seen_divergences.update({fp: True for fp in loaded["divergences"]})
 
@@ -966,7 +953,6 @@ class ParallelFuzzer:
                 "loaded deduper fingerprints from corpus: "
                 f"crashes={len(loaded['crashes'])}, "
                 f"compile_failures={len(loaded['compile_failures'])}, "
-                f"compilation_timeouts={len(loaded['compilation_timeouts'])}, "
                 f"divergences={len(loaded['divergences'])}"
             )
 
@@ -1097,7 +1083,6 @@ class ParallelFuzzer:
                 self.corpus_dir,
                 seen_crashes=self._shared_seen_crashes,
                 seen_compile_failures=self._shared_seen_compile_failures,
-                seen_compilation_timeouts=self._shared_seen_compilation_timeouts,
                 seen_divergences=self._shared_seen_divergences,
             )
             elapsed = time.monotonic() - start_time

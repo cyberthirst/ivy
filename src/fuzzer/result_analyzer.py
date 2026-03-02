@@ -29,9 +29,6 @@ class AnalysisResult:
     compile_failures: List[Tuple[DeploymentResult, KeepDecision]] = field(
         default_factory=list
     )
-    compilation_timeouts: List[Tuple[DeploymentResult, KeepDecision]] = field(
-        default_factory=list
-    )
     divergences: List[Tuple[Divergence, KeepDecision]] = field(default_factory=list)
 
     # Stats for reporter
@@ -45,7 +42,6 @@ class AnalysisResult:
         return (
             any(decision.keep for _, decision in self.crashes)
             or any(decision.keep for _, decision in self.compile_failures)
-            or any(decision.keep for _, decision in self.compilation_timeouts)
             or any(decision.keep for _, decision in self.divergences)
         )
 
@@ -54,9 +50,6 @@ class AnalysisResult:
 
     def unique_compile_failure_count(self) -> int:
         return sum(1 for _, decision in self.compile_failures if decision.keep)
-
-    def unique_compilation_timeout_count(self) -> int:
-        return sum(1 for _, decision in self.compilation_timeouts if decision.keep)
 
     def unique_divergence_count(self) -> int:
         return sum(1 for _, decision in self.divergences if decision.keep)
@@ -135,15 +128,6 @@ class ResultAnalyzer:
                         deployment_result.error
                     )
                 result.crashes.append((deployment_result, decision))
-            elif deployment_result.is_compilation_timeout:
-                decision = self._check_filter(
-                    deployment_result.to_dict(), IT.COMPILATION_TIMEOUT
-                )
-                if decision is None:
-                    decision = self.deduper.check_compilation_timeout(
-                        deployment_result.error
-                    )
-                result.compilation_timeouts.append((deployment_result, decision))
             elif deployment_result.is_compilation_failure:
                 decision = self._check_filter(
                     deployment_result.to_dict(), IT.COMPILE_FAILURE

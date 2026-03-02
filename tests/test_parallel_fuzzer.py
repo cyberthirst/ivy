@@ -283,7 +283,6 @@ def test_deduper_fingerprint_snapshot_round_trip(tmp_path):
         corpus_dir,
         seen_crashes={"crash-b": True, "crash-a": True},
         seen_compile_failures={"compile-fail-a": True},
-        seen_compilation_timeouts={"compile-timeout-a": True},
         seen_divergences={"div-b": True, "div-a": True},
     )
     loaded = _load_deduper_fingerprint_snapshot(corpus_dir)
@@ -291,7 +290,6 @@ def test_deduper_fingerprint_snapshot_round_trip(tmp_path):
     assert loaded == {
         "crashes": {"crash-a", "crash-b"},
         "compile_failures": {"compile-fail-a"},
-        "compilation_timeouts": {"compile-timeout-a"},
         "divergences": {"div-a", "div-b"},
     }
     snapshot_path = corpus_dir / "snapshots" / "deduper_fingerprints.json"
@@ -306,6 +304,5 @@ def test_deduper_fingerprint_snapshot_missing_file_returns_empty(tmp_path):
     assert loaded == {
         "crashes": set(),
         "compile_failures": set(),
-        "compilation_timeouts": set(),
         "divergences": set(),
     }
