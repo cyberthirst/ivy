@@ -32,6 +32,7 @@ PRECOMPILE_ADDRESSES: List[str] = [
     to_checksum_address("0x0000000000000000000000000000000000000002"),
     to_checksum_address("0x0000000000000000000000000000000000000003"),
     to_checksum_address("0x0000000000000000000000000000000000000004"),
+    to_checksum_address("0x0000000000000000000000000000000000000005"),
 ]
 
 # Realistic addresses usable as both function args and msg.sender.
@@ -217,7 +218,13 @@ class ValueMutator(BaseValueGenerator):
             byte_array = bytearray(addr_bytes)
             idx = self.rng.randint(0, 19)
             byte_array[idx] ^= self.rng.randint(1, 255)
-            return to_checksum_address(f"0x{byte_array.hex()}")
+            result = to_checksum_address(f"0x{byte_array.hex()}")
+            # If we accidentally landed on an unsupported precompile, use a
+            # boundary address instead to avoid uninteresting execution failures.
+            int_addr = int.from_bytes(byte_array, "big")
+            if 0 < int_addr < 256 and result not in PRECOMPILE_ADDRESSES:
+                return self.rng.choice(BOUNDARY_ADDRESSES)
+            return result
 
     def _generate_string(self, vyper_type: StringT) -> str:
         max_length = vyper_type.length
