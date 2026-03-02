@@ -112,145 +112,87 @@ class Deduper:
         seen_compilation_timeouts: Optional[Dict[str, bool]] = None,
         seen_divergences: Optional[Dict[str, bool]] = None,
     ):
-        self._seen_crashes: Dict[str, bool] = seen_crashes if seen_crashes is not None else {}
-        self._seen_compile_failures: Dict[str, bool] = seen_compile_failures if seen_compile_failures is not None else {}
-        self._seen_compilation_timeouts: Dict[str, bool] = seen_compilation_timeouts if seen_compilation_timeouts is not None else {}
-        self._seen_divergences: Dict[str, bool] = seen_divergences if seen_divergences is not None else {}
+        self._seen_crashes: Dict[str, bool] = (
+            seen_crashes if seen_crashes is not None else {}
+        )
+        self._seen_compile_failures: Dict[str, bool] = (
+            seen_compile_failures if seen_compile_failures is not None else {}
+        )
+        self._seen_compilation_timeouts: Dict[str, bool] = (
+            seen_compilation_timeouts if seen_compilation_timeouts is not None else {}
+        )
+        self._seen_divergences: Dict[str, bool] = (
+            seen_divergences if seen_divergences is not None else {}
+        )
 
     def _compute_fingerprint(self, sig: Tuple) -> str:
         """Compute blake2b fingerprint from a signature tuple."""
         h = hashlib.blake2b(repr(sig).encode("utf-8"), digest_size=16)
         return h.hexdigest()
 
+    def _check_seen(
+        self, sig: Tuple, seen: Dict[str, bool], category: str
+    ) -> KeepDecision:
+        fingerprint = self._compute_fingerprint(sig)
+        if fingerprint in seen:
+            return KeepDecision(
+                keep=False, reason=f"duplicate_{category}", fingerprint=fingerprint
+            )
+        seen[fingerprint] = True
+        return KeepDecision(
+            keep=True, reason=f"new_{category}", fingerprint=fingerprint
+        )
+
     def check_divergence(self, divergence: Divergence) -> KeepDecision:
-        """
-        Check if a divergence should be kept or dropped.
-
-        Returns DedupDecision with keep=True for new divergences.
-        """
-        # Build fingerprint based on divergence type
         if divergence.type == DivergenceType.XFAIL:
-            sig = (
-                "xfail",
-                divergence.xfail_expected,
-                divergence.xfail_actual,
-                tuple(divergence.xfail_reasons),
-            )
+            return self._check_xfail(divergence)
         elif divergence.type in (DivergenceType.DEPLOYMENT, DivergenceType.EXECUTION):
-            # Check if one succeeded and one failed
-            ivy_success = (
-                divergence.ivy_result.success if divergence.ivy_result else None
-            )
-            boa_success = (
-                divergence.boa_result.success if divergence.boa_result else None
-            )
-
-            if ivy_success == boa_success:
-                # Both succeeded with different results - don't dedup
-                return KeepDecision(
-                    keep=True,
-                    reason="both_succeeded_different_results",
-                    fingerprint="",
-                )
-
-            # One succeeded, one failed - fingerprint on the error
-            if ivy_success and not boa_success:
-                failing_runner = divergence.divergent_runner
-                error = divergence.boa_result.error if divergence.boa_result else None
-            else:
-                failing_runner = "ivy"
-                error = divergence.ivy_result.error if divergence.ivy_result else None
-
-            error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
-            sig = (
-                str(divergence.type),
-                failing_runner,
-                error_fp,
-            )
+            return self._check_result_divergence(divergence)
         else:
-            # Unknown type - don't dedup
             return KeepDecision(keep=True, reason="unknown_type", fingerprint="")
 
-        fingerprint = self._compute_fingerprint(sig)
+    def _check_xfail(self, divergence: Divergence) -> KeepDecision:
+        sig = (
+            "xfail",
+            divergence.xfail_expected,
+            divergence.xfail_actual,
+            tuple(divergence.xfail_reasons),
+        )
+        return self._check_seen(sig, self._seen_divergences, "divergence")
 
-        if fingerprint in self._seen_divergences:
+    def _check_result_divergence(self, divergence: Divergence) -> KeepDecision:
+        ivy_success = divergence.ivy_result.success if divergence.ivy_result else None
+        boa_success = divergence.boa_result.success if divergence.boa_result else None
+
+        if ivy_success == boa_success:
             return KeepDecision(
-                keep=False,
-                reason="duplicate_divergence",
-                fingerprint=fingerprint,
+                keep=True, reason="both_succeeded_different_results", fingerprint=""
             )
 
-        self._seen_divergences[fingerprint] = True
-        return KeepDecision(
-            keep=True,
-            reason="new_divergence",
-            fingerprint=fingerprint,
-        )
+        # One succeeded, one failed - fingerprint on the error
+        if ivy_success and not boa_success:
+            failing_runner = divergence.divergent_runner
+            error = divergence.boa_result.error if divergence.boa_result else None
+        else:
+            failing_runner = "ivy"
+            error = divergence.ivy_result.error if divergence.ivy_result else None
+
+        error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
+        sig = (str(divergence.type), failing_runner, error_fp)
+        return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def check_compiler_crash(self, error: Exception) -> KeepDecision:
-        """
-        Check if a compiler crash should be kept or dropped.
-        """
-        error_fp = fingerprint_error(error, self.CRASH_FRAMES)
-        sig = ("crash", error_fp)
-        fingerprint = self._compute_fingerprint(sig)
-
-        if fingerprint in self._seen_crashes:
-            return KeepDecision(
-                keep=False,
-                reason="duplicate_crash",
-                fingerprint=fingerprint,
-            )
-
-        self._seen_crashes[fingerprint] = True
-        return KeepDecision(
-            keep=True,
-            reason="new_crash",
-            fingerprint=fingerprint,
-        )
+        sig = ("crash", fingerprint_error(error, self.CRASH_FRAMES))
+        return self._check_seen(sig, self._seen_crashes, "crash")
 
     def check_compilation_failure(self, error: Exception) -> KeepDecision:
-        """
-        Check if a compilation failure should be kept or dropped.
-        """
-        error_fp = fingerprint_error(error, self.COMPILE_FAILURE_FRAMES)
-        sig = ("compile_fail", error_fp)
-        fingerprint = self._compute_fingerprint(sig)
-
-        if fingerprint in self._seen_compile_failures:
-            return KeepDecision(
-                keep=False,
-                reason="duplicate_compile_failure",
-                fingerprint=fingerprint,
-            )
-
-        self._seen_compile_failures[fingerprint] = True
-        return KeepDecision(
-            keep=True,
-            reason="new_compile_failure",
-            fingerprint=fingerprint,
-        )
+        sig = ("compile_fail", fingerprint_error(error, self.COMPILE_FAILURE_FRAMES))
+        return self._check_seen(sig, self._seen_compile_failures, "compile_failure")
 
     def check_compilation_timeout(self, error: Exception) -> KeepDecision:
-        """
-        Check if a compilation timeout should be kept or dropped.
-        """
-        error_fp = fingerprint_error(error, self.COMPILE_FAILURE_FRAMES)
-        sig = ("compile_timeout", error_fp)
-        fingerprint = self._compute_fingerprint(sig)
-
-        if fingerprint in self._seen_compilation_timeouts:
-            return KeepDecision(
-                keep=False,
-                reason="duplicate_compilation_timeout",
-                fingerprint=fingerprint,
-            )
-
-        self._seen_compilation_timeouts[fingerprint] = True
-        return KeepDecision(
-            keep=True,
-            reason="new_compilation_timeout",
-            fingerprint=fingerprint,
+        sig = ("compile_timeout", fingerprint_error(error, self.COMPILE_FAILURE_FRAMES))
+        return self._check_seen(
+            sig, self._seen_compilation_timeouts, "compilation_timeout"
         )
 
     def get_stats(self) -> Dict[str, int]:
