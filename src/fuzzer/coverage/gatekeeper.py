@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Set, Tuple
 
 from fuzzer.runner.base_scenario_runner import ScenarioResult, DeploymentResult
+from fuzzer.runner.scenario import Scenario
 from fuzzer.result_analyzer import AnalysisResult
 from fuzzer.coverage.tracker import GlobalEdgeTracker
 
@@ -63,15 +64,21 @@ class Gatekeeper:
     def decide_and_update(
         self,
         *,
-        edge_ids: Optional[Set[int]],
-        cycle_time_s: Optional[float],
+        edge_ids: Set[int],
+        cycle_time_s: float,
         analysis: AnalysisResult,
         ivy_result: ScenarioResult,
         boa_results: Optional[Dict[str, Tuple[object, ScenarioResult]]] = None,
         improves_representative: bool,
+        post_processed_scenario: Optional[Scenario] = None,
         coverage_fp: Optional[str] = None,
     ) -> GatekeeperDecision:
-        is_issue = analysis.unique_crash_count() > 0 or analysis.unique_divergence_count() > 0
+        # Note: queue admission semantics may depend on post-processing
+        # (e.g. traces removed before corpus insertion), so callers can pass the
+        # post-processed scenario even if it's not consumed yet.
+        del post_processed_scenario
+
+        is_issue = analysis.unique_divergence_count() > 0
 
         # Reject if nothing compiled under Ivy. The AST mutator depends on the
         # compiler frontend to parse and annotate the source, so a scenario that
@@ -81,18 +88,6 @@ class Gatekeeper:
                 accept=False,
                 reason="no_ivy_compile",
                 coverage_fingerprint=coverage_fp or "",
-                new_edges=0,
-                rare_edge_score=0.0,
-                selection_weight=0.0,
-            )
-
-        if edge_ids is None or cycle_time_s is None:
-            self._tracker.merge(edge_ids or set())
-            fp = coverage_fp or coverage_fingerprint(edge_ids or set())
-            return GatekeeperDecision(
-                accept=is_issue,
-                reason="issue" if is_issue else "missing_coverage",
-                coverage_fingerprint=fp,
                 new_edges=0,
                 rare_edge_score=0.0,
                 selection_weight=0.0,

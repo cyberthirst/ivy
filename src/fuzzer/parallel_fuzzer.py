@@ -40,6 +40,7 @@ from fuzzer.export_utils import (
 from fuzzer.issue_filter import IssueFilter, default_issue_filter
 from fuzzer.runtime_engine import HarnessConfig
 from fuzzer.generator import generate_scenario
+from fuzzer.runner.base_scenario_runner import DeploymentResult, ScenarioResult
 from fuzzer.runner.scenario import Scenario, create_scenario_from_item
 from fuzzer.trace_types import DeploymentTrace
 
@@ -71,6 +72,40 @@ def _scenario_source_size(scenario: Scenario) -> int:
         if isinstance(trace, DeploymentTrace):
             size += solc_json_source_size(trace.solc_json)
     return size
+
+
+def _sanitize_scenario_for_corpus(
+    scenario: Scenario,
+    ivy_result: ScenarioResult,
+) -> tuple[Scenario, bool]:
+    if len(scenario.traces) != len(ivy_result.results):
+        return scenario, any(
+            isinstance(trace, DeploymentTrace) for trace in scenario.traces
+        )
+
+    sanitized_traces = []
+    deployment_count = 0
+    for trace, trace_result in zip(scenario.traces, ivy_result.results):
+        if isinstance(trace, DeploymentTrace):
+            result = trace_result.result
+            if (
+                trace_result.trace_type == "deployment"
+                and isinstance(result, DeploymentResult)
+                and result.error_phase == "compile"
+            ):
+                continue
+            deployment_count += 1
+        sanitized_traces.append(trace)
+
+    return (
+        Scenario(
+            traces=sanitized_traces,
+            dependencies=scenario.dependencies,
+            scenario_id=scenario.scenario_id,
+            use_python_args=scenario.use_python_args,
+        ),
+        deployment_count > 0,
+    )
 
 
 def build_default_coverage_test_filter() -> TestFilter:
@@ -130,6 +165,9 @@ def _admit_to_corpus(
     disk_index: DiskIndex,
     corpus_dir: Path,
 ) -> Optional[GatekeeperDecision]:
+    scenario, has_deployment_trace = _sanitize_scenario_for_corpus(
+        scenario, artifacts.ivy_result
+    )
     coverage_fp = coverage_fingerprint(edge_ids)
     source_size = _scenario_source_size(scenario)
 
@@ -143,9 +181,12 @@ def _admit_to_corpus(
             source_size=source_size,
             cycle_time_s=cycle_time_s,
         ),
+        post_processed_scenario=scenario,
         coverage_fp=coverage_fp,
     )
     if not decision.accept:
+        return None
+    if not has_deployment_trace:
         return None
 
     write_corpus_entry(
@@ -163,10 +204,7 @@ def _admit_to_corpus(
 
 
 def _has_unique_issue(analysis: Any) -> bool:
-    return (
-        analysis.unique_crash_count() > 0
-        or analysis.unique_divergence_count() > 0
-    )
+    return analysis.unique_crash_count() > 0 or analysis.unique_divergence_count() > 0
 
 
 def _update_stagnation_counters(
@@ -176,12 +214,8 @@ def _update_stagnation_counters(
     iters_since_new_compiler_cov: int,
     iters_since_unique_issue: int,
 ) -> tuple[int, int]:
-    has_new_compiler_cov = (
-        decision is not None
-        and (
-            decision.reason == "new_edge"
-            or decision.new_edges > 0
-        )
+    has_new_compiler_cov = decision is not None and (
+        decision.reason == "new_edge" or decision.new_edges > 0
     )
     if has_new_compiler_cov:
         iters_since_new_compiler_cov = 0
@@ -274,7 +308,9 @@ def _bootstrap_worker(
             )
             cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-            reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=base_fuzzer.debug_mode)
+            reporter.ingest_run(
+                artifacts.analysis, artifacts, debug_mode=base_fuzzer.debug_mode
+            )
 
             edge_ids = _hash_collected_arcs(collector, edge_map)
             decision = _admit_to_corpus(
@@ -566,7 +602,9 @@ def _worker_main(
                 )
                 cycle_time_s = max(time.perf_counter() - cycle_start, _EPS)
 
-                reporter.ingest_run(artifacts.analysis, artifacts, debug_mode=debug_mode)
+                reporter.ingest_run(
+                    artifacts.analysis, artifacts, debug_mode=debug_mode
+                )
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
                 decision = _admit_to_corpus(
