@@ -45,6 +45,7 @@ class Divergence:
     boa_result: Optional[Union[DeploymentResult, CallResult]] = None
     function: Optional[str] = None  # For execution divergences
     details: Optional[str] = None  # Additional diagnostic info
+    reason: Optional[str] = None  # Sub-category: why the divergence was detected
     xfail_expected: Optional[str] = None
     xfail_actual: Optional[str] = None  # What actually happened
     xfail_reasons: list[str] = field(default_factory=list)
@@ -54,6 +55,7 @@ class Divergence:
         """Convert to dictionary for JSON serialization. Result is cached."""
         result = {
             "type": self.type,
+            "reason": self.reason,
             "step": self.step,
             "divergent_runner": self.divergent_runner,
         }
@@ -97,8 +99,6 @@ def _get_xfail_reasons(expectations: list[XFailExpectation]) -> list[str]:
 
 
 def _deployment_outcome_label(result: DeploymentResult) -> str:
-    if result.is_compilation_timeout:
-        return "compilation_timeout"
     if result.is_compilation_failure:
         return "compilation_failure"
     if result.is_compiler_crash:
@@ -118,8 +118,6 @@ def _execution_outcome_label(
     if result.success:
         return "success"
     if isinstance(result, DeploymentResult):
-        if result.is_compilation_timeout:
-            return "compilation_timeout"
         if result.is_compilation_failure:
             return "compilation_failure"
         if result.is_compiler_crash:
@@ -161,6 +159,7 @@ class DivergenceDetector:
         if len(ivy_result.results) != len(boa_result.results):
             return Divergence(
                 type=DivergenceType.EXECUTION,
+                reason="result_count_mismatch",
                 step=0,
                 scenario=scenario,
                 divergent_runner=divergent_runner,
@@ -197,11 +196,11 @@ class DivergenceDetector:
                     reasons = _get_xfail_reasons(trace_result.compilation_xfails)
                     if reasons and not (
                         deployment_result.is_compilation_failure
-                        or deployment_result.is_compilation_timeout
                         or deployment_result.is_compiler_crash
                     ):
                         return Divergence(
                             type=DivergenceType.XFAIL,
+                            reason="compilation_xfail_pass",
                             step=trace_result.trace_index,
                             scenario=scenario,
                             divergent_runner=xfail_runner_name,
@@ -224,6 +223,7 @@ class DivergenceDetector:
                     if not actual_runtime_fail:
                         return Divergence(
                             type=DivergenceType.XFAIL,
+                            reason="runtime_xfail_pass",
                             step=trace_result.trace_index,
                             scenario=scenario,
                             divergent_runner=xfail_runner_name,
@@ -241,14 +241,14 @@ class DivergenceDetector:
                 ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
                 assert isinstance(ivy_res, DeploymentResult)
                 assert isinstance(boa_res, DeploymentResult)
-                # Compiler crashes and timeouts invalidate comparison.
+                # Compiler crashes invalidate comparison.
                 if ivy_res.is_compiler_crash or boa_res.is_compiler_crash:
                     break
-                if ivy_res.is_compilation_timeout or boa_res.is_compilation_timeout:
-                    break
-                if not self._compare_deployment_results(ivy_res, boa_res):
+                mismatch_reason = self._compare_deployment_results(ivy_res, boa_res)
+                if mismatch_reason is not None:
                     return Divergence(
                         type=DivergenceType.DEPLOYMENT,
+                        reason=mismatch_reason,
                         step=ivy_trace_result.trace_index,
                         scenario=scenario,
                         divergent_runner=divergent_runner,
@@ -265,7 +265,8 @@ class DivergenceDetector:
                 ivy_res, boa_res = ivy_trace_result.result, boa_trace_result.result
                 assert isinstance(ivy_res, CallResult)
                 assert isinstance(boa_res, CallResult)
-                if not self._compare_call_results(ivy_res, boa_res):
+                mismatch_reason = self._compare_call_results(ivy_res, boa_res)
+                if mismatch_reason is not None:
                     # Find the function name from the scenario
                     function_name = None
                     traces = scenario.traces
@@ -275,6 +276,7 @@ class DivergenceDetector:
 
                     return Divergence(
                         type=DivergenceType.EXECUTION,
+                        reason=mismatch_reason,
                         step=ivy_trace_result.trace_index,
                         scenario=scenario,
                         divergent_runner=divergent_runner,
@@ -288,23 +290,26 @@ class DivergenceDetector:
 
     def _compare_deployment_results(
         self, ivy_res: DeploymentResult, boa_res: DeploymentResult
-    ) -> bool:
-        """Compare two deployment results for equality."""
+    ) -> Optional[str]:
+        """Compare two deployment results. Returns mismatch reason or None if equal."""
         # Check if both reverted or both succeeded
         if ivy_res.success != boa_res.success:
-            return False
+            failing = ivy_res if not ivy_res.success else boa_res
+            if failing.is_compilation_failure:
+                return "compilation_mismatch"
+            return "deploy_revert_mismatch"
 
         # If both failed, consider them equal
         # TODO: catch cases where semantically different errors occur
         if not ivy_res.success:
-            return True
+            return None
 
         # Compare deployed addresses
         ivy_addr = str(getattr(ivy_res.contract, "address", ivy_res.contract))
         boa_addr = str(getattr(boa_res.contract, "address", boa_res.contract))
 
         if ivy_addr != boa_addr:
-            return False
+            return "address_mismatch"
 
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
@@ -312,7 +317,7 @@ class DivergenceDetector:
                 if not self._normalized_dumps_match(
                     ivy_res, boa_res, location=DataLocation.STORAGE
                 ):
-                    return False
+                    return "storage_mismatch"
 
         if (
             ivy_res.transient_storage_dump is not None
@@ -324,23 +329,25 @@ class DivergenceDetector:
                     boa_res,
                     location=DataLocation.TRANSIENT,
                 ):
-                    return False
+                    return "transient_storage_mismatch"
 
-        return True
+        return None
 
-    def _compare_call_results(self, ivy_res: CallResult, boa_res: CallResult) -> bool:
-        """Compare two call results for equality."""
+    def _compare_call_results(
+        self, ivy_res: CallResult, boa_res: CallResult
+    ) -> Optional[str]:
+        """Compare two call results. Returns mismatch reason or None if equal."""
         # Check if both reverted or both succeeded
         if ivy_res.success != boa_res.success:
-            return False
+            return "success_revert_mismatch"
 
         # If both reverted, consider them equal
         if not ivy_res.success:
-            return True
+            return None
 
         # Compare outputs
         if ivy_res.output != boa_res.output:
-            return False
+            return "output_mismatch"
 
         # Compare storage dumps if available
         if ivy_res.storage_dump is not None and boa_res.storage_dump is not None:
@@ -348,7 +355,7 @@ class DivergenceDetector:
                 if not self._normalized_dumps_match(
                     ivy_res, boa_res, location=DataLocation.STORAGE
                 ):
-                    return False
+                    return "storage_mismatch"
 
         if (
             ivy_res.transient_storage_dump is not None
@@ -360,9 +367,9 @@ class DivergenceDetector:
                     boa_res,
                     location=DataLocation.TRANSIENT,
                 ):
-                    return False
+                    return "transient_storage_mismatch"
 
-        return True
+        return None
 
     @staticmethod
     def _normalized_dumps_match(
