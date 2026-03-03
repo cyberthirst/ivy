@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fuzzer.deduper import Deduper
+from fuzzer.deduper import Deduper, fingerprint_error
 from fuzzer.divergence_detector import Divergence, DivergenceType
 from fuzzer.runner.base_scenario_runner import CallResult
 from fuzzer.runner.scenario import Scenario
@@ -386,3 +386,102 @@ def test_similar_contracts_do_not_dedup_when_success_states_match():
     assert two.fingerprint == ""
     assert three.fingerprint == ""
     assert four.fingerprint == ""
+
+
+def test_boa_error_fingerprint_uses_structured_fields():
+    from boa.contracts.base_evm_contract import BoaError, StackTrace
+
+    from boa.contracts.vyper.vyper_contract import ErrorDetail
+
+    class FakeVMError(Exception):
+        pass
+
+    class Revert(FakeVMError):
+        pass
+
+    class InvalidInstruction(FakeVMError):
+        pass
+
+    def make_error_detail(vm_error, error_detail_str):
+        ed = ErrorDetail.__new__(ErrorDetail)
+        ed.vm_error = vm_error
+        ed.error_detail = error_detail_str
+        return ed
+
+    def make_boa_error(vm_error, error_detail_str):
+        st = StackTrace([make_error_detail(vm_error, error_detail_str)])
+        err = BoaError.__new__(BoaError)
+        err.stack_trace = st
+        err.call_trace = None
+        return err
+
+    # Different vm_error types produce different fingerprints
+    revert_err = make_boa_error(Revert(), "safeadd")
+    invalid_err = make_boa_error(InvalidInstruction(), "safeadd")
+    fp_revert = fingerprint_error(revert_err)
+    fp_invalid = fingerprint_error(invalid_err)
+    assert fp_revert != fp_invalid
+    assert fp_revert[0] == "Revert"
+    assert fp_invalid[0] == "InvalidInstruction"
+
+    # Different error_detail strings produce different fingerprints
+    safeadd_err = make_boa_error(Revert(), "safeadd")
+    bounds_err = make_boa_error(Revert(), "int128 bounds check")
+    fp_safeadd = fingerprint_error(safeadd_err)
+    fp_bounds = fingerprint_error(bounds_err)
+    assert fp_safeadd != fp_bounds
+    assert fp_safeadd[1] == "safeadd"
+    assert fp_bounds[1] == "int128 bounds check"
+
+    # Same vm_error type + same error_detail produce identical fingerprints
+    err_a = make_boa_error(Revert(), "safeadd")
+    err_b = make_boa_error(Revert(), "safeadd")
+    assert fingerprint_error(err_a) == fingerprint_error(err_b)
+
+    # Frames are always empty for BoaError fingerprints
+    assert fp_revert[2] == ()
+
+
+def test_boa_error_dedup_distinguishes_different_reverts():
+    from boa.contracts.base_evm_contract import BoaError, StackTrace
+    from boa.contracts.vyper.vyper_contract import ErrorDetail
+
+    class Revert(Exception):
+        pass
+
+    def make_boa_error(error_detail_str):
+        ed = ErrorDetail.__new__(ErrorDetail)
+        ed.vm_error = Revert()
+        ed.error_detail = error_detail_str
+        st = StackTrace([ed])
+        err = BoaError.__new__(BoaError)
+        err.stack_trace = st
+        err.call_trace = None
+        return err
+
+    deduper = Deduper()
+
+    # Two divergences with different BoaError error_detail should both be kept
+    div_safeadd = _make_result_divergence(
+        ivy_success=True,
+        boa_success=False,
+        boa_error=make_boa_error("safeadd"),
+    )
+    div_bounds = _make_result_divergence(
+        ivy_success=True,
+        boa_success=False,
+        boa_error=make_boa_error("int128 bounds check"),
+    )
+    div_safeadd_dup = _make_result_divergence(
+        ivy_success=True,
+        boa_success=False,
+        boa_error=make_boa_error("safeadd"),
+    )
+
+    first = deduper.check_divergence(div_safeadd)
+    second = deduper.check_divergence(div_bounds)
+    third = deduper.check_divergence(div_safeadd_dup)
+
+    assert first.keep is True
+    assert second.keep is True  # different error_detail
+    assert third.keep is False  # duplicate of first

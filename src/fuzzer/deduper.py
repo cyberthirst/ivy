@@ -10,21 +10,24 @@ Fingerprinting Strategy
 | Category                              | Dedup? | Fingerprint                                            |
 |---------------------------------------|--------|--------------------------------------------------------|
 | Divergence: both ok, different result | No     | -                                                      |
-| Divergence: one ok, one failed        | Yes    | (type, runner, error_type, msg[:20], last_3_frames)    |
+| Divergence: one ok, one failed        | Yes    | (type, runner, error_fp)                               |
 | Divergence: xfail violation           | Yes    | (xfail_expected, xfail_actual, xfail_reasons)          |
 | Compiler crash                        | Yes    | (error_type, msg[:20], last_3_frames)                  |
 | Compilation failure                   | Yes    | (error_type, msg[:20], last_5_frames)                  |
 
-Error fingerprinting uses:
-- error_type: Exception class name (e.g., "CompilerPanic")
-- msg[:20]: First 20 chars of first line of error message
-- last_N_frames: Last N stack frames as (filename:lineno:funcname)
+Error fingerprinting (error_fp) returns (error_type, detail, frames):
+- Generic exceptions: (class_name, msg[:20], last_N_stack_frames)
+- BoaError: (vm_error_type, error_detail, ()) — uses structured ErrorDetail
+  because BoaError's str() and traceback are useless for differentiation
 """
 
 import hashlib
 import traceback
 from dataclasses import dataclass
 from typing import Dict, Optional, Tuple
+
+from boa.contracts.base_evm_contract import BoaError  # type: ignore[import-not-found]
+from boa.contracts.vyper.vyper_contract import ErrorDetail  # type: ignore[import-not-found]
 
 from fuzzer.divergence_detector import Divergence, DivergenceType
 
@@ -66,10 +69,19 @@ def fingerprint_error(
     """
     Build fingerprint tuple from an exception.
 
-    Returns (error_type, msg_prefix, stack_frames).
+    Returns (error_type, detail, stack_frames).
+    For BoaError, extracts (vm_error_type, error_detail, ()) from ErrorDetail.
+    For other exceptions, uses (class_name, msg[:20], last_N_frames).
     """
     if error is None:
         return ("", "", ())
+
+    if isinstance(error, BoaError):
+        frame = error.stack_trace.last_frame  # type: ignore[union-attr]
+        if isinstance(frame, ErrorDetail):
+            vm_error_type = type(frame.vm_error).__name__
+            error_detail = frame.error_detail or ""
+            return (vm_error_type, error_detail, ())
 
     error_type = type(error).__name__
     try:
