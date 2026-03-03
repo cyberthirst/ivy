@@ -10,8 +10,8 @@ Fingerprinting Strategy
 | Category                              | Dedup? | Fingerprint                                            |
 |---------------------------------------|--------|--------------------------------------------------------|
 | Divergence: both ok, different result | No     | -                                                      |
-| Divergence: one ok, one failed        | Yes    | (type, runner, error_fp)                               |
-| Divergence: xfail violation           | Yes    | (xfail_expected, xfail_actual, xfail_reasons)          |
+| Divergence: one ok, one failed        | Yes    | (type, reason, runner, error_fp)                       |
+| Divergence: xfail violation           | Yes    | (reason, xfail_expected, xfail_actual, xfail_reasons)  |
 | Compiler crash                        | Yes    | (error_type, msg[:20], last_3_frames)                  |
 | Compilation failure                   | Yes    | (error_type, msg[:20], last_5_frames)                  |
 
@@ -161,6 +161,7 @@ class Deduper:
     def _check_xfail(self, divergence: Divergence) -> KeepDecision:
         sig = (
             "xfail",
+            divergence.reason,
             divergence.xfail_expected,
             divergence.xfail_actual,
             tuple(divergence.xfail_reasons),
@@ -185,7 +186,7 @@ class Deduper:
             error = divergence.ivy_result.error if divergence.ivy_result else None
 
         error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
-        sig = (str(divergence.type), failing_runner, error_fp)
+        sig = (str(divergence.type), divergence.reason, failing_runner, error_fp)
         return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def check_compiler_crash(self, error: Exception) -> KeepDecision:
