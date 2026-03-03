@@ -8,7 +8,7 @@ import logging
 import multiprocessing
 from pathlib import Path
 import random
-import resource
+import subprocess
 import time
 from typing import Any, Mapping, MutableSequence, Optional
 
@@ -56,6 +56,8 @@ _STATE_RUNNING = 1
 _STATE_BOOTSTRAPPING = 2
 _STATE_STOPPED = 3
 _DEFAULT_WORKER_MEMORY_LIMIT_BYTES = 1 * 1024**3
+_DEFAULT_MEMORY_BREACH_GRACE_CHECKS = 3
+_DEFAULT_MAX_WORKER_LIFETIME_S = 30 * 60.0
 _DEDUPER_FINGERPRINT_SNAPSHOT_FILE = "deduper_fingerprints.json"
 
 
@@ -98,14 +100,17 @@ def _save_deduper_fingerprint_snapshot(
         f.write("\n")
 
 
-def _apply_memory_limit(limit_bytes: int, worker_id: int) -> None:
+def _get_rss_bytes(pid: int) -> Optional[int]:
+    """Read RSS bytes for a process via ``ps`` on Linux/macOS."""
     try:
-        resource.setrlimit(resource.RLIMIT_AS, (limit_bytes, limit_bytes))
-        logger.info(
-            f"[w{worker_id}] memory limit set to {limit_bytes / 1024**3:.1f} GiB"
+        out = subprocess.check_output(
+            ["ps", "-o", "rss=", "-p", str(pid)],
+            stderr=subprocess.DEVNULL,
+            text=True,
         )
-    except (ValueError, OSError) as exc:
-        logger.warning(f"[w{worker_id}] failed to set memory limit: {exc}")
+        return int(out.strip()) * 1024  # ps reports KiB
+    except (subprocess.CalledProcessError, OSError, ValueError):
+        return None
 
 
 def _scenario_source_size(scenario: Scenario) -> int:
@@ -461,7 +466,6 @@ def _worker_main(
     seen_crashes: Optional[dict[str, bool]] = None,
     seen_compile_failures: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
-    worker_memory_limit: Optional[int] = None,
     debug_mode: bool = False,
     bootstrap_required: bool = False,
     bootstrap_done_event: Optional[Any] = None,
@@ -584,11 +588,9 @@ def _worker_main(
             disk_index.scan_new()
         if drop_initial_fresh:
             cleared = disk_index.clear_fresh()
+
             if cleared > 0:
                 logger.info(f"[w{worker_id}] cleared {cleared} fresh bootstrap entries")
-
-        if worker_memory_limit is not None:
-            _apply_memory_limit(worker_memory_limit, worker_id)
 
         while len(disk_index) == 0 and not stop_event.is_set():
             time.sleep(0.5)
@@ -845,14 +847,16 @@ class ParallelFuzzer:
         tag_edges_with_config: bool = False,
         compaction_interval_s: float = 60.0,
         snapshot_interval_s: float = 120.0,
-        monitor_interval_s: float = 2.0,
+        monitor_interval_s: float = 1.0,
         worker_stall_timeout_s: float = 45.0,
+        max_worker_lifetime_s: Optional[float] = _DEFAULT_MAX_WORKER_LIFETIME_S,
         min_energy: int = 4,
         max_energy: int = 16,
         max_runtime_s: Optional[float] = None,
         max_iterations_per_worker: Optional[int] = None,
         reports_dir: Path = Path("reports"),
         worker_memory_limit: Optional[int] = _DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
+        memory_breach_grace_checks: int = _DEFAULT_MEMORY_BREACH_GRACE_CHECKS,
         debug_mode: bool = False,
     ):
         self.exports_dir = Path(exports_dir)
@@ -867,12 +871,14 @@ class ParallelFuzzer:
         self.snapshot_interval_s = snapshot_interval_s
         self.monitor_interval_s = monitor_interval_s
         self.worker_stall_timeout_s = worker_stall_timeout_s
+        self.max_worker_lifetime_s = max_worker_lifetime_s
         self.min_energy = min_energy
         self.max_energy = max_energy
         self.max_runtime_s = max_runtime_s
         self.max_iterations_per_worker = max_iterations_per_worker
         self.reports_dir = Path(reports_dir)
         self.worker_memory_limit = worker_memory_limit
+        self.memory_breach_grace_checks = max(1, int(memory_breach_grace_checks))
         self.debug_mode = debug_mode
 
         self.ctx = multiprocessing.get_context("spawn")
@@ -912,6 +918,8 @@ class ParallelFuzzer:
         self._shared_seen_divergences = self._manager.dict()
 
         self._worker_epochs = [0 for _ in range(self.num_workers)]
+        self._worker_start_ts = [0.0 for _ in range(self.num_workers)]
+        self._memory_breach_counts = [0 for _ in range(self.num_workers)]
         self._test_filter: Optional[TestFilter] = None
         self._bootstrap_required = False
         self._drop_initial_fresh = False
@@ -945,7 +953,6 @@ class ParallelFuzzer:
                 "seen_crashes": self._shared_seen_crashes,
                 "seen_compile_failures": self._shared_seen_compile_failures,
                 "seen_divergences": self._shared_seen_divergences,
-                "worker_memory_limit": self.worker_memory_limit,
                 "debug_mode": self.debug_mode,
                 "bootstrap_required": self._bootstrap_required,
                 "bootstrap_done_event": self._bootstrap_done_event,
@@ -957,6 +964,8 @@ class ParallelFuzzer:
             name=f"parallel-fuzzer-worker-{worker_id}",
         )
         process.start()
+        self._worker_start_ts[worker_id] = time.monotonic()
+        self._memory_breach_counts[worker_id] = 0
         self.last_progress_ts[worker_id] = time.monotonic()
         self.last_iter[worker_id] = 0
         self.worker_state[worker_id] = _STATE_IDLE
@@ -1055,18 +1064,47 @@ class ParallelFuzzer:
             if not process.is_alive():
                 if self.stop_event.is_set():
                     continue
+                self._memory_breach_counts[worker_id] = 0
                 self._worker_epochs[worker_id] += 1
                 workers[worker_id] = self._spawn_worker(worker_id)
                 restarted = True
                 continue
 
-            if self.worker_state[worker_id] == _STATE_BOOTSTRAPPING:
-                continue
+            kill_reason: Optional[str] = None
+            is_bootstrapping = self.worker_state[worker_id] == _STATE_BOOTSTRAPPING
 
             last_ts = self.last_progress_ts[worker_id]
-            if now - last_ts <= self.worker_stall_timeout_s:
+            if not is_bootstrapping and now - last_ts > self.worker_stall_timeout_s:
+                kill_reason = "stalled"
+
+            if kill_reason is None and self.worker_memory_limit is not None:
+                rss = _get_rss_bytes(process.pid)
+                if rss is None:
+                    self._memory_breach_counts[worker_id] = 0
+                elif rss > self.worker_memory_limit:
+                    self._memory_breach_counts[worker_id] += 1
+                    breaches = self._memory_breach_counts[worker_id]
+                    if breaches >= self.memory_breach_grace_checks:
+                        kill_reason = (
+                            f"RSS {rss / 1024**2:.0f} MiB > "
+                            f"{self.worker_memory_limit / 1024**2:.0f} MiB limit "
+                            f"for {breaches} checks"
+                        )
+                else:
+                    self._memory_breach_counts[worker_id] = 0
+
+            if kill_reason is None and self.max_worker_lifetime_s is not None:
+                age_s = now - self._worker_start_ts[worker_id]
+                if age_s >= self.max_worker_lifetime_s:
+                    kill_reason = (
+                        f"recycling after {age_s:.0f}s "
+                        f"(limit={self.max_worker_lifetime_s:.0f}s)"
+                    )
+
+            if kill_reason is None:
                 continue
 
+            logger.warning(f"[w{worker_id}] killing worker: {kill_reason}")
             process.terminate()
             process.join(timeout=3.0)
             if process.is_alive():
@@ -1076,6 +1114,7 @@ class ParallelFuzzer:
             if self.stop_event.is_set():
                 continue
 
+            self._memory_breach_counts[worker_id] = 0
             self._worker_epochs[worker_id] += 1
             workers[worker_id] = self._spawn_worker(worker_id)
             restarted = True
@@ -1111,10 +1150,17 @@ class ParallelFuzzer:
             if self.worker_memory_limit is not None
             else "unlimited"
         )
+        lifetime_str = (
+            f"{self.max_worker_lifetime_s:.0f}s"
+            if self.max_worker_lifetime_s is not None
+            else "disabled"
+        )
         logger.info(
             f"starting {self.num_workers} workers, seed={self.seed}, "
             f"corpus={self.corpus_dir}, reports={self.reports_dir}, "
             f"worker_memory_limit={mem_str}, "
+            f"memory_breach_grace_checks={self.memory_breach_grace_checks}, "
+            f"max_worker_lifetime={lifetime_str}, "
             f"bootstrap_required={self._bootstrap_required}"
         )
 
@@ -1193,11 +1239,43 @@ def main() -> None:
     parser.add_argument("--max-corpus-size", type=int, default=10_000)
     parser.add_argument("--max-runtime-s", type=float, default=None)
     parser.add_argument("--max-iterations-per-worker", type=int, default=None)
+    parser.add_argument(
+        "--worker-memory-limit-mib",
+        type=float,
+        default=_DEFAULT_WORKER_MEMORY_LIMIT_BYTES / 1024**2,
+        help="Per-worker RSS limit in MiB (<=0 disables)",
+    )
+    parser.add_argument(
+        "--memory-breach-grace-checks",
+        type=int,
+        default=_DEFAULT_MEMORY_BREACH_GRACE_CHECKS,
+        help="Consecutive monitor checks above RSS limit before recycling",
+    )
+    parser.add_argument(
+        "--max-worker-lifetime-s",
+        type=float,
+        default=_DEFAULT_MAX_WORKER_LIFETIME_S,
+        help="Recycle workers after this many seconds (<=0 disables)",
+    )
+    parser.add_argument("--monitor-interval-s", type=float, default=1.0)
     parser.add_argument("--debug", action="store_true", default=False)
     args = parser.parse_args()
 
     if args.num_workers < 1:
         parser.error("--num-workers must be >= 1")
+    if args.memory_breach_grace_checks < 1:
+        parser.error("--memory-breach-grace-checks must be >= 1")
+    if args.monitor_interval_s <= 0:
+        parser.error("--monitor-interval-s must be > 0")
+
+    worker_memory_limit = (
+        None
+        if args.worker_memory_limit_mib <= 0
+        else int(args.worker_memory_limit_mib * 1024**2)
+    )
+    max_worker_lifetime_s = (
+        None if args.max_worker_lifetime_s <= 0 else args.max_worker_lifetime_s
+    )
 
     fuzzer = ParallelFuzzer(
         exports_dir=args.exports_dir,
@@ -1208,8 +1286,11 @@ def main() -> None:
         max_corpus_size=args.max_corpus_size,
         max_runtime_s=args.max_runtime_s,
         max_iterations_per_worker=args.max_iterations_per_worker,
+        monitor_interval_s=args.monitor_interval_s,
         reports_dir=args.reports_dir,
-        worker_memory_limit=_DEFAULT_WORKER_MEMORY_LIMIT_BYTES,
+        worker_memory_limit=worker_memory_limit,
+        memory_breach_grace_checks=args.memory_breach_grace_checks,
+        max_worker_lifetime_s=max_worker_lifetime_s,
         debug_mode=args.debug,
     )
     fuzzer.run(test_filter=build_default_coverage_test_filter())
