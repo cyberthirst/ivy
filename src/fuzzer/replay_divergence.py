@@ -104,11 +104,14 @@ def replay_divergence(divergence_path: Path) -> bool:
     if not data.get("traces"):
         raise ValueError("Cannot replay: no traces in divergence file")
 
+    expected_reason = data.get("reason")
     scenario = _build_scenario_from_traces(data)
-    return _run_and_check(scenario)
+    return _run_and_check(scenario, expected_reason=expected_reason)
 
 
-def _run_and_check(scenario: Scenario) -> bool:
+def _run_and_check(
+    scenario: Scenario, *, expected_reason: str | None = None
+) -> bool:
     """Run scenario and check for divergences."""
     multi_runner = MultiRunner(collect_storage_dumps=True)
     detector = DivergenceDetector()
@@ -118,7 +121,19 @@ def _run_and_check(scenario: Scenario) -> bool:
     divergences = detector.compare_all_results(
         results.ivy_result, results.boa_results, scenario
     )
-    return len(divergences) > 0
+    if not divergences:
+        return False
+
+    if expected_reason is not None:
+        replayed_reasons = [d.reason for d in divergences]
+        if expected_reason not in replayed_reasons:
+            print(
+                f"Warning: expected reason '{expected_reason}' "
+                f"but got {replayed_reasons}"
+            )
+            return False
+
+    return True
 
 
 def main(argv: list[str]) -> None:
