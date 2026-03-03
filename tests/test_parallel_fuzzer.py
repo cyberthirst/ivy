@@ -231,15 +231,31 @@ def test_update_stagnation_counters_does_not_reset_for_better_representative():
         selection_weight=0.0,
     )
 
-    cov_iters, issue_iters = _update_stagnation_counters(
+    (
+        cov_iters,
+        issue_iters,
+        t_last_new_cov,
+        t_last_unique_issue,
+        ema_dt_cov,
+        ema_dt_issue,
+    ) = _update_stagnation_counters(
         decision=decision,
         analysis=AnalysisResult(),
         iters_since_new_compiler_cov=9,
         iters_since_unique_issue=4,
+        now=100.0,
+        t_last_new_cov=90.0,
+        t_last_unique_issue=80.0,
+        ema_dt_cov=5.0,
+        ema_dt_issue=300.0,
     )
 
     assert cov_iters == 10
     assert issue_iters == 5
+    assert t_last_new_cov == 90.0
+    assert t_last_unique_issue == 80.0
+    assert ema_dt_cov == 5.0
+    assert ema_dt_issue == 300.0
 
 
 def test_update_stagnation_counters_resets_on_new_edge_and_unique_issue():
@@ -265,15 +281,31 @@ def test_update_stagnation_counters_resets_on_new_edge_and_unique_issue():
         selection_weight=0.0,
     )
 
-    cov_iters, issue_iters = _update_stagnation_counters(
+    (
+        cov_iters,
+        issue_iters,
+        t_last_new_cov,
+        t_last_unique_issue,
+        ema_dt_cov,
+        ema_dt_issue,
+    ) = _update_stagnation_counters(
         decision=decision,
         analysis=analysis,
         iters_since_new_compiler_cov=9,
         iters_since_unique_issue=4,
+        now=130.0,
+        t_last_new_cov=100.0,
+        t_last_unique_issue=10.0,
+        ema_dt_cov=5.0,
+        ema_dt_issue=300.0,
     )
 
     assert cov_iters == 0
     assert issue_iters == 0
+    assert t_last_new_cov == 130.0
+    assert t_last_unique_issue == 130.0
+    assert ema_dt_cov == 7.5
+    assert ema_dt_issue == 282.0
 
 
 def test_deduper_fingerprint_snapshot_round_trip(tmp_path):

@@ -31,6 +31,7 @@ from fuzzer.coverage.gatekeeper import (
     Gatekeeper,
     GatekeeperDecision,
     coverage_fingerprint,
+    had_any_successful_compile,
 )
 from fuzzer.coverage.shared_tracker import SharedEdgeTracker, create_shared_edge_counts
 from fuzzer.export_utils import (
@@ -249,27 +250,67 @@ def _has_unique_issue(analysis: Any) -> bool:
     return analysis.unique_crash_count() > 0 or analysis.unique_divergence_count() > 0
 
 
+def _clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
+
+
+def _ramp01(x: float, soft: float, hard: float) -> float:
+    if x <= soft:
+        return 0.0
+    if x >= hard:
+        return 1.0
+    return (x - soft) / (hard - soft)
+
+
+def _geom_interp(s: float, n_min: float = 1.0, n_max: float = 16.0) -> int:
+    return max(1, round(n_min * (n_max / n_min) ** s))
+
+
+def _gen_prob(
+    s_cov: float, p_min: float = 0.01, p_max: float = 0.60, gamma: float = 2.0
+) -> float:
+    return p_min + (p_max - p_min) * s_cov**gamma
+
+
 def _update_stagnation_counters(
     *,
     decision: Optional[GatekeeperDecision],
     analysis: Any,
     iters_since_new_compiler_cov: int,
     iters_since_unique_issue: int,
-) -> tuple[int, int]:
+    now: float,
+    t_last_new_cov: float,
+    t_last_unique_issue: float,
+    ema_dt_cov: float,
+    ema_dt_issue: float,
+) -> tuple[int, int, float, float, float, float]:
     has_new_compiler_cov = decision is not None and (
         decision.reason == "new_edge" or decision.new_edges > 0
     )
     if has_new_compiler_cov:
+        dt = now - t_last_new_cov
+        ema_dt_cov = 0.9 * ema_dt_cov + 0.1 * dt
+        t_last_new_cov = now
         iters_since_new_compiler_cov = 0
     else:
         iters_since_new_compiler_cov += 1
 
     if _has_unique_issue(analysis):
+        dt = now - t_last_unique_issue
+        ema_dt_issue = 0.9 * ema_dt_issue + 0.1 * dt
+        t_last_unique_issue = now
         iters_since_unique_issue = 0
     else:
         iters_since_unique_issue += 1
 
-    return iters_since_new_compiler_cov, iters_since_unique_issue
+    return (
+        iters_since_new_compiler_cov,
+        iters_since_unique_issue,
+        t_last_new_cov,
+        t_last_unique_issue,
+        ema_dt_cov,
+        ema_dt_issue,
+    )
 
 
 def _bootstrap_worker(
@@ -417,7 +458,6 @@ def _worker_main(
     max_energy: int = 16,
     max_iterations: Optional[int] = None,
     log_interval: int = _LOG_INTERVAL,
-    stagnation_threshold: int = 80,
     seen_crashes: Optional[dict[str, bool]] = None,
     seen_compile_failures: Optional[dict[str, bool]] = None,
     seen_divergences: Optional[dict[str, bool]] = None,
@@ -467,6 +507,12 @@ def _worker_main(
     iters_since_unique_issue = 0
     last_scan = time.monotonic()
     last_purge = last_scan
+    t_last_new_cov = time.monotonic()
+    t_last_unique_issue = time.monotonic()
+    ema_dt_cov = 5.0
+    ema_dt_issue = 300.0
+    s_smooth = 0.0
+    valid_ema = 0.80
 
     _touch_heartbeat(
         worker_id,
@@ -586,7 +632,29 @@ def _worker_main(
                 )
 
             # Pick a starting scenario: generate from scratch or select from corpus
-            if iters_since_new_compiler_cov >= stagnation_threshold:
+            now_s = time.monotonic()
+            dt_cov = now_s - t_last_new_cov
+            dt_issue = now_s - t_last_unique_issue
+
+            soft_cov = _clamp(2 * ema_dt_cov, 2, 60)
+            hard_cov = _clamp(10 * ema_dt_cov, 10, 900)
+            soft_issue = _clamp(2 * ema_dt_issue, 60, 1800)
+            hard_issue = _clamp(10 * ema_dt_issue, 600, 21600)
+
+            s_cov = _ramp01(dt_cov, soft_cov, hard_cov)
+            s_issue = _ramp01(dt_issue, soft_issue, hard_issue)
+            s_raw = 1.0 - (1.0 - s_cov) * (1.0 - 0.25 * s_issue)
+            s_smooth = 0.9 * s_smooth + 0.1 * s_raw
+
+            n_mut = _geom_interp(s_smooth)
+            if valid_ema < 0.60:
+                n_mut = max(1, round(n_mut * (valid_ema / 0.60)))
+
+            gp = _gen_prob(s_cov)
+            if valid_ema < 0.5:
+                gp = min(0.80, gp + 0.25 * (0.5 - valid_ema))
+
+            if rng.random() < gp:
                 gen_seed = _derive_seed(worker_seed, "gen", batch_id)
                 parent_scenario = generate_scenario(seed=gen_seed)
                 if parent_scenario is None:
@@ -624,7 +692,7 @@ def _worker_main(
 
                 cycle_start = time.perf_counter()
                 mutated = base_fuzzer.mutate_scenario(
-                    parent_scenario, scenario_seed=scenario_seed
+                    parent_scenario, scenario_seed=scenario_seed, n_mutations=n_mut
                 )
 
                 reporter.set_context(
@@ -645,6 +713,8 @@ def _worker_main(
                 reporter.ingest_run(
                     artifacts.analysis, artifacts, debug_mode=debug_mode
                 )
+                compiled_ok = had_any_successful_compile(artifacts.ivy_result)
+                valid_ema = 0.9 * valid_ema + 0.1 * (1.0 if compiled_ok else 0.0)
 
                 edge_ids = _hash_collected_arcs(collector, edge_map)
                 decision = _admit_to_corpus(
@@ -661,11 +731,20 @@ def _worker_main(
                 (
                     iters_since_new_compiler_cov,
                     iters_since_unique_issue,
+                    t_last_new_cov,
+                    t_last_unique_issue,
+                    ema_dt_cov,
+                    ema_dt_issue,
                 ) = _update_stagnation_counters(
                     decision=decision,
                     analysis=artifacts.analysis,
                     iters_since_new_compiler_cov=iters_since_new_compiler_cov,
                     iters_since_unique_issue=iters_since_unique_issue,
+                    now=time.monotonic(),
+                    t_last_new_cov=t_last_new_cov,
+                    t_last_unique_issue=t_last_unique_issue,
+                    ema_dt_cov=ema_dt_cov,
+                    ema_dt_issue=ema_dt_issue,
                 )
 
                 _touch_heartbeat(
@@ -693,6 +772,9 @@ def _worker_main(
                         snapshot,
                         iters_since_new_compiler_cov,
                         iters_since_unique_issue,
+                        s_smooth,
+                        n_mut,
+                        valid_ema,
                     )
 
                 if max_iterations is not None and iteration >= max_iterations:
@@ -724,6 +806,9 @@ def _log_worker_progress(
     snapshot: Optional[dict[str, Any]],  # noqa: ARG001
     iters_since_new_compiler_cov: int,
     iters_since_unique_issue: int,
+    s_smooth: float,
+    n_mut: int,
+    valid_ema: float,
 ) -> None:
     del snapshot
     elapsed = reporter.get_elapsed_time()
@@ -737,6 +822,9 @@ def _log_worker_progress(
         f"crashes={reporter.compiler_crashes} | "
         f"iters_since_cov={iters_since_new_compiler_cov} | "
         f"iters_since_issue={iters_since_unique_issue} | "
+        f"s={s_smooth:.2f} | "
+        f"n_mut={n_mut} | "
+        f"valid={valid_ema:.2f} | "
         f"deploy_ok={deploy_ok:.1f}% | "
         f"call_ok={call_ok:.1f}% | "
         f"rate={rate:.1f}/s"
