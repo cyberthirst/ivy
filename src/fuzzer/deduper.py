@@ -12,13 +12,17 @@ Fingerprinting Strategy
 | Divergence: both ok, different result | No     | -                                                      |
 | Divergence: one ok, one failed        | Yes    | (type, reason, runner, error_fp)                       |
 | Divergence: xfail violation           | Yes    | (reason, xfail_expected, xfail_actual, xfail_reasons)  |
-| Compiler crash                        | Yes    | (error_type, msg[:20], last_3_frames)                  |
-| Compilation failure                   | Yes    | (error_type, msg[:20], last_5_frames)                  |
+| Compiler crash                        | Yes    | (error_type, last_3_frames)                            |
+| Compilation failure                   | Yes    | (error_type, last_5_frames)                            |
 
 Error fingerprinting (error_fp) returns (error_type, detail, frames):
 - Generic exceptions: (class_name, msg[:20], last_N_stack_frames)
 - BoaError: (vm_error_type, error_detail, ()) — uses structured ErrorDetail
   because BoaError's str() and traceback are useless for differentiation
+
+Compiler crash and compilation-failure dedup intentionally ignore message
+detail and key only on error type + stack frames to avoid over-splitting on
+volatile SSA names in exception text.
 """
 
 import hashlib
@@ -190,11 +194,13 @@ class Deduper:
         return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def check_compiler_crash(self, error: Exception) -> KeepDecision:
-        sig = ("crash", fingerprint_error(error, self.CRASH_FRAMES))
+        error_type, _detail, frames = fingerprint_error(error, self.CRASH_FRAMES)
+        sig = ("crash", error_type, frames)
         return self._check_seen(sig, self._seen_crashes, "crash")
 
     def check_compilation_failure(self, error: Exception) -> KeepDecision:
-        sig = ("compile_fail", fingerprint_error(error, self.COMPILE_FAILURE_FRAMES))
+        error_type, _detail, frames = fingerprint_error(error, self.COMPILE_FAILURE_FRAMES)
+        sig = ("compile_fail", error_type, frames)
         return self._check_seen(sig, self._seen_compile_failures, "compile_failure")
 
     def get_stats(self) -> Dict[str, int]:
