@@ -239,8 +239,8 @@ class FuzzerReporter:
         Report results from an AnalysisResult.
 
         Handles all reporting: stats, item stats, file saving, and logging.
-        Saves unique items to filtered/*/untriaged, all items to
-        unfiltered/*/untriaged if debug_mode.
+        Saves unique items to <category>/queue, all items to
+        <category>/all if debug_mode.
         """
         from .divergence_detector import DivergenceType
 
@@ -274,7 +274,6 @@ class FuzzerReporter:
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
-                    subfolder="filtered",
                 )
             if debug_mode:
                 self.save_compiler_crash(
@@ -282,7 +281,7 @@ class FuzzerReporter:
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
-                    subfolder="unfiltered",
+                    debug_copy=True,
                 )
 
         # Report compilation failures
@@ -301,7 +300,6 @@ class FuzzerReporter:
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
-                    subfolder="filtered",
                 )
             if debug_mode:
                 self.save_compilation_failure(
@@ -309,7 +307,7 @@ class FuzzerReporter:
                     error,
                     error_type,
                     compiler_settings=deployment_result.compiler_settings,
-                    subfolder="unfiltered",
+                    debug_copy=True,
                 )
 
         # Report divergences
@@ -327,9 +325,9 @@ class FuzzerReporter:
                 )
 
             if decision.keep:
-                self.save_divergence(divergence, subfolder="filtered")
+                self.save_divergence(divergence)
             if debug_mode:
-                self.save_divergence(divergence, subfolder="unfiltered")
+                self.save_divergence(divergence, debug_copy=True)
 
         # Log success if no divergences
         if not analysis.divergences:
@@ -912,12 +910,10 @@ class FuzzerReporter:
             "scenarios_per_second": self.get_scenarios_per_second(),
         }
 
-    def save_divergence(self, divergence: Any, subfolder: Optional[str] = None):
+    def save_divergence(self, divergence: Any, *, debug_copy: bool = False):
         """Save a divergence between Ivy and Boa execution."""
         reports_dir = self._get_run_reports_dir()
-        if subfolder:
-            reports_dir = reports_dir / subfolder
-        reports_dir = reports_dir / "divergences" / "untriaged"
+        reports_dir = reports_dir / "divergence" / ("all" if debug_copy else "queue")
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         item_name = self.current_item_name or "unknown"
@@ -946,15 +942,14 @@ class FuzzerReporter:
         error: Optional[Exception],
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
-        subfolder: Optional[str] = None,
+        *,
+        debug_copy: bool = False,
     ):
         """Save a compiler crash with the source code that caused it."""
         error_type = self._resolve_error_type(error, error_type)
 
         crash_dir = self._get_run_reports_dir()
-        if subfolder:
-            crash_dir = crash_dir / subfolder
-        crash_dir = crash_dir / "compiler_crashes" / "untriaged"
+        crash_dir = crash_dir / "crash" / ("all" if debug_copy else "queue")
         crash_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
@@ -987,15 +982,16 @@ class FuzzerReporter:
         error: Optional[Exception],
         error_type: Optional[str] = None,
         compiler_settings: Optional[Dict[str, Any]] = None,
-        subfolder: Optional[str] = None,
+        *,
+        debug_copy: bool = False,
     ):
         """Save a compilation failure with the source code that caused it."""
         error_type = self._resolve_error_type(error, error_type)
 
         failure_dir = self._get_run_reports_dir()
-        if subfolder:
-            failure_dir = failure_dir / subfolder
-        failure_dir = failure_dir / "compilation_failures" / "untriaged"
+        failure_dir = (
+            failure_dir / "compile_failure" / ("all" if debug_copy else "queue")
+        )
         failure_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
