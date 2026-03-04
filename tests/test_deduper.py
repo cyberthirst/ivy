@@ -199,43 +199,33 @@ def test_when_ivy_fails_runner_name_is_ignored_for_dedup():
     assert second_different_runner.keep is False
 
 
-def test_mixed_success_dedup_distinguishes_error_type_message_prefix_and_frames():
+def test_mixed_success_dedup_distinguishes_error_type_and_frames():
     deduper = Deduper()
 
-    # Same first 20 chars and same stack shape should dedup.
-    same_prefix_first = deduper.check_divergence(
+    # Same error type and stack shape should dedup regardless of message.
+    first = deduper.check_divergence(
         _make_result_divergence(
             ivy_success=True,
             boa_success=False,
-            boa_error=_capture_runtime_error_a("01234567890123456789_A"),
+            boa_error=_capture_runtime_error_a("message A"),
         )
     )
-    same_prefix_second = deduper.check_divergence(
+    same_type_different_msg = deduper.check_divergence(
         _make_result_divergence(
             ivy_success=True,
             boa_success=False,
-            boa_error=_capture_runtime_error_a("01234567890123456789_B"),
+            boa_error=_capture_runtime_error_a("completely different message"),
         )
     )
-    assert same_prefix_first.keep is True
-    assert same_prefix_second.keep is False
-
-    # Different first 20 chars should not dedup.
-    different_message = deduper.check_divergence(
-        _make_result_divergence(
-            ivy_success=True,
-            boa_success=False,
-            boa_error=_capture_runtime_error_a("X1234567890123456789_B"),
-        )
-    )
-    assert different_message.keep is True
+    assert first.keep is True
+    assert same_type_different_msg.keep is False
 
     # Different exception type should not dedup.
     different_type = deduper.check_divergence(
         _make_result_divergence(
             ivy_success=True,
             boa_success=False,
-            boa_error=_capture_value_error("01234567890123456789_A"),
+            boa_error=_capture_value_error("message A"),
         )
     )
     assert different_type.keep is True
@@ -245,7 +235,7 @@ def test_mixed_success_dedup_distinguishes_error_type_message_prefix_and_frames(
         _make_result_divergence(
             ivy_success=True,
             boa_success=False,
-            boa_error=_capture_runtime_error_b("01234567890123456789_A"),
+            boa_error=_capture_runtime_error_b("message A"),
         )
     )
     assert different_frames.keep is True

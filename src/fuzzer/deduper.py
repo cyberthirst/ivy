@@ -15,17 +15,16 @@ Fingerprinting Strategy
 | Compiler crash                        | Yes    | CrashSig(error_type, frames)                         |
 | Compilation failure                   | Yes    | CompileFailSig(error_type, frames)                   |
 
-Error fingerprinting (ErrorFP) has fields (error_type, detail, frames):
-- Generic exceptions: ErrorFP(class_name, msg[:20], last_N_stack_frames)
-- BoaError: ErrorFP(class_name, "", boa_frame_fingerprints) where each frame is:
+Error fingerprinting (ErrorFP) has fields (error_type, frames):
+- Generic exceptions: ErrorFP(class_name, last_N_stack_frames)
+- BoaError: ErrorFP(class_name, boa_frame_fingerprints) where each frame is:
   - UnknownFrameFP() for plain string stack frames
   - BoaFrameFP(ast_fingerprint, error_detail, pretty_vm_reason) for ErrorDetail
     frames, using AST fingerprint depth 3 and up to the first 3 frames
     (innermost first)
 
-Compiler crash and compilation-failure dedup intentionally ignore message
-detail and key only on error type + stack frames to avoid over-splitting on
-volatile SSA names in exception text.
+Error messages are intentionally excluded from all fingerprints to avoid
+over-splitting on volatile content (SSA names, addresses, values).
 """
 
 from __future__ import annotations
@@ -67,7 +66,6 @@ class BoaFrameFP(Signature):
 @dataclass(frozen=True)
 class ErrorFP(Signature):
     error_type: str
-    detail: str
     frames: tuple[BoaFrameFP | UnknownFrameFP, ...] | tuple[str, ...]
 
 
@@ -223,27 +221,22 @@ def extract_stack_frames(error: Exception | None, n: int = 3) -> tuple[str, ...]
 def fingerprint_error(error: Exception | None, n_frames: int = 3) -> ErrorFP:
     """Build an ErrorFP from an exception.
 
-    For BoaError: ErrorFP(error_type, "", boa_frame_fingerprints)
-    For other exceptions: ErrorFP(class_name, msg[:20], last_N_frames)
+    For BoaError: ErrorFP(error_type, boa_frame_fingerprints)
+    For other exceptions: ErrorFP(class_name, last_N_frames)
     """
     if error is None:
-        return ErrorFP(error_type="", detail="", frames=())
+        return ErrorFP(error_type="", frames=())
 
     if isinstance(error, BoaError):
         return ErrorFP(
             error_type=type(error).__name__,
-            detail="",
             frames=_fingerprint_boa_error(error, n_frames, 3),
         )
 
     error_type = type(error).__name__
-    try:
-        msg = str(error).split("\n")[0][:20]
-    except Exception:
-        msg = repr(error).split("\n")[0][:20]
     frames = extract_stack_frames(error, n_frames)
 
-    return ErrorFP(error_type=error_type, detail=msg, frames=frames)
+    return ErrorFP(error_type=error_type, frames=frames)
 
 
 # --- Deduper ---
