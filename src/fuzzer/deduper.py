@@ -303,7 +303,7 @@ class Deduper:
         elif divergence.type in (DivergenceType.DEPLOYMENT, DivergenceType.EXECUTION):
             return self._check_result_divergence(divergence)
         else:
-            return KeepDecision(keep=True, reason="unknown_type", fingerprint="")
+            assert False, "unreachable"
 
     def _check_xfail(self, divergence: Divergence) -> KeepDecision:
         sig = XfailSig(

@@ -323,25 +323,6 @@ def test_xfail_divergence_deduplication_keys():
     assert different_reason_order.keep is True
 
 
-def test_unknown_divergence_type_is_always_kept():
-    deduper = Deduper()
-    divergence = Divergence(
-        type="unknown",  # type: ignore[arg-type]
-        step=0,
-        scenario=_make_scenario("@external\ndef foo() -> uint256:\n    return 1\n"),
-    )
-
-    first = deduper.check_divergence(divergence)
-    second = deduper.check_divergence(divergence)
-
-    assert first.keep is True
-    assert second.keep is True
-    assert first.reason == "unknown_type"
-    assert second.reason == "unknown_type"
-    assert first.fingerprint == ""
-    assert second.fingerprint == ""
-
-
 def test_similar_contracts_do_not_dedup_when_success_states_match():
     deduper = Deduper()
 
