@@ -329,6 +329,11 @@ class Deduper:
             error = divergence.ivy_result.error
 
         assert error is not None, "failing result must have an error"
+        if isinstance(error, BoaError):
+            assert divergence.reason in (
+                "deploy_revert_mismatch",
+                "success_revert_mismatch",
+            ), f"BoaError with unexpected reason: {divergence.reason}"
         n_frames = self.DIVERGENCE_FRAMES
         if divergence.reason in ("deploy_revert_mismatch", "success_revert_mismatch"):
             n_frames = self.REVERT_MISMATCH_FRAMES
