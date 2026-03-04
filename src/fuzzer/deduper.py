@@ -17,8 +17,12 @@ Fingerprinting Strategy
 
 Error fingerprinting (error_fp) returns (error_type, detail, frames):
 - Generic exceptions: (class_name, msg[:20], last_N_stack_frames)
-- BoaError: (vm_error_type, error_detail, ()) — uses structured ErrorDetail
-  because BoaError's str() and traceback are useless for differentiation
+- BoaError: (class_name, "", frame_fingerprints) where each frame fingerprint
+  is:
+  - ("unknown",) for plain string stack frames
+  - (fingerprint(ast_source), error_detail, pretty_vm_reason) for ErrorDetail
+    frames, using AST fingerprint depth 3 and up to the first 3 frames
+    (innermost first)
 
 Compiler crash and compilation-failure dedup intentionally ignore message
 detail and key only on error type + stack frames to avoid over-splitting on
@@ -28,12 +32,95 @@ volatile SSA names in exception text.
 import hashlib
 import traceback
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
+from functools import lru_cache
+from typing import Any, Dict, Optional, Tuple
 
 from boa.contracts.base_evm_contract import BoaError  # type: ignore[import-not-found]
-from boa.contracts.vyper.vyper_contract import ErrorDetail  # type: ignore[import-not-found]
+from vyper.ast.nodes import Constant, Name, VyperNode
 
 from fuzzer.divergence_detector import Divergence, DivergenceType
+
+
+def fingerprint_ast_node(node: VyperNode, depth: int = 3) -> str:
+    """Structural fingerprint of a Vyper AST node for dedup."""
+    name = type(node).__name__
+
+    if depth <= 0:
+        return name
+
+    # Leaves: type only, no values.
+    if isinstance(node, Constant):
+        return name
+    if any(base.__name__ == "Operator" for base in type(node).__mro__):
+        return name
+    if isinstance(node, Name):
+        if node.id in _builtin_names():
+            return f"Name({node.id})"
+        return "Name"
+
+    # Compound nodes: recurse into fields.
+    parts = []
+    for field in sorted(node.get_fields()):
+        if field.startswith("_"):
+            continue
+        child = getattr(node, field, None)
+        if child is None:
+            continue
+        if isinstance(child, VyperNode):
+            parts.append(fingerprint_ast_node(child, depth - 1))
+        elif isinstance(child, list):
+            sub = [
+                fingerprint_ast_node(c, depth - 1)
+                for c in child
+                if isinstance(c, VyperNode)
+            ]
+            parts.append(f"[{','.join(sub)}]")
+
+    return f"{name}({','.join(parts)})"
+
+
+@lru_cache(maxsize=1)
+def _builtin_names() -> frozenset[str]:
+    from vyper.builtins.functions import get_builtin_functions
+
+    return frozenset(get_builtin_functions()) | frozenset({"self", "msg", "block"})
+
+
+def _boa_frame_pretty_vm_reason(frame: Any) -> str:
+    try:
+        pretty_vm_reason = frame.pretty_vm_reason
+    except Exception:
+        pretty_vm_reason = None
+
+    if pretty_vm_reason is not None:
+        return str(pretty_vm_reason)
+
+    return repr(getattr(frame, "vm_error", None))
+
+
+def _fingerprint_boa_frame(frame: Any, ast_depth: int = 3) -> Tuple[Any, ...]:
+    if isinstance(frame, str):
+        return ("unknown",)
+
+    ast_source = getattr(frame, "ast_source", None)
+    ast_fingerprint = (
+        fingerprint_ast_node(ast_source, ast_depth)
+        if isinstance(ast_source, VyperNode)
+        else None
+    )
+    error_detail = getattr(frame, "error_detail", None)
+    pretty_vm_reason = _boa_frame_pretty_vm_reason(frame)
+    return (ast_fingerprint, error_detail, pretty_vm_reason)
+
+
+def _fingerprint_boa_error(
+    error: BoaError, n_frames: int = 3, ast_depth: int = 3
+) -> Tuple[Tuple[Any, ...], ...]:
+    stack_trace = getattr(error, "stack_trace", None)
+    if stack_trace is None:
+        return ()
+    frames = list(stack_trace)[:n_frames]
+    return tuple(_fingerprint_boa_frame(frame, ast_depth) for frame in frames)
 
 
 def extract_stack_frames(error: Optional[Exception], n: int = 3) -> Tuple[str, ...]:
@@ -69,23 +156,21 @@ def extract_stack_frames(error: Optional[Exception], n: int = 3) -> Tuple[str, .
 
 def fingerprint_error(
     error: Optional[Exception], n_frames: int = 3
-) -> Tuple[str, str, Tuple[str, ...]]:
+) -> Tuple[str, str, Tuple[Any, ...]]:
     """
     Build fingerprint tuple from an exception.
 
     Returns (error_type, detail, stack_frames).
-    For BoaError, extracts (vm_error_type, error_detail, ()) from ErrorDetail.
+    For BoaError, returns ("BoaError", "", boa_frame_fingerprints), where
+    each frame fingerprint is either ("unknown",) or
+    (ast_fingerprint, error_detail, pretty_vm_reason).
     For other exceptions, uses (class_name, msg[:20], last_N_frames).
     """
     if error is None:
         return ("", "", ())
 
     if isinstance(error, BoaError):
-        frame = error.stack_trace.last_frame  # type: ignore[union-attr]
-        if isinstance(frame, ErrorDetail):
-            vm_error_type = type(frame.vm_error).__name__
-            error_detail = frame.error_detail or ""
-            return (vm_error_type, error_detail, ())
+        return (type(error).__name__, "", _fingerprint_boa_error(error, n_frames, 3))
 
     error_type = type(error).__name__
     try:

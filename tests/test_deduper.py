@@ -388,58 +388,139 @@ def test_similar_contracts_do_not_dedup_when_success_states_match():
     assert four.fingerprint == ""
 
 
-def test_boa_error_fingerprint_uses_structured_fields():
+def _capture_boa_error(source: str, function_name: str, *args) -> Exception:
+    import boa
+
+    contract = boa.loads(source)
+    fn = getattr(contract, function_name)
+    try:
+        fn(*args)
+    except Exception as exc:
+        return exc
+    raise AssertionError("expected Boa call to fail")
+
+
+def _make_synthetic_boa_error(stack_frames: list[object]) -> Exception:
     from boa.contracts.base_evm_contract import BoaError, StackTrace
 
+    err = BoaError.__new__(BoaError)
+    err.stack_trace = StackTrace(stack_frames)
+    err.call_trace = None
+    return err
+
+
+def _make_error_detail(
+    vm_error: Exception, *, error_detail: str | None, ast_source: object = None
+) -> object:
     from boa.contracts.vyper.vyper_contract import ErrorDetail
 
-    class FakeVMError(Exception):
-        pass
+    frame = ErrorDetail.__new__(ErrorDetail)
+    frame.vm_error = vm_error
+    frame.error_detail = error_detail
+    frame.ast_source = ast_source
+    return frame
 
-    class Revert(FakeVMError):
-        pass
 
-    class InvalidInstruction(FakeVMError):
-        pass
+def test_boa_error_fingerprint_top_level_similar_vs_different_expressions():
+    max_uint256 = 2**256 - 1
 
-    def make_error_detail(vm_error, error_detail_str):
-        ed = ErrorDetail.__new__(ErrorDetail)
-        ed.vm_error = vm_error
-        ed.error_detail = error_detail_str
-        return ed
+    add_const_one = """
+@external
+def foo(x: uint256) -> uint256:
+    return x + 1
+"""
+    add_const_two = """
+@external
+def foo(x: uint256) -> uint256:
+    return x + 2
+"""
+    add_vars = """
+@external
+def foo(x: uint256, y: uint256) -> uint256:
+    return x + y
+"""
 
-    def make_boa_error(vm_error, error_detail_str):
-        st = StackTrace([make_error_detail(vm_error, error_detail_str)])
-        err = BoaError.__new__(BoaError)
-        err.stack_trace = st
-        err.call_trace = None
-        return err
+    err_add_const_one = _capture_boa_error(add_const_one, "foo", max_uint256)
+    err_add_const_two = _capture_boa_error(add_const_two, "foo", max_uint256 - 1)
+    err_add_vars = _capture_boa_error(add_vars, "foo", max_uint256, 1)
 
-    # Different vm_error types produce different fingerprints
-    revert_err = make_boa_error(Revert(), "safeadd")
-    invalid_err = make_boa_error(InvalidInstruction(), "safeadd")
-    fp_revert = fingerprint_error(revert_err)
-    fp_invalid = fingerprint_error(invalid_err)
-    assert fp_revert != fp_invalid
-    assert fp_revert[0] == "Revert"
-    assert fp_invalid[0] == "InvalidInstruction"
+    fp_add_const_one = fingerprint_error(err_add_const_one)
+    fp_add_const_two = fingerprint_error(err_add_const_two)
+    fp_add_vars = fingerprint_error(err_add_vars)
 
-    # Different error_detail strings produce different fingerprints
-    safeadd_err = make_boa_error(Revert(), "safeadd")
-    bounds_err = make_boa_error(Revert(), "int128 bounds check")
-    fp_safeadd = fingerprint_error(safeadd_err)
-    fp_bounds = fingerprint_error(bounds_err)
-    assert fp_safeadd != fp_bounds
-    assert fp_safeadd[1] == "safeadd"
-    assert fp_bounds[1] == "int128 bounds check"
+    # Similar expressions should dedup to the same fingerprint.
+    assert fp_add_const_one == fp_add_const_two
+    # Different expression shape should produce a different fingerprint.
+    assert fp_add_const_one != fp_add_vars
 
-    # Same vm_error type + same error_detail produce identical fingerprints
-    err_a = make_boa_error(Revert(), "safeadd")
-    err_b = make_boa_error(Revert(), "safeadd")
-    assert fingerprint_error(err_a) == fingerprint_error(err_b)
+    frame = fp_add_const_one[2][0]
+    assert frame[0] is not None and "Add" in frame[0]
+    assert frame[1] == "safeadd"
+    assert "Revert(" in frame[2]
 
-    # Frames are always empty for BoaError fingerprints
-    assert fp_revert[2] == ()
+
+def test_boa_error_fingerprint_nested_call_keeps_innermost_first():
+    source = """
+interface Self:
+    def do_sub(x: uint256, y: uint256) -> uint256: nonpayable
+
+@external
+def entry(x: uint256, y: uint256) -> uint256:
+    return extcall Self(self).do_sub(x, y)
+
+@external
+def do_sub(x: uint256, y: uint256) -> uint256:
+    return x - y
+"""
+
+    err = _capture_boa_error(source, "entry", 5, 10)
+    fp = fingerprint_error(err)
+
+    assert fp[0] == "BoaError"
+    assert len(fp[2]) == 2
+
+    innermost, caller = fp[2]
+    assert innermost[0] is not None and "Sub" in innermost[0]
+    assert innermost[1] == "safesub"
+    assert "Revert(" in innermost[2]
+
+    assert caller[0] is not None and "Call" in caller[0]
+    assert caller[1] == "external call failed"
+    assert "Revert(" in caller[2]
+
+
+def test_boa_error_fingerprint_uses_first_three_frames_only():
+    frames = [
+        _make_error_detail(RuntimeError("vm-0"), error_detail="d0"),
+        _make_error_detail(RuntimeError("vm-1"), error_detail="d1"),
+        _make_error_detail(RuntimeError("vm-2"), error_detail="d2"),
+        _make_error_detail(RuntimeError("vm-3"), error_detail="d3"),
+    ]
+    err = _make_synthetic_boa_error(frames)
+
+    fp = fingerprint_error(err)
+
+    assert len(fp[2]) == 3
+    assert [frame[1] for frame in fp[2]] == ["d0", "d1", "d2"]
+    assert all(frame[0] is None for frame in fp[2])
+    assert all("RuntimeError(" in frame[2] for frame in fp[2])
+
+
+def test_boa_error_fingerprint_marks_unknown_string_frames():
+    err = _make_synthetic_boa_error(
+        [
+            "Unknown contract 0x1234",
+            _make_error_detail(ValueError("boom"), error_detail=None),
+        ]
+    )
+
+    fp = fingerprint_error(err)
+
+    assert fp[0] == "BoaError"
+    assert fp[2][0] == ("unknown",)
+    assert fp[2][1][0] is None
+    assert fp[2][1][1] is None
+    assert fp[2][1][2] == "ValueError('boom')"
 
 
 def test_boa_error_dedup_distinguishes_different_reverts():
