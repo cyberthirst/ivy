@@ -1048,7 +1048,7 @@ class ParallelFuzzer:
             if not is_bootstrapping and now - last_ts > self.worker_stall_timeout_s:
                 kill_reason = "stalled"
 
-            if kill_reason is None and self.worker_memory_limit is not None:
+            if kill_reason is None and self.worker_memory_limit is not None and not is_bootstrapping:
                 rss = _get_rss_bytes(process.pid)
                 if rss is None:
                     self._memory_breach_counts[worker_id] = 0
