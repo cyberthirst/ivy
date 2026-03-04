@@ -309,8 +309,17 @@ class Deduper:
         return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def _check_result_divergence(self, divergence: Divergence) -> KeepDecision:
-        ivy_success = divergence.ivy_result.success if divergence.ivy_result else None
-        boa_success = divergence.boa_result.success if divergence.boa_result else None
+        assert divergence.ivy_result is not None or divergence.boa_result is not None, (
+            "divergence must have at least one result"
+        )
+        if divergence.ivy_result is None or divergence.boa_result is None:
+            # TODO: add fingerprinting for divergences with a missing result
+            return KeepDecision(
+                keep=True, reason="missing_result", fingerprint=""
+            )
+
+        ivy_success = divergence.ivy_result.success
+        boa_success = divergence.boa_result.success
 
         if ivy_success == boa_success:
             return KeepDecision(
@@ -319,10 +328,10 @@ class Deduper:
 
         if ivy_success and not boa_success:
             failing_runner = divergence.divergent_runner
-            error = divergence.boa_result.error if divergence.boa_result else None
+            error = divergence.boa_result.error
         else:
             failing_runner = "ivy"
-            error = divergence.ivy_result.error if divergence.ivy_result else None
+            error = divergence.ivy_result.error
 
         error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
         sig = DivergenceSig(
