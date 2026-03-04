@@ -192,14 +192,11 @@ def _fingerprint_boa_error(
 # --- Generic error fingerprinting ---
 
 
-def extract_stack_frames(error: Exception | None, n: int = 3) -> tuple[str, ...]:
+def extract_stack_frames(error: Exception, n: int = 3) -> tuple[str, ...]:
     """Extract last N frames from exception traceback.
 
     Normalizes frame info to (filename, lineno, funcname) for stability.
     """
-    if error is None:
-        return ()
-
     tb = getattr(error, "__traceback__", None)
     if tb is None:
         return ()
@@ -218,15 +215,12 @@ def extract_stack_frames(error: Exception | None, n: int = 3) -> tuple[str, ...]
     return tuple(normalized)
 
 
-def fingerprint_error(error: Exception | None, n_frames: int = 3) -> ErrorFP:
+def fingerprint_error(error: Exception, n_frames: int = 3) -> ErrorFP:
     """Build an ErrorFP from an exception.
 
     For BoaError: ErrorFP(error_type, boa_frame_fingerprints)
     For other exceptions: ErrorFP(class_name, last_N_frames)
     """
-    if error is None:
-        return ErrorFP(error_type="", frames=())
-
     if isinstance(error, BoaError):
         return ErrorFP(
             error_type=type(error).__name__,
@@ -333,6 +327,7 @@ class Deduper:
             failing_runner = "ivy"
             error = divergence.ivy_result.error
 
+        assert error is not None, "failing result must have an error"
         error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
         sig = DivergenceSig(
             div_type=str(divergence.type),
