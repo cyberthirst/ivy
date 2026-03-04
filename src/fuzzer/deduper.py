@@ -305,6 +305,7 @@ class Deduper:
             xfail_actual=divergence.xfail_actual,
             xfail_reasons=tuple(divergence.xfail_reasons),
         )
+        divergence.fingerprint = repr(sig)
         return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def _check_result_divergence(self, divergence: Divergence) -> KeepDecision:
@@ -330,6 +331,7 @@ class Deduper:
             failing_runner=failing_runner,
             error_fp=error_fp,
         )
+        divergence.fingerprint = repr(sig)
         return self._check_seen(sig, self._seen_divergences, "divergence")
 
     def check_compiler_crash(self, error: Exception) -> KeepDecision:

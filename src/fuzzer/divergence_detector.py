@@ -49,6 +49,7 @@ class Divergence:
     xfail_expected: Optional[str] = None
     xfail_actual: Optional[str] = None  # What actually happened
     xfail_reasons: list[str] = field(default_factory=list)
+    fingerprint: Optional[str] = None
 
     @cached_property
     def as_dict(self) -> Dict[str, Any]:
@@ -83,6 +84,9 @@ class Divergence:
 
         if self.details:
             result["details"] = self.details
+
+        if self.fingerprint:
+            result["fingerprint"] = self.fingerprint
 
         # Add relevant traces up to the divergence point
         if self.scenario.traces:
