@@ -1,5 +1,9 @@
 {
   "output_root": "./issue-archives",
+  "agent": {
+    "backend": "claude",
+    "args": ["-p", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", "--output-format", "text"]
+  },
   "defaults": {
     "format": "both",
     "force": false,

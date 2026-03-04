@@ -14,8 +14,6 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 DEFAULT_CONFIG = SCRIPT_DIR / "triage_config.json"
 MAX_PARALLEL_AGENTS = 4
-CLAUDE_MODEL = "claude-opus-4-6"
-CODEX_MODEL = "gpt-5.3-codex"
 MAX_INDEX_CHARS = 180_000
 AGENT_LOCAL_ONLY_POLICY = """Remote issue safety policy (STRICT):
 - Work only on local files in this repository.
@@ -53,8 +51,18 @@ class TriagePaths:
 
 
 @dataclass(frozen=True)
+class AgentConfig:
+    backend: str          # "claude" or "codex"
+    args: tuple[str, ...]
+
+
+_agent: AgentConfig | None = None
+
+
+@dataclass(frozen=True)
 class TriageConfig:
     output_root: Path
+    agent: AgentConfig
 
 
 def _print_step(message: str) -> None:
@@ -108,7 +116,19 @@ def _parse_config(config_path: Path) -> TriageConfig:
     if not isinstance(output_root, str):
         output_root = str(output_root)
     resolved_output_root = _resolve_project_path(output_root)
-    return TriageConfig(output_root=resolved_output_root)
+
+    agent_raw = payload.get("agent")
+    if not isinstance(agent_raw, dict):
+        raise ValueError("config missing required 'agent' object")
+    backend = agent_raw.get("backend")
+    if backend not in ("claude", "codex"):
+        raise ValueError(f"agent.backend must be 'claude' or 'codex', got {backend!r}")
+    args_raw = agent_raw.get("args", [])
+    if not isinstance(args_raw, list) or not all(isinstance(a, str) for a in args_raw):
+        raise ValueError("agent.args must be a list of strings")
+    agent = AgentConfig(backend=backend, args=tuple(args_raw))
+
+    return TriageConfig(output_root=resolved_output_root, agent=agent)
 
 
 def _prepare_paths(run_dir: Path, skip_verify: bool) -> TriagePaths:
@@ -208,25 +228,42 @@ def get_vyper_version() -> str:
     return version or "unknown"
 
 
-def _run_claude(prompt: str, label: str) -> tuple[bool, str]:
-    cmd = [
-        "claude",
-        "-p",
-        "--dangerously-skip-permissions",
-        "--model",
-        CLAUDE_MODEL,
-        "--output-format",
-        "text",
-    ]
+def _run_claude(args: tuple[str, ...], prompt: str, label: str, *, output_file: Path | None = None) -> tuple[bool, str]:
+    cmd = ["claude", *args]
     result = _run_unchecked(cmd, input_text=prompt)
     if result.returncode != 0:
         err = result.stderr.strip() or f"{label} failed with exit code {result.returncode}"
         return False, err
+    output = result.stdout.strip()
+    if output_file is not None:
+        _write_text(output_file, output)
+    return True, output
+
+
+def _run_codex(args: tuple[str, ...], prompt: str, label: str, *, output_file: Path | None = None) -> tuple[bool, str]:
+    cmd = ["codex", *args]
+    if output_file is not None:
+        cmd.extend(["-o", str(output_file)])
+    result = _run_unchecked(cmd, input_text=prompt)
+    if result.returncode != 0:
+        err = result.stderr.strip() or f"{label} failed with exit code {result.returncode}"
+        return False, err
+    if output_file is not None:
+        if output_file.exists():
+            return True, _read_text(output_file).strip()
+        return True, ""
     return True, result.stdout.strip()
 
 
+def run_agent(prompt: str, label: str, *, output_file: Path | None = None) -> tuple[bool, str]:
+    assert _agent is not None, "agent not configured; call main() first"
+    if _agent.backend == "codex":
+        return _run_codex(_agent.args, prompt, label, output_file=output_file)
+    return _run_claude(_agent.args, prompt, label, output_file=output_file)
+
+
 def dedup_divergences(paths: TriagePaths, vyper_version: str) -> list[Path]:
-    _print_step("Step 2/5: Deduplicating divergence reports with Claude")
+    _print_step("Step 2/5: Deduplicating divergence reports")
     if not paths.filtered_divergences_untriaged.exists():
         _print_step(
             f"  Skipping: missing directory {paths.filtered_divergences_untriaged}"
@@ -267,11 +304,11 @@ Constraints:
 {AGENT_LOCAL_ONLY_POLICY}
 """
 
-    ok, output_or_error = _run_claude(prompt, "Divergence deduplication")
+    ok, output_or_error = run_agent(prompt, "Divergence deduplication")
     if not ok:
         print(f"  Warning: {output_or_error}", file=sys.stderr)
     elif output_or_error:
-        _print_step(f"  Claude output: {output_or_error.splitlines()[0]}")
+        _print_step(f"  Agent output: {output_or_error.splitlines()[0]}")
 
     reports = _sorted_md_files(paths.unverified_divergences, recursive=False)
     moved = _move_json_files_to_triaged(
@@ -283,7 +320,7 @@ Constraints:
 
 
 def dedup_crashes(paths: TriagePaths, vyper_version: str) -> list[Path]:
-    _print_step("Step 3/5: Deduplicating compiler crash reports with Claude")
+    _print_step("Step 3/5: Deduplicating compiler crash reports")
     if not paths.filtered_crashes_untriaged.exists():
         _print_step(f"  Skipping: missing directory {paths.filtered_crashes_untriaged}")
         return []
@@ -322,11 +359,11 @@ Constraints:
 {AGENT_LOCAL_ONLY_POLICY}
 """
 
-    ok, output_or_error = _run_claude(prompt, "Crash deduplication")
+    ok, output_or_error = run_agent(prompt, "Crash deduplication")
     if not ok:
         print(f"  Warning: {output_or_error}", file=sys.stderr)
     elif output_or_error:
-        _print_step(f"  Claude output: {output_or_error.splitlines()[0]}")
+        _print_step(f"  Agent output: {output_or_error.splitlines()[0]}")
 
     reports = _sorted_md_files(paths.unverified_crashes, recursive=False)
     moved = _move_json_files_to_triaged(crash_files, paths.filtered_crashes_triaged)
@@ -377,30 +414,12 @@ Original report:
 {report_content}
 """
 
-    cmd = [
-        "codex",
-        "exec",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--model",
-        CODEX_MODEL,
-        "-c",
-        "reasoning_effort=xhigh",
-        "-o",
-        str(temp_output_path),
-    ]
-
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        text=True,
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-    )
-    if result.returncode != 0:
+    ok, output = run_agent(prompt, f"Verify {report_path.name}", output_file=temp_output_path)
+    if not ok:
         return {
             "status": "error",
             "report_path": report_path_raw,
-            "error": result.stderr.strip() or f"exit code {result.returncode}",
+            "error": output,
         }
 
     if not temp_output_path.exists():
@@ -429,7 +448,7 @@ Original report:
 
 
 def verify_reports(paths: TriagePaths, vyper_skill_content: str) -> tuple[list[Path], int]:
-    _print_step("Step 4/5: Verifying reports with Codex")
+    _print_step("Step 4/5: Verifying reports")
     snapshot = _sorted_md_files(paths.unverified_root, recursive=True)
     _print_step(f"  Snapshot captured: {len(snapshot)} unverified report(s)")
     if not snapshot:
@@ -549,30 +568,12 @@ Verified report:
 {report_content}
 """
 
-    cmd = [
-        "codex",
-        "exec",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--model",
-        CODEX_MODEL,
-        "-c",
-        "reasoning_effort=xhigh",
-        "-o",
-        str(dedup_log_path),
-    ]
-    result = subprocess.run(
-        cmd,
-        input=prompt,
-        text=True,
-        cwd=PROJECT_ROOT,
-        capture_output=True,
-    )
-
-    if result.returncode != 0:
+    ok, output = run_agent(prompt, f"Dedup {report_path.name}", output_file=dedup_log_path)
+    if not ok:
         return {
             "status": "error",
             "report_path": report_path_raw,
-            "error": result.stderr.strip() or f"exit code {result.returncode}",
+            "error": output,
         }
     return {"status": "ok", "report_path": report_path_raw}
 
@@ -669,7 +670,7 @@ def main() -> int:
 
     try:
         config = _parse_config(config_path)
-    except (json.JSONDecodeError, OSError) as exc:
+    except (json.JSONDecodeError, OSError, ValueError) as exc:
         print(f"Error: failed to parse config {config_path}: {exc}", file=sys.stderr)
         return 1
 
@@ -697,6 +698,9 @@ def main() -> int:
             print(exc.stderr, file=sys.stderr, end="")
         print("Error: could not determine Vyper version.", file=sys.stderr)
         return exc.returncode or 1
+
+    global _agent
+    _agent = config.agent
 
     divergence_reports = dedup_divergences(paths, vyper_version)
     crash_reports = dedup_crashes(paths, vyper_version)
