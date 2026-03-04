@@ -253,6 +253,7 @@ class Deduper:
     CRASH_FRAMES = 3
     COMPILE_FAILURE_FRAMES = 5
     DIVERGENCE_FRAMES = 3
+    REVERT_MISMATCH_FRAMES = 6
 
     def __init__(
         self,
@@ -328,7 +329,10 @@ class Deduper:
             error = divergence.ivy_result.error
 
         assert error is not None, "failing result must have an error"
-        error_fp = fingerprint_error(error, self.DIVERGENCE_FRAMES)
+        n_frames = self.DIVERGENCE_FRAMES
+        if divergence.reason in ("deploy_revert_mismatch", "success_revert_mismatch"):
+            n_frames = self.REVERT_MISMATCH_FRAMES
+        error_fp = fingerprint_error(error, n_frames)
         sig = DivergenceSig(
             div_type=str(divergence.type),
             reason=divergence.reason,
