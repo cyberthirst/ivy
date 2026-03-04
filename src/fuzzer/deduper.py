@@ -11,6 +11,7 @@ Fingerprinting Strategy
 |---------------------------------------|--------|-------------------------------------------------------|
 | Divergence: both ok, different result | No     | -                                                     |
 | Divergence: one ok, one failed        | Yes    | DivergenceSig(type, reason, runner, error_fp)         |
+| Divergence: BoaError, no AST node     | No     | - (insufficient info for dedup)                       |
 | Divergence: xfail violation           | Yes    | XfailSig(reason, expected, actual, reasons)           |
 | Compiler crash                        | Yes    | CrashSig(error_type, frames)                         |
 | Compilation failure                   | Yes    | CompileFailSig(error_type, frames)                   |
@@ -338,6 +339,14 @@ class Deduper:
         if divergence.reason in ("deploy_revert_mismatch", "success_revert_mismatch"):
             n_frames = self.REVERT_MISMATCH_FRAMES
         error_fp = fingerprint_error(error, n_frames)
+        # BoaError with no AST info in any frame — not enough to deduplicate
+        if isinstance(error, BoaError) and not any(
+            isinstance(f, BoaFrameFP) and f.ast_fingerprint is not None
+            for f in error_fp.frames
+        ):
+            return KeepDecision(
+                keep=True, reason="boa_error_no_ast", fingerprint=""
+            )
         sig = DivergenceSig(
             div_type=str(divergence.type),
             reason=divergence.reason,
