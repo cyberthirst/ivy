@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+from datetime import datetime
 import hashlib
 import json
 import logging
@@ -38,6 +39,7 @@ from fuzzer.export_utils import (
     solc_json_source_size,
 )
 from fuzzer.issue_filter import IssueFilter, default_issue_filter
+from fuzzer.reporter import build_run_reports_dir
 from fuzzer.runtime_engine import HarnessConfig
 from fuzzer.generator import generate_scenario
 from fuzzer.runner.base_scenario_runner import DeploymentResult, ScenarioResult
@@ -455,6 +457,7 @@ def _worker_main(
     worker_state: MutableSequence[int],
     harness_config: HarnessConfig,
     reports_dir: Path,
+    file_prefix: str = "",
     tag_edges_with_config: bool = False,
     scan_interval_s: float = 5.0,
     min_energy: int = 4,
@@ -499,7 +502,8 @@ def _worker_main(
         deduper=deduper,
     )
     reporter = base_fuzzer.reporter
-    reporter.reports_dir = reports_dir
+    reporter._file_prefix = file_prefix
+    reporter._run_reports_dir = reports_dir
     reporter.start_timer()
     reporter.start_metrics_stream(harness_config.enable_interval_metrics)
 
@@ -922,6 +926,7 @@ class ParallelFuzzer:
         self._bootstrap_required = False
         self._drop_initial_fresh = False
         self._compaction_process: Optional[Any] = None
+        self._run_reports_dir: Optional[Path] = None
 
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         (self.corpus_dir / "queue").mkdir(parents=True, exist_ok=True)
@@ -944,7 +949,8 @@ class ParallelFuzzer:
                 "last_iter": self.last_iter,
                 "worker_state": self.worker_state,
                 "harness_config": self.harness_config,
-                "reports_dir": self.reports_dir,
+                "reports_dir": self._run_reports_dir,
+                "file_prefix": f"w{worker_id}e{self._worker_epochs[worker_id]}",
                 "tag_edges_with_config": self.tag_edges_with_config,
                 "min_energy": self.min_energy,
                 "max_energy": self.max_energy,
@@ -980,9 +986,7 @@ class ParallelFuzzer:
             self._compaction_process.join(timeout=1.0)
             exitcode = self._compaction_process.exitcode
             if exitcode and exitcode != 0:
-                logger.warning(
-                    f"compaction process exited with code {exitcode}"
-                )
+                logger.warning(f"compaction process exited with code {exitcode}")
             self._compaction_process = None
 
         proc = self.ctx.Process(
@@ -1048,7 +1052,11 @@ class ParallelFuzzer:
             if not is_bootstrapping and now - last_ts > self.worker_stall_timeout_s:
                 kill_reason = "stalled"
 
-            if kill_reason is None and self.worker_memory_limit is not None and not is_bootstrapping:
+            if (
+                kill_reason is None
+                and self.worker_memory_limit is not None
+                and not is_bootstrapping
+            ):
                 rss = _get_rss_bytes(process.pid)
                 if rss is None:
                     self._memory_breach_counts[worker_id] = 0
@@ -1126,9 +1134,14 @@ class ParallelFuzzer:
             if self.max_worker_lifetime_s is not None
             else "disabled"
         )
+        self._run_reports_dir = build_run_reports_dir(
+            self.reports_dir, datetime.now(), self.seed
+        )
+        self._run_reports_dir.mkdir(parents=True, exist_ok=True)
+
         logger.info(
             f"starting {self.num_workers} workers, seed={self.seed}, "
-            f"corpus={self.corpus_dir}, reports={self.reports_dir}, "
+            f"corpus={self.corpus_dir}, reports={self._run_reports_dir}, "
             f"worker_memory_limit={mem_str}, "
             f"memory_breach_grace_checks={self.memory_breach_grace_checks}, "
             f"max_worker_lifetime={lifetime_str}, "

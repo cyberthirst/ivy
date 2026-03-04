@@ -89,6 +89,19 @@ def build_divergence_record(
     return _make_json_serializable(divergence_data)
 
 
+def build_run_reports_dir(
+    reports_dir: Path, started_at: datetime, seed: Optional[int]
+) -> Path:
+    seed_part = str(seed) if seed is not None else "noseed"
+    base_name = f"{started_at.strftime('%Y-%m-%d_%H-%M-%S')}_seed-{seed_part}"
+    run_dir = reports_dir / base_name
+    suffix = 1
+    while run_dir.exists():
+        run_dir = reports_dir / f"{base_name}_{suffix}"
+        suffix += 1
+    return run_dir
+
+
 @dataclass
 class FuzzerReporter:
     # Deployment statistics
@@ -119,7 +132,9 @@ class FuzzerReporter:
     reports_dir: Path = field(default_factory=lambda: Path("reports"))
     _run_started_at: Optional[datetime] = None
     _run_reports_dir: Optional[Path] = None
+    _file_prefix: str = ""
     _file_counter: int = 0
+
     _metrics_enabled: bool = False
     _metrics_path: Optional[Path] = None
     _last_snapshot_elapsed_s: float = 0.0
@@ -333,14 +348,7 @@ class FuzzerReporter:
         return (self.successful_calls / total) * 100
 
     def _build_run_reports_dir(self, started_at: datetime) -> Path:
-        seed_part = str(self.seed) if self.seed is not None else "noseed"
-        base_name = f"{started_at.strftime('%Y-%m-%d_%H-%M-%S')}_seed-{seed_part}"
-        run_dir = self.reports_dir / base_name
-        suffix = 1
-        while run_dir.exists():
-            run_dir = self.reports_dir / f"{base_name}_{suffix}"
-            suffix += 1
-        return run_dir
+        return build_run_reports_dir(self.reports_dir, started_at, self.seed)
 
     def _get_run_reports_dir(self) -> Path:
         if self._run_reports_dir is None:
@@ -353,8 +361,6 @@ class FuzzerReporter:
 
     def start_timer(self):
         self._run_started_at = datetime.now()
-        self._run_reports_dir = self._build_run_reports_dir(self._run_started_at)
-        self._run_reports_dir.mkdir(parents=True, exist_ok=True)
         self.start_time = time.time()
         self.end_time = None
 
@@ -587,9 +593,12 @@ class FuzzerReporter:
         stats_dir.mkdir(parents=True, exist_ok=True)
         seed_part = str(self.seed) if self.seed is not None else "noseed"
         timestamp = datetime.now().strftime("%H%M%S")
-        self._metrics_path = stats_dir / f"metrics_{seed_part}_{timestamp}.jsonl"
+        self._metrics_path = (
+            stats_dir / f"metrics_{seed_part}_{timestamp}_{self._file_prefix}.jsonl"
+        )
         self._contract_fingerprints_path = (
-            stats_dir / f"contract_fingerprints_{seed_part}_{timestamp}.txt"
+            stats_dir
+            / f"contract_fingerprints_{seed_part}_{timestamp}_{self._file_prefix}.txt"
         )
 
         logging.info(f"Interval metrics enabled at {self._metrics_path}")
@@ -915,7 +924,7 @@ class FuzzerReporter:
         scenario_num = self.current_scenario_num or 0
 
         self._file_counter += 1
-        filename = f"divergence_{self._file_counter}.json"
+        filename = f"divergence_{self._file_counter}_{self._file_prefix}.json"
         filepath = reports_dir / filename
 
         divergence_data = build_divergence_record(
@@ -949,7 +958,7 @@ class FuzzerReporter:
         crash_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
-        filename = f"crash_{error_type}_{timestamp}.json"
+        filename = f"crash_{error_type}_{timestamp}_{self._file_prefix}.json"
         filepath = crash_dir / filename
 
         crash_data = {
@@ -990,7 +999,7 @@ class FuzzerReporter:
         failure_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S_%f")[:-3]
-        filename = f"failure_{error_type}_{timestamp}.json"
+        filename = f"failure_{error_type}_{timestamp}_{self._file_prefix}.json"
         filepath = failure_dir / filename
 
         failure_data = {
@@ -1021,7 +1030,7 @@ class FuzzerReporter:
         stats_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%H%M%S")
-        filename = f"stats_{timestamp}.json"
+        filename = f"stats_{timestamp}_{self._file_prefix}.json"
         filepath = stats_dir / filename
 
         stats_data = self.to_dict()
