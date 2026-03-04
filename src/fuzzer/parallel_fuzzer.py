@@ -15,13 +15,11 @@ from typing import Any, Mapping, MutableSequence, Optional
 from fuzzer.base_fuzzer import BaseFuzzer
 from fuzzer.deduper import Deduper
 from fuzzer.coverage.collector import ArcCoverageCollector
+from fuzzer.coverage.compaction import compact_corpus
 from fuzzer.coverage.disk_corpus import (
-    DiskEntryMeta,
     DiskIndex,
     compute_energy,
-    delete_corpus_entry,
     load_edge_count_snapshot,
-    read_all_meta,
     select_parent,
     write_corpus_entry,
     save_edge_count_snapshot,
@@ -923,6 +921,7 @@ class ParallelFuzzer:
         self._test_filter: Optional[TestFilter] = None
         self._bootstrap_required = False
         self._drop_initial_fresh = False
+        self._compaction_process: Optional[Any] = None
 
         self.corpus_dir.mkdir(parents=True, exist_ok=True)
         (self.corpus_dir / "queue").mkdir(parents=True, exist_ok=True)
@@ -974,61 +973,33 @@ class ParallelFuzzer:
     def _queue_size(self) -> int:
         return sum(1 for _ in (self.corpus_dir / "queue").glob("*.meta.json"))
 
-    def _cleanup_orphans(self) -> int:
-        queue_dir = self.corpus_dir / "queue"
-        deleted = 0
-        cutoff = time.time() - 60.0
+    def _maybe_start_compaction(self) -> None:
+        if self._compaction_process is not None:
+            if self._compaction_process.is_alive():
+                return
+            self._compaction_process.join(timeout=1.0)
+            exitcode = self._compaction_process.exitcode
+            if exitcode and exitcode != 0:
+                logger.warning(
+                    f"compaction process exited with code {exitcode}"
+                )
+            self._compaction_process = None
 
-        for suffix in (".scenario.json", ".edges.bin"):
-            for path in queue_dir.glob(f"*{suffix}"):
-                if path.stat().st_mtime >= cutoff:
-                    continue
-                entry_id = path.name[: -len(suffix)]
-                if (queue_dir / f"{entry_id}.meta.json").exists():
-                    continue
-                path.unlink(missing_ok=True)
-                deleted += 1
+        proc = self.ctx.Process(
+            target=compact_corpus,
+            args=(self.corpus_dir, self.max_corpus_size),
+            name="parallel-fuzzer-compaction",
+        )
+        proc.start()
+        self._compaction_process = proc
 
-        return deleted
-
-    def _compact_corpus(self) -> int:
-        all_entries = read_all_meta(self.corpus_dir)
-        if not all_entries:
-            return self._cleanup_orphans()
-
-        by_fp: dict[str, list[DiskEntryMeta]] = {}
-        for entry in all_entries:
-            by_fp.setdefault(entry.coverage_fp, []).append(entry)
-
-        to_delete: list[str] = []
-        for entries in by_fp.values():
-            keep_ids: set[str] = set()
-            smallest = min(entries, key=lambda e: e.source_size)
-            fastest = min(entries, key=lambda e: e.cycle_time_s)
-            keep_ids.add(smallest.entry_id)
-            keep_ids.add(fastest.entry_id)
-
-            for entry in entries:
-                if entry.entry_id not in keep_ids:
-                    to_delete.append(entry.entry_id)
-
-        to_delete_set = set(to_delete)
-        remaining = [
-            entry for entry in all_entries if entry.entry_id not in to_delete_set
-        ]
-        if len(remaining) > self.max_corpus_size:
-            evictable = sorted(
-                remaining,
-                key=lambda e: e.timestamp,
-            )
-            excess = len(remaining) - self.max_corpus_size
-            for entry in evictable[:excess]:
-                to_delete_set.add(entry.entry_id)
-
-        for entry_id in to_delete_set:
-            delete_corpus_entry(self.corpus_dir, entry_id)
-
-        return len(to_delete_set) + self._cleanup_orphans()
+    def _join_compaction(self) -> None:
+        if self._compaction_process is not None:
+            self._compaction_process.join(timeout=5.0)
+            if self._compaction_process.is_alive():
+                self._compaction_process.kill()
+                self._compaction_process.join(timeout=1.0)
+            self._compaction_process = None
 
     def _snapshot_edge_counts(self, shared_counts: MutableSequence[int]) -> None:
         save_edge_count_snapshot(self.corpus_dir, shared_counts)
@@ -1176,10 +1147,10 @@ class ParallelFuzzer:
                 now = time.monotonic()
 
                 if (now - last_compaction) >= self.compaction_interval_s:
-                    self._compact_corpus()
+                    self._maybe_start_compaction()
                     last_compaction = now
                 elif self._queue_size() > self.max_corpus_size:
-                    self._compact_corpus()
+                    self._maybe_start_compaction()
                     last_compaction = now
 
                 if (now - last_snapshot) >= self.snapshot_interval_s:
@@ -1212,6 +1183,7 @@ class ParallelFuzzer:
                     process.kill()
                     process.join(timeout=1.0)
 
+            self._join_compaction()
             self._snapshot_edge_counts(self.shared_counts)
             _save_deduper_fingerprint_snapshot(
                 self.corpus_dir,
