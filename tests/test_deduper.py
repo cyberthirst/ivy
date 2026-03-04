@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fuzzer.deduper import Deduper, fingerprint_error
+from fuzzer.deduper import BoaFrameFP, Deduper, UnknownFrameFP, fingerprint_error
 from fuzzer.divergence_detector import Divergence, DivergenceType
 from fuzzer.runner.base_scenario_runner import CallResult
 from fuzzer.runner.scenario import Scenario
@@ -453,10 +453,11 @@ def foo(x: uint256, y: uint256) -> uint256:
     # Different expression shape should produce a different fingerprint.
     assert fp_add_const_one != fp_add_vars
 
-    frame = fp_add_const_one[2][0]
-    assert frame[0] is not None and "Add" in frame[0]
-    assert frame[1] == "safeadd"
-    assert "Revert(" in frame[2]
+    frame = fp_add_const_one.frames[0]
+    assert isinstance(frame, BoaFrameFP)
+    assert frame.ast_fingerprint is not None and "Add" in frame.ast_fingerprint
+    assert frame.error_detail == "safeadd"
+    assert "Revert(" in frame.pretty_vm_reason
 
 
 def test_boa_error_fingerprint_nested_call_keeps_innermost_first():
@@ -476,17 +477,19 @@ def do_sub(x: uint256, y: uint256) -> uint256:
     err = _capture_boa_error(source, "entry", 5, 10)
     fp = fingerprint_error(err)
 
-    assert fp[0] == "BoaError"
-    assert len(fp[2]) == 2
+    assert fp.error_type == "BoaError"
+    assert len(fp.frames) == 2
 
-    innermost, caller = fp[2]
-    assert innermost[0] is not None and "Sub" in innermost[0]
-    assert innermost[1] == "safesub"
-    assert "Revert(" in innermost[2]
+    innermost, caller = fp.frames
+    assert isinstance(innermost, BoaFrameFP)
+    assert innermost.ast_fingerprint is not None and "Sub" in innermost.ast_fingerprint
+    assert innermost.error_detail == "safesub"
+    assert "Revert(" in innermost.pretty_vm_reason
 
-    assert caller[0] is not None and "Call" in caller[0]
-    assert caller[1] == "external call failed"
-    assert "Revert(" in caller[2]
+    assert isinstance(caller, BoaFrameFP)
+    assert caller.ast_fingerprint is not None and "Call" in caller.ast_fingerprint
+    assert caller.error_detail == "external call failed"
+    assert "Revert(" in caller.pretty_vm_reason
 
 
 def test_boa_error_fingerprint_uses_first_three_frames_only():
@@ -500,10 +503,10 @@ def test_boa_error_fingerprint_uses_first_three_frames_only():
 
     fp = fingerprint_error(err)
 
-    assert len(fp[2]) == 3
-    assert [frame[1] for frame in fp[2]] == ["d0", "d1", "d2"]
-    assert all(frame[0] is None for frame in fp[2])
-    assert all("RuntimeError(" in frame[2] for frame in fp[2])
+    assert len(fp.frames) == 3
+    assert [frame.error_detail for frame in fp.frames] == ["d0", "d1", "d2"]
+    assert all(frame.ast_fingerprint is None for frame in fp.frames)
+    assert all("RuntimeError(" in frame.pretty_vm_reason for frame in fp.frames)
 
 
 def test_boa_error_fingerprint_marks_unknown_string_frames():
@@ -516,11 +519,12 @@ def test_boa_error_fingerprint_marks_unknown_string_frames():
 
     fp = fingerprint_error(err)
 
-    assert fp[0] == "BoaError"
-    assert fp[2][0] == ("unknown",)
-    assert fp[2][1][0] is None
-    assert fp[2][1][1] is None
-    assert fp[2][1][2] == "ValueError('boom')"
+    assert fp.error_type == "BoaError"
+    assert isinstance(fp.frames[0], UnknownFrameFP)
+    assert isinstance(fp.frames[1], BoaFrameFP)
+    assert fp.frames[1].ast_fingerprint is None
+    assert fp.frames[1].error_detail is None
+    assert fp.frames[1].pretty_vm_reason == "ValueError('boom')"
 
 
 def test_boa_error_dedup_distinguishes_different_reverts():
