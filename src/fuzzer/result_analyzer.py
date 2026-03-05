@@ -114,6 +114,8 @@ class ResultAnalyzer:
             decision = self._check_filter(divergence.as_dict, IT.DIVERGENCE)
             if decision is None:
                 decision = self.deduper.check_divergence(divergence)
+            if not divergence.fingerprint:
+                divergence.fingerprint = decision.reason
             result.divergences.append((divergence, decision))
 
         return result
