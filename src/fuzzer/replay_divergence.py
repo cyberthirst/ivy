@@ -15,6 +15,7 @@ from fuzzer.trace_types import DeploymentTrace, CallTrace, Env, Tx, Block
 from fuzzer.xfail import XFailExpectation
 from fuzzer.runner.scenario import Scenario
 from fuzzer.runner.multi_runner import MultiRunner
+from fuzzer.runner.boa_scenario_runner import MinimalNoopGasMeter
 from fuzzer.divergence_detector import DivergenceDetector
 
 
@@ -113,7 +114,11 @@ def _run_and_check(
     scenario: Scenario, *, expected_reason: str | None = None
 ) -> bool:
     """Run scenario and check for divergences."""
-    multi_runner = MultiRunner(collect_storage_dumps=True)
+    # Keep replay runner settings aligned with the fuzzer harness.
+    multi_runner = MultiRunner(
+        collect_storage_dumps=True,
+        boa_gas_meter_class=MinimalNoopGasMeter,
+    )
     detector = DivergenceDetector()
 
     results = multi_runner.run(scenario)
