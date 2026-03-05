@@ -113,20 +113,6 @@ def default_issue_filter() -> IssueFilter:
     """Create filter with default rules for known limitations."""
     f = IssueFilter()
 
-    # Ivy limitations - unsupported builtins
-    f.add_rule(
-        name="ivy_unknown_builtin",
-        contains="Unknown builtin:",
-        issue_types={IssueType.DIVERGENCE},
-    )
-
-    # Boa decoder limitations - appears in storage dumps
-    f.add_rule(
-        name="boa_unimplemented_decoder",
-        contains="unimplemented decoder",
-        issue_types={IssueType.DIVERGENCE},
-    )
-
     # Contract too large for EVM
     f.add_rule(
         name="eip3860_code_size_limit",
