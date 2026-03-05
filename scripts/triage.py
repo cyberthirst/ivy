@@ -40,13 +40,13 @@ Task scope policy (STRICT):
 @dataclass(frozen=True)
 class TriagePaths:
     run_dir: Path
-    filtered_divergences_untriaged: Path
-    filtered_divergences_triaged: Path
-    filtered_crashes_untriaged: Path
-    filtered_crashes_triaged: Path
-    unverified_root: Path
-    unverified_divergences: Path
-    unverified_crashes: Path
+    divergence_queue: Path
+    divergence_done: Path
+    crash_queue: Path
+    crash_done: Path
+    drafts_root: Path
+    drafts_divergences: Path
+    drafts_crashes: Path
     verified_dir: Path
 
 
@@ -132,27 +132,26 @@ def _parse_config(config_path: Path) -> TriageConfig:
 
 
 def _prepare_paths(run_dir: Path, skip_verify: bool) -> TriagePaths:
-    filtered = run_dir / "filtered"
-    divergences_root = filtered / "divergences"
-    crashes_root = filtered / "compiler_crashes"
+    issues = run_dir / "issues"
+    triage = run_dir / "triage"
     paths = TriagePaths(
         run_dir=run_dir,
-        filtered_divergences_untriaged=divergences_root / "untriaged",
-        filtered_divergences_triaged=divergences_root / "triaged",
-        filtered_crashes_untriaged=crashes_root / "untriaged",
-        filtered_crashes_triaged=crashes_root / "triaged",
-        unverified_root=run_dir / "unverified",
-        unverified_divergences=run_dir / "unverified" / "divergences",
-        unverified_crashes=run_dir / "unverified" / "compiler_crashes",
-        verified_dir=run_dir / "verified",
+        divergence_queue=issues / "divergence" / "queue",
+        divergence_done=issues / "divergence" / "done",
+        crash_queue=issues / "crash" / "queue",
+        crash_done=issues / "crash" / "done",
+        drafts_root=triage / "drafts",
+        drafts_divergences=triage / "drafts" / "divergence",
+        drafts_crashes=triage / "drafts" / "crash",
+        verified_dir=triage / "verified",
     )
 
-    paths.unverified_divergences.mkdir(parents=True, exist_ok=True)
-    paths.unverified_crashes.mkdir(parents=True, exist_ok=True)
+    paths.drafts_divergences.mkdir(parents=True, exist_ok=True)
+    paths.drafts_crashes.mkdir(parents=True, exist_ok=True)
     paths.verified_dir.mkdir(parents=True, exist_ok=True)
 
-    _clear_md_files(paths.unverified_divergences)
-    _clear_md_files(paths.unverified_crashes)
+    _clear_md_files(paths.drafts_divergences)
+    _clear_md_files(paths.drafts_crashes)
     if not skip_verify:
         _clear_md_files(paths.verified_dir)
 
@@ -264,30 +263,30 @@ def run_agent(prompt: str, label: str, *, output_file: Path | None = None) -> tu
 
 def dedup_divergences(paths: TriagePaths, vyper_version: str) -> list[Path]:
     _print_step("Step 2/5: Deduplicating divergence reports")
-    if not paths.filtered_divergences_untriaged.exists():
+    if not paths.divergence_queue.exists():
         _print_step(
-            f"  Skipping: missing directory {paths.filtered_divergences_untriaged}"
+            f"  Skipping: missing directory {paths.divergence_queue}"
         )
         return []
 
-    divergence_files = _sorted_json_files(paths.filtered_divergences_untriaged)
+    divergence_files = _sorted_json_files(paths.divergence_queue)
     if not divergence_files:
         _print_step(
-            f"  Skipping: no untriaged divergence JSON files in {paths.filtered_divergences_untriaged}"
+            f"  Skipping: no queued divergence JSON files in {paths.divergence_queue}"
         )
         return []
 
     prompt = f"""You are triaging fuzzer divergences for the Vyper compiler.
 Vyper version: {vyper_version}
 
-Divergence JSON files are in: {paths.filtered_divergences_untriaged}
-Write deduplicated bug reports to: {paths.unverified_divergences}
+Divergence JSON files are in: {paths.divergence_queue}
+Write deduplicated bug reports to: {paths.drafts_divergences}
 
 Instructions:
-1. Read all divergence files in {paths.filtered_divergences_untriaged}.
+1. Read all divergence files in {paths.divergence_queue}.
 2. Use up to 4 subagents for parallel analysis.
 3. Group divergences by root cause.
-4. For each unique root cause, write one markdown report to {paths.unverified_divergences}/<root-cause-slug>.md.
+4. For each unique root cause, write one markdown report to {paths.drafts_divergences}/<root-cause-slug>.md.
 5. Each report must contain:
    - Title descriptive of root cause
    - Vyper version
@@ -297,8 +296,8 @@ Instructions:
    - List of divergence files sharing this root cause
 
 Constraints:
-- Treat files under filtered/ as read-only.
-- Do not write outside {paths.unverified_divergences}.
+- Treat files under issues/ as read-only.
+- Do not write outside {paths.drafts_divergences}.
 - Do not minimize PoCs at this stage; minimization is handled during verification.
 
 {AGENT_LOCAL_ONLY_POLICY}
@@ -310,39 +309,39 @@ Constraints:
     elif output_or_error:
         _print_step(f"  Agent output: {output_or_error.splitlines()[0]}")
 
-    reports = _sorted_md_files(paths.unverified_divergences, recursive=False)
+    reports = _sorted_md_files(paths.drafts_divergences, recursive=False)
     moved = _move_json_files_to_triaged(
-        divergence_files, paths.filtered_divergences_triaged
+        divergence_files, paths.divergence_done
     )
     _print_step(f"  Generated {len(reports)} divergence report(s)")
-    _print_step(f"  Moved {moved} divergence JSON file(s) to {paths.filtered_divergences_triaged}")
+    _print_step(f"  Moved {moved} divergence JSON file(s) to {paths.divergence_done}")
     return reports
 
 
 def dedup_crashes(paths: TriagePaths, vyper_version: str) -> list[Path]:
     _print_step("Step 3/5: Deduplicating compiler crash reports")
-    if not paths.filtered_crashes_untriaged.exists():
-        _print_step(f"  Skipping: missing directory {paths.filtered_crashes_untriaged}")
+    if not paths.crash_queue.exists():
+        _print_step(f"  Skipping: missing directory {paths.crash_queue}")
         return []
 
-    crash_files = _sorted_json_files(paths.filtered_crashes_untriaged)
+    crash_files = _sorted_json_files(paths.crash_queue)
     if not crash_files:
         _print_step(
-            f"  Skipping: no untriaged crash JSON files in {paths.filtered_crashes_untriaged}"
+            f"  Skipping: no queued crash JSON files in {paths.crash_queue}"
         )
         return []
 
     prompt = f"""You are triaging Vyper compiler crash reports from a fuzzer run.
 Vyper version: {vyper_version}
 
-Crash JSON files are in: {paths.filtered_crashes_untriaged}
-Write deduplicated bug reports to: {paths.unverified_crashes}
+Crash JSON files are in: {paths.crash_queue}
+Write deduplicated bug reports to: {paths.drafts_crashes}
 
 Instructions:
-1. Read all crash files in {paths.filtered_crashes_untriaged}.
+1. Read all crash files in {paths.crash_queue}.
 2. Use up to 4 subagents for parallel analysis.
 3. Group crashes by root cause (same traceback/cause should be grouped).
-4. For each unique root cause, write one markdown report to {paths.unverified_crashes}/<root-cause-slug>.md.
+4. For each unique root cause, write one markdown report to {paths.drafts_crashes}/<root-cause-slug>.md.
 5. Each report must contain:
    - Title descriptive of root cause
    - Vyper version
@@ -352,8 +351,8 @@ Instructions:
    - List of crash files sharing this root cause
 
 Constraints:
-- Treat files under filtered/ as read-only.
-- Do not write outside {paths.unverified_crashes}.
+- Treat files under issues/ as read-only.
+- Do not write outside {paths.drafts_crashes}.
 - Do not minimize PoCs at this stage; minimization is handled during verification.
 
 {AGENT_LOCAL_ONLY_POLICY}
@@ -365,15 +364,15 @@ Constraints:
     elif output_or_error:
         _print_step(f"  Agent output: {output_or_error.splitlines()[0]}")
 
-    reports = _sorted_md_files(paths.unverified_crashes, recursive=False)
-    moved = _move_json_files_to_triaged(crash_files, paths.filtered_crashes_triaged)
+    reports = _sorted_md_files(paths.drafts_crashes, recursive=False)
+    moved = _move_json_files_to_triaged(crash_files, paths.crash_done)
     _print_step(f"  Generated {len(reports)} crash report(s)")
-    _print_step(f"  Moved {moved} crash JSON file(s) to {paths.filtered_crashes_triaged}")
+    _print_step(f"  Moved {moved} crash JSON file(s) to {paths.crash_done}")
     return reports
 
 
-def _verify_output_name(unverified_root: Path, report_path: Path) -> str:
-    relative = report_path.relative_to(unverified_root)
+def _verify_output_name(drafts_root: Path, report_path: Path) -> str:
+    relative = report_path.relative_to(drafts_root)
     return "__".join(relative.parts)
 
 
@@ -449,7 +448,7 @@ Original report:
 
 def verify_reports(paths: TriagePaths, vyper_skill_content: str) -> tuple[list[Path], int]:
     _print_step("Step 4/5: Verifying reports")
-    snapshot = _sorted_md_files(paths.unverified_root, recursive=True)
+    snapshot = _sorted_md_files(paths.drafts_root, recursive=True)
     _print_step(f"  Snapshot captured: {len(snapshot)} unverified report(s)")
     if not snapshot:
         return [], 0
@@ -458,7 +457,7 @@ def verify_reports(paths: TriagePaths, vyper_skill_content: str) -> tuple[list[P
     with ProcessPoolExecutor(max_workers=MAX_PARALLEL_AGENTS) as executor:
         futures = []
         for report_path in snapshot:
-            output_name = _verify_output_name(paths.unverified_root, report_path)
+            output_name = _verify_output_name(paths.drafts_root, report_path)
             output_path = paths.verified_dir / output_name
             futures.append(
                 executor.submit(
