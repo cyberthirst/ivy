@@ -76,9 +76,7 @@ class Gatekeeper:
         # Note: queue admission semantics may depend on post-processing
         # (e.g. traces removed before corpus insertion), so callers can pass the
         # post-processed scenario even if it's not consumed yet.
-        del post_processed_scenario
-
-        has_divergence = analysis.unique_divergence_count() > 0
+        del post_processed_scenario, analysis
 
         # Reject if nothing compiled under Ivy. The AST mutator depends on the
         # compiler frontend to parse and annotate the source, so a scenario that
@@ -98,16 +96,6 @@ class Gatekeeper:
         rare_edge_score = self._tracker.compute_rare_score(edge_ids)
         selection_weight = rare_edge_score / max(cycle_time_s, self._eps)
         new_edges = self._tracker.merge(edge_ids)
-
-        if has_divergence:
-            return GatekeeperDecision(
-                accept=True,
-                reason="issue",
-                coverage_fingerprint=fp,
-                new_edges=new_edges,
-                rare_edge_score=rare_edge_score,
-                selection_weight=selection_weight,
-            )
 
         if boa_results is not None and all_boa_configs_failed_to_compile(boa_results):
             return GatekeeperDecision(
