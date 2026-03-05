@@ -49,6 +49,7 @@ class Divergence:
     xfail_actual: Optional[str] = None  # What actually happened
     xfail_reasons: list[str] = field(default_factory=list)
     fingerprint: Optional[str] = None
+    contract_fingerprints: tuple[str, ...] = ()
 
     @property
     def as_dict(self) -> Dict[str, Any]:

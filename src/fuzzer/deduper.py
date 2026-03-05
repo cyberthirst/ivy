@@ -9,9 +9,9 @@ Fingerprinting Strategy
 
 | Category                              | Dedup? | Fingerprint                                           |
 |---------------------------------------|--------|-------------------------------------------------------|
-| Divergence: both ok, different result | No     | -                                                     |
+| Divergence: both ok, different result | Yes*   | SourceSig(reason, contract_fingerprints) *if available |
 | Divergence: one ok, one failed        | Yes    | DivergenceSig(type, reason, runner, error_fp)         |
-| Divergence: BoaError, no AST node     | No     | - (insufficient info for dedup)                       |
+| Divergence: BoaError, no AST node     | Yes*   | SourceSig(reason, contract_fps) *if available         |
 | Divergence: xfail violation           | Yes    | XfailSig(reason, expected, actual, reasons)           |
 | Compiler crash                        | Yes    | CrashSig(error_type, frames)                         |
 | Compilation failure                   | Yes    | CompileFailSig(error_type, frames)                   |
@@ -88,6 +88,12 @@ class DivergenceSig(Signature):
     reason: str | None
     failing_runner: str | None
     error_fp: ErrorFP
+
+
+@dataclass(frozen=True)
+class SourceSig(Signature):
+    reason: str
+    contract_fingerprints: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -309,7 +315,6 @@ class Deduper:
             "divergence must have at least one result"
         )
         if divergence.ivy_result is None or divergence.boa_result is None:
-            # TODO: add fingerprinting for divergences with a missing result
             return KeepDecision(
                 keep=True, reason="missing_result", fingerprint=""
             )
@@ -318,6 +323,13 @@ class Deduper:
         boa_success = divergence.boa_result.success
 
         if ivy_success == boa_success:
+            if divergence.contract_fingerprints:
+                sig = SourceSig(
+                    reason=divergence.reason or "both_same_outcome",
+                    contract_fingerprints=divergence.contract_fingerprints,
+                )
+                divergence.fingerprint = repr(sig)
+                return self._check_seen(sig, self._seen_divergences, "divergence")
             return KeepDecision(
                 keep=True, reason="both_succeeded_different_results", fingerprint=""
             )
@@ -339,11 +351,18 @@ class Deduper:
         if divergence.reason in ("deploy_revert_mismatch", "success_revert_mismatch"):
             n_frames = self.REVERT_MISMATCH_FRAMES
         error_fp = fingerprint_error(error, n_frames)
-        # BoaError with no AST info in any frame — not enough to deduplicate
+        # BoaError with no AST info in any frame — fall back to source fingerprint
         if isinstance(error, BoaError) and not any(
             isinstance(f, BoaFrameFP) and f.ast_fingerprint is not None
             for f in error_fp.frames
         ):
+            if divergence.contract_fingerprints:
+                sig = SourceSig(
+                    reason=divergence.reason or "boa_error_no_ast",
+                    contract_fingerprints=divergence.contract_fingerprints,
+                )
+                divergence.fingerprint = repr(sig)
+                return self._check_seen(sig, self._seen_divergences, "divergence")
             return KeepDecision(
                 keep=True, reason="boa_error_no_ast", fingerprint=""
             )

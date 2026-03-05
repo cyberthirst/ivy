@@ -68,7 +68,9 @@ def _make_result_divergence(
     ivy_error: Exception | None = None,
     boa_error: Exception | None = None,
     runner: str = "boa",
+    reason: str | None = None,
     source: str = "@external\ndef foo() -> uint256:\n    return 1\n",
+    contract_fingerprints: tuple[str, ...] = (),
 ) -> Divergence:
     return Divergence(
         type=div_type,
@@ -78,6 +80,8 @@ def _make_result_divergence(
         ivy_result=_make_result(ivy_success, ivy_error),
         boa_result=_make_result(boa_success, boa_error),
         function="foo",
+        reason=reason,
+        contract_fingerprints=contract_fingerprints,
     )
 
 
@@ -99,19 +103,13 @@ def _make_xfail_divergence(
 
 
 def test_result_divergence_all_success_state_combinations():
-    combos = [
-        (True, True, False),
-        (False, False, False),
-        (None, None, False),
-        (True, False, True),
-        (False, True, True),
-        (True, None, True),
-        (None, True, True),
-        (False, None, True),
-        (None, False, True),
+    # Mixed success: one ok, one failed → dedups on error fingerprint
+    dedup_combos = [
+        (True, False),
+        (False, True),
     ]
 
-    for ivy_success, boa_success, should_dedup in combos:
+    for ivy_success, boa_success in dedup_combos:
         deduper = Deduper()
         divergence = _make_result_divergence(
             ivy_success=ivy_success,
@@ -123,20 +121,55 @@ def test_result_divergence_all_success_state_combinations():
         first = deduper.check_divergence(divergence)
         second = deduper.check_divergence(divergence)
 
-        if should_dedup:
-            assert first.keep is True
-            assert first.reason == "new_divergence"
-            assert second.keep is False
-            assert second.reason == "duplicate_divergence"
-            assert first.fingerprint
-            assert second.fingerprint == first.fingerprint
-        else:
-            assert first.keep is True
-            assert second.keep is True
-            assert first.reason == "both_succeeded_different_results"
-            assert second.reason == "both_succeeded_different_results"
-            assert first.fingerprint == ""
-            assert second.fingerprint == ""
+        assert first.keep is True
+        assert first.reason == "new_divergence"
+        assert second.keep is False
+        assert second.reason == "duplicate_divergence"
+        assert first.fingerprint
+        assert second.fingerprint == first.fingerprint
+
+    # Same outcome: both ok or both failed → no dedup (without contract fingerprints)
+    no_dedup_combos = [
+        (True, True),
+        (False, False),
+    ]
+
+    for ivy_success, boa_success in no_dedup_combos:
+        deduper = Deduper()
+        divergence = _make_result_divergence(
+            ivy_success=ivy_success,
+            boa_success=boa_success,
+            ivy_error=_capture_runtime_error_a("ivy failed"),
+            boa_error=_capture_runtime_error_a("boa failed"),
+        )
+
+        first = deduper.check_divergence(divergence)
+        second = deduper.check_divergence(divergence)
+
+        assert first.keep is True
+        assert second.keep is True
+        assert first.reason == "both_succeeded_different_results"
+        assert first.fingerprint == ""
+
+    # One or both results missing → missing_result (no dedup)
+    missing_combos = [
+        (True, None),
+        (None, True),
+        (False, None),
+        (None, False),
+    ]
+
+    for ivy_success, boa_success in missing_combos:
+        deduper = Deduper()
+        divergence = _make_result_divergence(
+            ivy_success=ivy_success,
+            boa_success=boa_success,
+            ivy_error=_capture_runtime_error_a("ivy failed"),
+            boa_error=_capture_runtime_error_a("boa failed"),
+        )
+        first = deduper.check_divergence(divergence)
+        assert first.keep is True
+        assert first.reason == "missing_result"
 
 
 def test_when_boa_fails_runner_name_is_part_of_dedup_fingerprint():
@@ -501,14 +534,19 @@ def test_boa_error_fingerprint_marks_unknown_string_frames():
 def test_boa_error_dedup_distinguishes_different_reverts():
     from boa.contracts.base_evm_contract import BoaError, StackTrace
     from boa.contracts.vyper.vyper_contract import ErrorDetail
+    from vyper.ast.nodes import Name
 
     class Revert(Exception):
         pass
+
+    dummy_ast = Name.__new__(Name)
+    dummy_ast.id = "x"
 
     def make_boa_error(error_detail_str):
         ed = ErrorDetail.__new__(ErrorDetail)
         ed.vm_error = Revert()
         ed.error_detail = error_detail_str
+        ed.ast_source = dummy_ast
         st = StackTrace([ed])
         err = BoaError.__new__(BoaError)
         err.stack_trace = st
@@ -522,16 +560,19 @@ def test_boa_error_dedup_distinguishes_different_reverts():
         ivy_success=True,
         boa_success=False,
         boa_error=make_boa_error("safeadd"),
+        reason="success_revert_mismatch",
     )
     div_bounds = _make_result_divergence(
         ivy_success=True,
         boa_success=False,
         boa_error=make_boa_error("int128 bounds check"),
+        reason="success_revert_mismatch",
     )
     div_safeadd_dup = _make_result_divergence(
         ivy_success=True,
         boa_success=False,
         boa_error=make_boa_error("safeadd"),
+        reason="success_revert_mismatch",
     )
 
     first = deduper.check_divergence(div_safeadd)
@@ -541,3 +582,114 @@ def test_boa_error_dedup_distinguishes_different_reverts():
     assert first.keep is True
     assert second.keep is True  # different error_detail
     assert third.keep is False  # duplicate of first
+
+
+def test_both_ok_dedups_on_contract_fingerprints():
+    deduper = Deduper()
+
+    fp_a = ("abc123",)
+    fp_b = ("def456",)
+
+    first = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=True,
+            contract_fingerprints=fp_a,
+        )
+    )
+    duplicate = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=True,
+            contract_fingerprints=fp_a,
+        )
+    )
+    different_source = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=True,
+            contract_fingerprints=fp_b,
+        )
+    )
+
+    assert first.keep is True
+    assert first.reason == "new_divergence"
+    assert first.fingerprint != ""
+    assert duplicate.keep is False
+    assert duplicate.reason == "duplicate_divergence"
+    assert different_source.keep is True
+
+
+def test_both_ok_no_fingerprints_does_not_dedup():
+    deduper = Deduper()
+
+    first = deduper.check_divergence(
+        _make_result_divergence(ivy_success=True, boa_success=True)
+    )
+    second = deduper.check_divergence(
+        _make_result_divergence(ivy_success=True, boa_success=True)
+    )
+
+    assert first.keep is True
+    assert second.keep is True
+    assert first.fingerprint == ""
+
+
+def test_boa_error_no_ast_dedups_on_contract_fingerprints():
+    deduper = Deduper()
+
+    fp_a = ("abc123",)
+
+    err = _make_synthetic_boa_error(["Unknown contract 0x1234"])
+
+    first = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=False,
+            boa_error=err,
+            reason="success_revert_mismatch",
+            contract_fingerprints=fp_a,
+        )
+    )
+    duplicate = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=False,
+            boa_error=err,
+            reason="success_revert_mismatch",
+            contract_fingerprints=fp_a,
+        )
+    )
+
+    assert first.keep is True
+    assert first.reason == "new_divergence"
+    assert first.fingerprint != ""
+    assert duplicate.keep is False
+    assert duplicate.reason == "duplicate_divergence"
+
+
+def test_boa_error_no_ast_no_fingerprints_does_not_dedup():
+    deduper = Deduper()
+
+    err = _make_synthetic_boa_error(["Unknown contract 0x1234"])
+
+    first = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=False,
+            boa_error=err,
+            reason="success_revert_mismatch",
+        )
+    )
+    second = deduper.check_divergence(
+        _make_result_divergence(
+            ivy_success=True,
+            boa_success=False,
+            boa_error=err,
+            reason="success_revert_mismatch",
+        )
+    )
+
+    assert first.keep is True
+    assert second.keep is True
+    assert first.reason == "boa_error_no_ast"

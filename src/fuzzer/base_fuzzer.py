@@ -207,6 +207,7 @@ class BaseFuzzer:
             harness_result.finalized_scenario,
             harness_result.ivy_result,
             results.boa_results,
+            contract_fingerprints=tuple(sorted(harness_result.contract_fingerprints)),
         )
 
         return ScenarioRunArtifacts(

@@ -86,6 +86,7 @@ class ResultAnalyzer:
         scenario: Scenario,
         ivy_result: ScenarioResult,
         boa_results: Dict[str, Tuple[CompilerConfig, ScenarioResult]],
+        contract_fingerprints: tuple[str, ...] = (),
     ) -> AnalysisResult:
         """
         Analyze a completed scenario run.
@@ -109,6 +110,7 @@ class ResultAnalyzer:
 
         # Apply filter and dedup to divergences
         for divergence in divergences:
+            divergence.contract_fingerprints = contract_fingerprints
             decision = self._check_filter(divergence.as_dict, IT.DIVERGENCE)
             if decision is None:
                 decision = self.deduper.check_divergence(divergence)
